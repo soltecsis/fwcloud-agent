@@ -32,8 +32,8 @@ pub enum FwcError {
   #[error("API key not found")]
   ApiKeyNotFound,
 
-  #[error("Bad API key")]
-  ApiKeyAuthError,
+  #[error("Invalid API key")]
+  ApiKeyNotValid,
 
   #[error("Not allowed parameter in request")]
   NotAllowedParameter,
@@ -59,7 +59,7 @@ impl ResponseError for FwcError {
       match self {
         FwcError::NotAllowedParameter | FwcError::AtLeastOneFile | FwcError::Validation(_) 
           => StatusCode::BAD_REQUEST,
-        FwcError::ApiKeyAuthError | &FwcError::ApiKeyNotFound =>  StatusCode::FORBIDDEN,
+        FwcError::ApiKeyNotValid | &FwcError::ApiKeyNotFound =>  StatusCode::FORBIDDEN,
         _ => StatusCode::INTERNAL_SERVER_ERROR
       }
     }
