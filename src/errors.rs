@@ -29,6 +29,12 @@ use validator::ValidationErrors;
 
 #[derive(Error, Debug, Serialize)]
 pub enum FwcError {
+  #[error("API key not found")]
+  ApiKeyNotFound,
+
+  #[error("Bad API key")]
+  ApiKeyAuthError,
+
   #[error("Not allowed parameter in request")]
   NotAllowedParameter,
 
@@ -51,9 +57,9 @@ pub enum FwcError {
 impl ResponseError for FwcError {
     fn status_code(&self) -> StatusCode {
       match self {
-        FwcError::NotAllowedParameter => StatusCode::BAD_REQUEST,
-        FwcError::AtLeastOneFile => StatusCode::BAD_REQUEST,
-        FwcError::Validation(_) => StatusCode::BAD_REQUEST,
+        FwcError::NotAllowedParameter | FwcError::AtLeastOneFile | FwcError::Validation(_) 
+          => StatusCode::BAD_REQUEST,
+        FwcError::ApiKeyAuthError | &FwcError::ApiKeyNotFound =>  StatusCode::FORBIDDEN,
         _ => StatusCode::INTERNAL_SERVER_ERROR
       }
     }

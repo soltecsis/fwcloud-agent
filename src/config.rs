@@ -33,6 +33,8 @@ use validator::{Validate};
 
 lazy_static! {
   static ref IPV4: Regex = Regex::new("^(?:[0-9]{1,3}.){3}[0-9]{1,3}$").unwrap();
+  static ref ALPHA_NUM: Regex = Regex::new("^[a-zA-Z0-9]*$").unwrap();
+  static ref ALPHA_NUM_2: Regex = Regex::new("^[a-zA-Z0-9\\-_]*$").unwrap();
 }
 
 #[derive(Validate, Deserialize)]
@@ -44,7 +46,11 @@ pub struct Config {
   #[validate(range(min = 1, max = 65535))]
   pub workers: usize,
 
-  pub tmp_dir: String
+  pub tmp_dir: String,
+
+  #[validate(regex = "ALPHA_NUM_2")]
+  #[validate(length(min = 16, max = 128))]
+  pub api_key: String
 }
 
 impl Config {
@@ -55,9 +61,10 @@ impl Config {
     let cpus = num_cpus::get();
 
     let cfg = Config {
-      bind_ip: env::var("BIND_IP").unwrap_or("127.0.0.1".to_string()),
-      bind_port: env::var("BIND_PORT").unwrap_or("33033".to_string()).parse::<u16>().unwrap_or(33033),
+      bind_ip: env::var("BIND_IP").unwrap_or(String::from("127.0.0.1")),
+      bind_port: env::var("BIND_PORT").unwrap_or(String::from("33033")).parse::<u16>().unwrap_or(33033),
       workers: env::var("WORKERS").unwrap_or(cpus.to_string()).parse::<usize>().unwrap_or(cpus),
+      api_key: env::var("API_KEY").unwrap_or(String::from("")),
       tmp_dir: "./tmp/".to_string()
     };
 

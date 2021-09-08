@@ -23,10 +23,11 @@
 #[macro_use]
 extern crate lazy_static;
 
+mod errors;
 mod config;
+mod auth;
 mod routes;
 mod utils;
-mod errors;
 
 use std::sync::Arc;
 
@@ -48,6 +49,7 @@ async fn main() -> std::io::Result<()> {
             .data(cfg.clone())
             .wrap(RequestIDService::default())
             .wrap(middleware::Logger::default())
+            .wrap(auth::SayHi)
             .configure(routes::routes_setup)
     })
     .workers(workers)
