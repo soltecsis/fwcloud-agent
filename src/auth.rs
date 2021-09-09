@@ -21,10 +21,11 @@
 */
 
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use actix_service::{Service, Transform};
-use actix_web::{dev::ServiceRequest, dev::ServiceResponse, Error};
+use actix_web::{dev::ServiceRequest, dev::ServiceResponse, Error, web};
 use futures::future::{ok, Ready};
 use futures::Future;
 
@@ -62,6 +63,10 @@ pub struct AuthorizeMiddleware<S> {
     service: S,
 }
 
+macro_rules! err {
+    ($x: expr) => { Box::pin(async { Err(Error::from($x)) }) };
+}
+
 impl<S, B> Service for AuthorizeMiddleware<S>
 where
     S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
@@ -78,27 +83,31 @@ where
     }
 
     fn call(&mut self, req: ServiceRequest) -> Self::Future {
-        let cfg: &Config = req.app_data().unwrap();
         let api_key: String; 
+
+        let cfg: &web::Data<Arc<Config>> = match req.app_data() {
+            Some(val) => val,
+            None => return err!(FwcError::Custom("Error accessing configuration from authorization middleware"))
+        };
 
         // (1) Verify that the supplied API key is correct.
         match req.headers().get("X-API-Key") {
             Some(value) => api_key = String::from(value.to_str().unwrap()),
-            None => return Box::pin(async { Err(Error::from(FwcError::ApiKeyNotFound)) })
+            None => return err!(FwcError::ApiKeyNotFound)
         }
 
         if cfg.api_key != api_key {
-            return Box::pin(async { Err(Error::from(FwcError::ApiKeyNotValid)) });
+            return err!(FwcError::ApiKeyNotValid);
         }
 
         // (2) Now check that the peer IP is allowed.
         // If allowed_ips vector is empty we are allowing connections form any IP.
-        if cfg.allowed_ips.len() > 1 { 
+        if cfg.allowed_ips.len() > 0 { 
             let mut found = false;
 
             let remote_ip = match req.connection_info().remote_addr() {
                 Some(data) => String::from(data),
-                None => return Box::pin(async { Err(Error::from(FwcError::Custom("Allowed IPs list not empty and was not possible to get the remote IP"))) })
+                None => return err!(FwcError::Custom("Allowed IPs list not empty and was not possible to get the remote IP"))
             };
 
             for ip in cfg.allowed_ips.iter() {
@@ -108,7 +117,7 @@ where
                 }
             }
             if ! found {
-                return Box::pin(async { Err(Error::from(FwcError::NotAllowedIP)) });
+                return err!(FwcError::NotAllowedIP);
             }
         }
 

@@ -35,7 +35,7 @@ pub enum FwcError {
   #[error("Invalid API key")]
   ApiKeyNotValid,
 
-  #[error("Connections from your IP are not allowed")]
+  #[error("Authorization error, access from your IP is not allowed")]
   NotAllowedIP,
 
   #[error("Not allowed parameter in request")]
