@@ -32,7 +32,12 @@ use crate::errors::FwcError;
 use validator::{Validate};
 
 lazy_static! {
-  static ref IPV4: Regex = Regex::new("^(?:[0-9]{1,3}.){3}[0-9]{1,3}$").unwrap();
+  static ref IPV4: Regex = Regex::new("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})){3}$").unwrap();
+  static ref IPV4_LIST: Regex = Regex::new("^(((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})){3})( ?))*$").unwrap();
+
+  static ref IPV6: Regex = Regex::new("(^\\d{20}$)|(^((:[a-fA-F0-9]{1,4}){6}|::)ffff:(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})){3}$)|(^((:[a-fA-F0-9]{1,4}){6}|::)ffff(:[a-fA-F0-9]{1,4}){2}$)|(^([a-fA-F0-9]{1,4}) (:[a-fA-F0-9]{1,4}){7}$)|(^:(:[a-fA-F0-9]{1,4}(::)?){1,6}$)|(^((::)?[a-fA-F0-9]{1,4}:){1,6}:$)|(^::$)").unwrap();
+  static ref IPV6_LIST: Regex = Regex::new("(((^\\d{20}$)|(^((:[a-fA-F0-9]{1,4}){6}|::)ffff:(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})){3}$)|(^((:[a-fA-F0-9]{1,4}){6}|::)ffff(:[a-fA-F0-9]{1,4}){2}$)|(^([a-fA-F0-9]{1,4}) (:[a-fA-F0-9]{1,4}){7}$)|(^:(:[a-fA-F0-9]{1,4}(::)?){1,6}$)|(^((::)?[a-fA-F0-9]{1,4}:){1,6}:$)|(^::$))(,\\n|,?)))*$").unwrap();
+  
   static ref ALPHA_NUM: Regex = Regex::new("^[a-zA-Z0-9]*$").unwrap();
   static ref ALPHA_NUM_2: Regex = Regex::new("^[a-zA-Z0-9\\-_]*$").unwrap();
 }
@@ -45,12 +50,15 @@ pub struct Config {
   bind_port: u16,
   #[validate(range(min = 1, max = 65535))]
   pub workers: usize,
-
-  pub tmp_dir: String,
+  #[validate(regex = "IPV4_LIST")]
+  allowed_ips_list: String,
+  pub allowed_ips: Vec<String>,
 
   #[validate(regex = "ALPHA_NUM_2")]
   #[validate(length(min = 16, max = 128))]
-  pub api_key: String
+  pub api_key: String,
+
+  pub tmp_dir: String
 }
 
 impl Config {
@@ -60,15 +68,27 @@ impl Config {
     // Amount of cores available.
     let cpus = num_cpus::get();
 
-    let cfg = Config {
+    let mut cfg = Config {
       bind_ip: env::var("BIND_IP").unwrap_or(String::from("127.0.0.1")),
       bind_port: env::var("BIND_PORT").unwrap_or(String::from("33033")).parse::<u16>().unwrap_or(33033),
       workers: env::var("WORKERS").unwrap_or(cpus.to_string()).parse::<usize>().unwrap_or(cpus),
+      
+      allowed_ips_list: env::var("ALLOWED_IPS").unwrap_or(String::from("")),
+      allowed_ips: vec![],
+      
       api_key: env::var("API_KEY").unwrap_or(String::from("")),
       tmp_dir: "./tmp/".to_string()
     };
 
     cfg.validate()?;
+    
+    // Create list of allowed IPs.
+    if cfg.allowed_ips_list.len() > 1 {
+      let ips: Vec<&str> = cfg.allowed_ips_list.split(" ").collect();
+      for ip in ips.into_iter() {
+        cfg.allowed_ips.push(String::from(ip));
+      }  
+    }
     
     // Create temporary directory if it doesn't exists.
     fs::create_dir_all(&cfg.tmp_dir)?;

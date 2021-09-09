@@ -35,6 +35,9 @@ pub enum FwcError {
   #[error("Invalid API key")]
   ApiKeyNotValid,
 
+  #[error("Connections from your IP are not allowed")]
+  NotAllowedIP,
+
   #[error("Not allowed parameter in request")]
   NotAllowedParameter,
 
@@ -59,7 +62,8 @@ impl ResponseError for FwcError {
       match self {
         FwcError::NotAllowedParameter | FwcError::AtLeastOneFile | FwcError::Validation(_) 
           => StatusCode::BAD_REQUEST,
-        FwcError::ApiKeyNotValid | &FwcError::ApiKeyNotFound =>  StatusCode::FORBIDDEN,
+        FwcError::ApiKeyNotValid | FwcError::ApiKeyNotFound | &FwcError::NotAllowedIP
+          =>  StatusCode::FORBIDDEN,
         _ => StatusCode::INTERNAL_SERVER_ERROR
       }
     }

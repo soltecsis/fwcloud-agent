@@ -49,7 +49,7 @@ async fn main() -> std::io::Result<()> {
             .data(cfg.clone())
             .wrap(RequestIDService::default())
             .wrap(middleware::Logger::default())
-            .wrap(auth::Auth)
+            .wrap(auth::Authorize)
             .configure(routes::routes_setup)
     })
     .workers(workers)

@@ -21,7 +21,6 @@
 */
 
 use std::pin::Pin;
-use std::env;
 use std::task::{Context, Poll};
 
 use actix_service::{Service, Transform};
@@ -30,17 +29,18 @@ use futures::future::{ok, Ready};
 use futures::Future;
 
 use crate::errors::FwcError;
+use crate::config::Config;
 
 // There are two steps in middleware processing.
 // 1. Middleware initialization, middleware factory gets called with
 //    next service in chain as parameter.
 // 2. Middleware's call method gets called with normal request.
-pub struct Auth;
+pub struct Authorize;
 
 // Middleware factory is `Transform` trait from actix-service crate
 // `S` - type of the next service
 // `B` - type of response's body
-impl<S, B> Transform<S> for Auth
+impl<S, B> Transform<S> for Authorize
 where
     S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
@@ -50,19 +50,19 @@ where
     type Response = ServiceResponse<B>;
     type Error = Error;
     type InitError = ();
-    type Transform = AuthMiddleware<S>;
+    type Transform = AuthorizeMiddleware<S>;
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
-        ok(AuthMiddleware { service })
+        ok(AuthorizeMiddleware { service })
     }
 }
 
-pub struct AuthMiddleware<S> {
+pub struct AuthorizeMiddleware<S> {
     service: S,
 }
 
-impl<S, B> Service for AuthMiddleware<S>
+impl<S, B> Service for AuthorizeMiddleware<S>
 where
     S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
@@ -78,23 +78,45 @@ where
     }
 
     fn call(&mut self, req: ServiceRequest) -> Self::Future {
-        //println!("Hi from start. You requested: {}", req.path());
+        let cfg: &Config = req.app_data().unwrap();
         let api_key: String; 
+
+        // (1) Verify that the supplied API key is correct.
         match req.headers().get("X-API-Key") {
             Some(value) => api_key = String::from(value.to_str().unwrap()),
             None => return Box::pin(async { Err(Error::from(FwcError::ApiKeyNotFound)) })
         }
 
-        let server_api_key = env::var("API_KEY").unwrap();
-        if server_api_key != api_key {
+        if cfg.api_key != api_key {
             return Box::pin(async { Err(Error::from(FwcError::ApiKeyNotValid)) });
         }
+
+        // (2) Now check that the peer IP is allowed.
+        // If allowed_ips vector is empty we are allowing connections form any IP.
+        if cfg.allowed_ips.len() > 1 { 
+            let mut found = false;
+
+            let remote_ip = match req.connection_info().remote_addr() {
+                Some(data) => String::from(data),
+                None => return Box::pin(async { Err(Error::from(FwcError::Custom("Allowed IPs list not empty and was not possible to get the remote IP"))) })
+            };
+
+            for ip in cfg.allowed_ips.iter() {
+                if *ip == remote_ip {
+                    found = true;
+                    break;
+                }
+            }
+            if ! found {
+                return Box::pin(async { Err(Error::from(FwcError::NotAllowedIP)) });
+            }
+        }
+
 
         let fut = self.service.call(req);
 
         Box::pin(async move {
             let res = fut.await?;
-            //println!("Hi from response");
             Ok(res)
         })
     }
