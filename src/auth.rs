@@ -87,7 +87,7 @@ where
 
         let cfg: &web::Data<Arc<Config>> = match req.app_data() {
             Some(val) => val,
-            None => return err!(FwcError::Custom("Error accessing configuration from authorization middleware"))
+            None => return err!(FwcError::Internal("Error accessing configuration from authorization middleware"))
         };
 
         // (1) Verify that the supplied API key is correct.
@@ -106,8 +106,11 @@ where
             let mut found = false;
 
             let remote_ip = match req.connection_info().remote_addr() {
-                Some(data) => String::from(data),
-                None => return err!(FwcError::Custom("Allowed IPs list not empty and was not possible to get the remote IP"))
+                Some(data) => {
+                        let ip_and_port: Vec<&str> = data.split(":").collect(); 
+                        String::from(ip_and_port[0])
+                    },
+                None => return err!(FwcError::Internal("Allowed IPs list not empty and was not possible to get the remote IP"))
             };
 
             for ip in cfg.allowed_ips.iter() {

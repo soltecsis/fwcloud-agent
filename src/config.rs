@@ -69,7 +69,7 @@ impl Config {
     let cpus = num_cpus::get();
 
     let mut cfg = Config {
-      bind_ip: env::var("BIND_IP").unwrap_or(String::from("127.0.0.1")),
+      bind_ip: env::var("BIND_IP").unwrap_or(String::from("0.0.0.0")),
       bind_port: env::var("BIND_PORT").unwrap_or(String::from("33033")).parse::<u16>().unwrap_or(33033),
       workers: env::var("WORKERS").unwrap_or(cpus.to_string()).parse::<usize>().unwrap_or(cpus),
       

@@ -128,7 +128,7 @@ impl HttpFiles {
   fn validate(&self) -> Result<(), FwcError> {
     // Destination directory parameter is mandatory.
     if self.dst_dir.len() < 1 {
-      return Err(FwcError::Custom("Destination directory parameter not found in multipart/form-data stream"));
+      return Err(FwcError::Internal("Destination directory parameter not found in multipart/form-data stream"));
     }
 
     if !Path::new(&self.dst_dir).is_dir() {

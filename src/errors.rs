@@ -48,13 +48,13 @@ pub enum FwcError {
   AtLeastOneFile,
 
   #[error("`{0}`")]
-  Custom(&'static str),
- 
-  #[error("`{0}`")]
   StdErr(String),
 
   #[error("`VALIDATION ERROR: {0}`")]
-  Validation(String)
+  Validation(String),
+
+  #[error("`{0}`")]
+  Internal(&'static str) 
 }
 
 impl ResponseError for FwcError {
@@ -90,7 +90,7 @@ impl<E: fmt::Debug> From<BlockingError<E>> for FwcError {
     where
       E: fmt::Debug,
   {  
-    FwcError::Custom("Blocking error")
+    FwcError::Internal("Blocking error")
   }
 }
 
