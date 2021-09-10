@@ -20,7 +20,7 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::io::Write;
+use std::{io::Write, os::unix::prelude::PermissionsExt};
 
 use actix_multipart::{Multipart, Field};
 use actix_web::web;
@@ -34,7 +34,8 @@ use crate::errors::{FwcError, Result};
 pub struct HttpFiles {
   tmp_dir: String,
   dst_dir: String,
-  files: Vec<FileData>
+  files: Vec<FileData>,
+  perms: u32
 }
 
 struct FileData {
@@ -43,11 +44,12 @@ struct FileData {
 }
 
 impl HttpFiles {
-  pub fn new(tmp_dir: String) -> Self {
+  pub fn new(tmp_dir: String, perms: u32) -> Self {
     HttpFiles {
       tmp_dir,
       dst_dir: "".to_string(),
-      files: Vec::new()
+      files: Vec::new(),
+      perms
     }
   } 
 
@@ -119,6 +121,10 @@ impl HttpFiles {
 
       fs::copy(&src,&dst)?;
       fs::remove_file(&src)?;
+
+      let mut perms = fs::metadata(&dst)?.permissions();
+      perms.set_mode(self.perms);
+      fs::set_permissions(&dst, perms)?;
     }
 
     Ok(())
