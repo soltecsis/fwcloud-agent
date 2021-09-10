@@ -21,35 +21,16 @@
 */
 
 use std::sync::Arc;
-use actix_web::{get, post, HttpResponse, Responder, web, Error};
+use actix_web::{post, HttpResponse, web};
 use actix_multipart::Multipart;
-use rand::Rng;
 
 use crate::config::Config;
 use crate::utils::http_files::HttpFiles;
 
-#[get("/cpu_stress")]
-pub async fn cpu_stress() -> impl Responder {
-    // Creates an array of 10000000 random integers in the range 0 - 1000000000
-    //let mut array: [i32; 10000000] = [0; 10000000];
-    let n = 10_000_000;
-    let mut array = Vec::new();
-
-    // Fill the array
-    let mut rng = rand::thread_rng();
-    for _ in 0..n {
-        //array[i] = rng.gen::<i32>();
-        array.push(rng.gen::<i32>());
-    }
-
-    // Sort
-    array.sort();
-    
-    HttpResponse::Ok().body("Done!")
-}
+use crate::errors::Result;
 
 #[post("/upload")]
-pub async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse, Error> {
+pub async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   HttpFiles::new(cfg.tmp_dir.clone()).process(payload).await?;
   Ok(HttpResponse::Ok().finish())
 }

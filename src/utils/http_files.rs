@@ -29,7 +29,7 @@ use uuid::Uuid;
 use std::fs;
 use std::path::Path;
 
-use crate::errors::FwcError;
+use crate::errors::{FwcError, Result};
 
 pub struct HttpFiles {
   tmp_dir: String,
@@ -51,7 +51,7 @@ impl HttpFiles {
     }
   } 
 
-  pub async fn process(&mut self, payload: Multipart) -> Result<(), FwcError> {
+  pub async fn process(&mut self, payload: Multipart) -> Result<()> {
     self.extract_multipart_data(payload).await?;
     self.validate()?;
     self.move_tmp_files()?;
@@ -59,10 +59,9 @@ impl HttpFiles {
     Ok(())
   }
 
-  async fn extract_dst_dir(&mut self, mut field: Field, name: String) -> Result<(), FwcError> {
+  async fn extract_dst_dir(&mut self, mut field: Field, name: String) -> Result<()> {
     // We only accept one NO file parameter in the multipart stream and it must be the destination directory.
     if name != "dst_dir" {
-      //return Err(HttpResponse::BadRequest().body("ERROR: Not accepted parameter.").into());
       return Err(FwcError::NotAllowedParameter);
     }
 
@@ -77,7 +76,7 @@ impl HttpFiles {
     Ok(())
   }
 
-  async fn extract_multipart_data(&mut self, mut payload: Multipart) -> Result<(), FwcError> {
+  async fn extract_multipart_data(&mut self, mut payload: Multipart) -> Result<()> {
     // iterate over multipart stream
     while let Ok(Some(mut field)) = payload.try_next().await {
       let content_type = field.content_disposition().unwrap();
@@ -113,7 +112,7 @@ impl HttpFiles {
     Ok(())
   }
 
-  fn move_tmp_files(&mut self) -> Result<(), FwcError> {
+  fn move_tmp_files(&mut self) -> Result<()> {
     for file_data in self.files.iter() {
       let src = format!("{}/{}",self.tmp_dir,file_data.src_name);
       let dst = format!("{}/{}",self.dst_dir,file_data.dst_name);
@@ -125,7 +124,7 @@ impl HttpFiles {
     Ok(())
   }
 
-  fn validate(&self) -> Result<(), FwcError> {
+  fn validate(&self) -> Result<()> {
     // Destination directory parameter is mandatory.
     if self.dst_dir.len() < 1 {
       return Err(FwcError::Internal("Destination directory parameter not found in multipart/form-data stream"));

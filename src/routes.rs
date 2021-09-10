@@ -29,7 +29,6 @@ use actix_web::web;
 pub fn routes_setup(config: &mut web::ServiceConfig) {
     config.service(web::scope("/api/v1")
         .service(web::scope("/fwcloud_script/")
-            .service(fwcloud_script::cpu_stress)
             .service(fwcloud_script::upload_and_run)
         )
 
@@ -38,6 +37,7 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
         )
 
         .service(web::scope("/hello/")
+            .service(hello::cpu_stress)
             .service(hello::echo)
             .service(hello::greeting)
         )        

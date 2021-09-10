@@ -22,6 +22,28 @@
 use actix_web::{get, post, HttpResponse, Responder};
 use actix_web_requestid::{RequestID};
 
+use rand::Rng;
+
+#[get("/cpu_stress")]
+pub async fn cpu_stress() -> impl Responder {
+    // Creates an array of 10000000 random integers in the range 0 - 1000000000
+    //let mut array: [i32; 10000000] = [0; 10000000];
+    let n = 10_000_000;
+    let mut array = Vec::new();
+
+    // Fill the array
+    let mut rng = rand::thread_rng();
+    for _ in 0..n {
+        //array[i] = rng.gen::<i32>();
+        array.push(rng.gen::<i32>());
+    }
+
+    // Sort
+    array.sort();
+    
+    HttpResponse::Ok().body("Done!")
+}
+
 #[post("/echo")]
 pub async fn echo(req_body: String) -> impl Responder {
     HttpResponse::Ok().body(req_body)

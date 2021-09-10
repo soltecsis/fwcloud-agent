@@ -26,7 +26,7 @@ use std::fs;
 use serde::Deserialize;
 use regex::Regex;
 
-use crate::errors::FwcError;
+use crate::errors::Result;
 
 // A trait that the Validate derive will impl
 use validator::{Validate};
@@ -44,13 +44,13 @@ lazy_static! {
 
 #[derive(Validate, Deserialize)]
 pub struct Config {
-  #[validate(regex = "IPV4")]
+  #[validate(regex(path = "IPV4", message = "Bad IPv4 address"))]
   bind_ip: String,
   #[validate(range(min = 1, max = 65535))]
   bind_port: u16,
   #[validate(range(min = 1, max = 65535))]
   pub workers: usize,
-  #[validate(regex = "IPV4_LIST")]
+  #[validate(regex(path = "IPV4_LIST", message = "Bad IPv4 address list"))]
   allowed_ips_list: String,
   pub allowed_ips: Vec<String>,
 
@@ -62,7 +62,7 @@ pub struct Config {
 }
 
 impl Config {
-  pub fn new() -> Result<Self, FwcError> {
+  pub fn new() -> Result<Self> {
     dotenv::dotenv().ok();
     
     // Amount of cores available.

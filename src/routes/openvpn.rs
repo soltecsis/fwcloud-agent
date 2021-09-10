@@ -22,14 +22,16 @@
 
 use std::sync::Arc;
 
-use actix_web::{HttpResponse, Error, post, web};
+use actix_web::{HttpResponse, post, web};
 use actix_multipart::Multipart;
 
 use crate::config::Config;
 use crate::utils::http_files::HttpFiles;
 
+use crate::errors::Result;
+
 #[post("/files/upload")]
-pub async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse, Error> {
+pub async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   HttpFiles::new(cfg.tmp_dir.clone()).process(payload).await?;  
   Ok(HttpResponse::Ok().finish())
 }
