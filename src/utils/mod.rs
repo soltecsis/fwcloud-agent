@@ -21,3 +21,4 @@
 */
 
 pub mod http_files;
+pub mod myregex;

@@ -4,6 +4,7 @@
     "cpus",
     "dotenv",
     "ipaddress",
+    "myregex",
     "openvpn",
     "requestid",
     "soltecsis",

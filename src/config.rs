@@ -24,37 +24,29 @@ extern crate num_cpus;
 use std::env;
 use std::fs;
 use serde::Deserialize;
-use regex::Regex;
 
 use crate::errors::Result;
 
 // A trait that the Validate derive will impl
 use validator::Validate;
 
-lazy_static! {
-  static ref IPV4: Regex = Regex::new("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})){3}$").unwrap();
-  static ref IPV4_LIST: Regex = Regex::new("^(((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})){3})( ?))*$").unwrap();
-
-  static ref IPV6: Regex = Regex::new("(^\\d{20}$)|(^((:[a-fA-F0-9]{1,4}){6}|::)ffff:(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})){3}$)|(^((:[a-fA-F0-9]{1,4}){6}|::)ffff(:[a-fA-F0-9]{1,4}){2}$)|(^([a-fA-F0-9]{1,4}) (:[a-fA-F0-9]{1,4}){7}$)|(^:(:[a-fA-F0-9]{1,4}(::)?){1,6}$)|(^((::)?[a-fA-F0-9]{1,4}:){1,6}:$)|(^::$)").unwrap();
-  static ref IPV6_LIST: Regex = Regex::new("(((^\\d{20}$)|(^((:[a-fA-F0-9]{1,4}){6}|::)ffff:(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})){3}$)|(^((:[a-fA-F0-9]{1,4}){6}|::)ffff(:[a-fA-F0-9]{1,4}){2}$)|(^([a-fA-F0-9]{1,4}) (:[a-fA-F0-9]{1,4}){7}$)|(^:(:[a-fA-F0-9]{1,4}(::)?){1,6}$)|(^((::)?[a-fA-F0-9]{1,4}:){1,6}:$)|(^::$))(,\\n|,?)))*$").unwrap();
-  
-  static ref ALPHA_NUM: Regex = Regex::new("^[a-zA-Z0-9]*$").unwrap();
-  static ref ALPHA_NUM_2: Regex = Regex::new("^[a-zA-Z0-9\\-_]*$").unwrap();
-}
-
 #[derive(Validate, Deserialize)]
 pub struct Config {
-  #[validate(regex(path = "IPV4", message = "Bad IPv4 address"))]
+  #[validate(regex(path = "crate::utils::myregex::IPV4", message = "Bad IPv4 address"))]
   bind_ip: String,
+
   #[validate(range(min = 1, max = 65535))]
   bind_port: u16,
+
   #[validate(range(min = 1, max = 65535))]
   pub workers: usize,
-  #[validate(regex(path = "IPV4_LIST", message = "Bad IPv4 address list"))]
+
+  #[validate(regex(path = "crate::utils::myregex::IPV4_LIST", message = "Bad IPv4 address list"))]
   allowed_ips_list: String,
+  
   pub allowed_ips: Vec<String>,
 
-  #[validate(regex = "ALPHA_NUM_2")]
+  #[validate(regex = "crate::utils::myregex::ALPHA_NUM_2")]
   #[validate(length(min = 16, max = 128))]
   pub api_key: String,
 

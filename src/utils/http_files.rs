@@ -29,20 +29,15 @@ use uuid::Uuid;
 use std::fs;
 use std::path::Path;
 use validator::Validate;
-use regex::Regex;
 
 use crate::errors::{FwcError, Result};
-
-lazy_static! {
-  static ref FILE_PERMISSIONS: Regex = Regex::new("^[0-7]{3}$").unwrap();
-}
 
 #[derive(Validate)]
 pub struct HttpFiles {
   tmp_dir: String,
   dst_dir: String,
   files: Vec<FileData>,
-  #[validate(regex(path = "FILE_PERMISSIONS", message = "Invalid file permissions"))]
+  #[validate(regex(path = "crate::utils::myregex::FILE_PERMISSIONS", message = "Invalid file permissions"))]
   perms: String,
   perms_u32: u32
 }
