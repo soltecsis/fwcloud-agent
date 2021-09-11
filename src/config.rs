@@ -29,7 +29,7 @@ use regex::Regex;
 use crate::errors::Result;
 
 // A trait that the Validate derive will impl
-use validator::{Validate};
+use validator::Validate;
 
 lazy_static! {
   static ref IPV4: Regex = Regex::new("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})){3}$").unwrap();

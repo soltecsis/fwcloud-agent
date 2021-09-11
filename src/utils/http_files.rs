@@ -28,14 +28,23 @@ use futures::{StreamExt, TryStreamExt};
 use uuid::Uuid;
 use std::fs;
 use std::path::Path;
+use validator::Validate;
+use regex::Regex;
 
 use crate::errors::{FwcError, Result};
 
+lazy_static! {
+  static ref FILE_PERMISSIONS: Regex = Regex::new("^[0-7]{3}$").unwrap();
+}
+
+#[derive(Validate)]
 pub struct HttpFiles {
   tmp_dir: String,
   dst_dir: String,
   files: Vec<FileData>,
-  perms: u32
+  #[validate(regex(path = "FILE_PERMISSIONS", message = "Invalid file permissions"))]
+  perms: String,
+  perms_u32: u32
 }
 
 struct FileData {
@@ -44,37 +53,21 @@ struct FileData {
 }
 
 impl HttpFiles {
-  pub fn new(tmp_dir: String, perms: u32) -> Self {
+  pub fn new(tmp_dir: String) -> Self {
     HttpFiles {
       tmp_dir,
       dst_dir: "".to_string(),
       files: Vec::new(),
-      perms
+      perms: "640".to_string(),
+      perms_u32: 420
     }
   } 
 
   pub async fn process(&mut self, payload: Multipart) -> Result<()> {
     self.extract_multipart_data(payload).await?;
-    self.validate()?;
+    self.check_data()?;
     self.move_tmp_files()?;
     
-    Ok(())
-  }
-
-  async fn extract_dst_dir(&mut self, mut field: Field, name: String) -> Result<()> {
-    // We only accept one NO file parameter in the multipart stream and it must be the destination directory.
-    if name != "dst_dir" {
-      return Err(FwcError::NotAllowedParameter);
-    }
-
-    // Field in turn is stream of *Bytes* object
-    while let Some(chunk) = field.next().await {
-      let data = chunk.unwrap();
-      for byte in data {
-        self.dst_dir.push(byte as char);
-      }
-    }
-
     Ok(())
   }
 
@@ -86,7 +79,7 @@ impl HttpFiles {
       let filename = content_type.get_filename().unwrap_or("").to_string();
       if filename.len() == 0 {
         let name = content_type.get_name().unwrap_or("").to_string();
-        self.extract_dst_dir(field, name).await?;
+        self.extract_field_data(field, name).await?;
         continue;
       }
       
@@ -114,6 +107,29 @@ impl HttpFiles {
     Ok(())
   }
 
+  async fn extract_field_data(&mut self, mut field: Field, name: String) -> Result<()> {
+    // We only accept these NO file parameter in the multipart stream and it must be the destination directory.
+    let buf: &mut String;
+    if name == "dst_dir" {
+      buf = &mut self.dst_dir;
+    } else if name == "perms" {
+      self.perms.clear();
+      buf = &mut self.perms;
+    } else {
+      return Err(FwcError::NotAllowedParameter);
+    }
+
+    // Field in turn is stream of *Bytes* object
+    while let Some(chunk) = field.next().await {
+      let data = chunk.unwrap();
+      for byte in data {
+        buf.push(byte as char);
+      }
+    }
+
+    Ok(())
+  }
+
   fn move_tmp_files(&mut self) -> Result<()> {
     for file_data in self.files.iter() {
       let src = format!("{}/{}",self.tmp_dir,file_data.src_name);
@@ -123,14 +139,19 @@ impl HttpFiles {
       fs::remove_file(&src)?;
 
       let mut perms = fs::metadata(&dst)?.permissions();
-      perms.set_mode(self.perms);
+      perms.set_mode(self.perms_u32);
       fs::set_permissions(&dst, perms)?;
     }
 
     Ok(())
   }
 
-  fn validate(&self) -> Result<()> {
+  fn check_data(&mut self) -> Result<()> {
+    // Validate data using the Validator crate and the marco annotations over struct fields.
+    self.validate()?;
+    
+    self.perms_to_u32();
+
     // Destination directory parameter is mandatory.
     if self.dst_dir.len() < 1 {
       return Err(FwcError::Internal("Destination directory parameter not found in multipart/form-data stream"));
@@ -146,6 +167,14 @@ impl HttpFiles {
 
     Ok(())
   }
+
+  fn perms_to_u32(&mut self) {
+    let d0 = (self.perms.as_bytes()[0] as u32) - 48;
+    let d1 = (self.perms.as_bytes()[1] as u32) - 48;
+    let d2 = (self.perms.as_bytes()[2] as u32) - 48;
+
+    self.perms_u32 = (d0 * 64) + (d1 * 8) + d2;
+  } 
 }
 
 // Make sure that temporary files are removed after the HttpFiles object instance goes out of scope.

@@ -32,6 +32,6 @@ use crate::errors::Result;
 
 #[post("/files/upload")]
 pub async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
-  HttpFiles::new(cfg.tmp_dir.clone(), 0o644).process(payload).await?;  
+  HttpFiles::new(cfg.tmp_dir.clone()).process(payload).await?;  
   Ok(HttpResponse::Ok().finish())
 }
