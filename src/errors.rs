@@ -24,6 +24,7 @@
 
 use actix_web::{HttpResponse, ResponseError, http::{StatusCode, header}};
 use thiserror::Error;
+use log::error;
 
 pub type Result<T> = std::result::Result<T, FwcError>;
 
@@ -78,6 +79,7 @@ impl ResponseError for FwcError {
         header::HeaderValue::from_static("application/json"),
       );
       
+      error!("{}",self);
       resp.set_body(actix_web::dev::Body::from(format!("{{\"message\":\"{}\"}}",self)))
     }
 }

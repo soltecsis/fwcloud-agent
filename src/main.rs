@@ -29,8 +29,8 @@ mod auth;
 mod routes;
 mod utils;
 
+use log::{info, warn};
 use std::sync::Arc;
-
 use config::Config;
 use actix_web::{App, HttpServer, middleware};
 use actix_web_requestid::{RequestIDService};
@@ -39,11 +39,13 @@ use env_logger::Env;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+
+    info!("Starting fwcloud-agent application");
+
     let cfg = Arc::new(Config::new().unwrap());
     let cfg_main_thread = cfg.clone();
     
-    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
-
     let server = HttpServer::new( move || {
         App::new()
             .data(cfg.clone())
@@ -55,6 +57,7 @@ async fn main() -> std::io::Result<()> {
     .workers(cfg_main_thread.workers);
     
     if cfg_main_thread.enable_tls { 
+        info!("Using secure communications (https)");
         let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
         builder.set_private_key_file(format!("{}/key.pem",cfg_main_thread.etc_dir), SslFiletype::PEM).unwrap();
         builder.set_certificate_chain_file(format!("{}/cert.pem",cfg_main_thread.etc_dir)).unwrap();
@@ -62,6 +65,7 @@ async fn main() -> std::io::Result<()> {
         server.bind_openssl(cfg_main_thread.bind_to(), builder)?.run().await 
     }
     else { 
+        warn!("Insecure communications (http) not recommended in production");
         server.bind(cfg_main_thread.bind_to())?.run().await 
     }
 }
