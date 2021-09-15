@@ -23,14 +23,13 @@ extern crate num_cpus;
 
 use std::env;
 use std::fs;
-use serde::Deserialize;
 
 use crate::errors::Result;
 
 // A trait that the Validate derive will impl
 use validator::Validate;
 
-#[derive(Validate, Deserialize)]
+#[derive(Validate)]
 pub struct Config {
   #[validate(regex(path = "crate::utils::myregex::IPV4", message = "Bad IPv4 address"))]
   bind_ip: String,
@@ -41,6 +40,8 @@ pub struct Config {
   #[validate(range(min = 1, max = 65535))]
   pub workers: usize,
 
+  pub enable_tls: bool,
+
   #[validate(regex(path = "crate::utils::myregex::IPV4_LIST", message = "Bad IPv4 address list"))]
   allowed_ips_list: String,
   
@@ -50,6 +51,7 @@ pub struct Config {
   #[validate(length(min = 16, max = 128))]
   pub api_key: String,
 
+  pub etc_dir: String,
   pub tmp_dir: String
 }
 
@@ -64,16 +66,18 @@ impl Config {
       bind_ip: env::var("BIND_IP").unwrap_or(String::from("0.0.0.0")),
       bind_port: env::var("BIND_PORT").unwrap_or(String::from("33033")).parse::<u16>().unwrap_or(33033),
       workers: env::var("WORKERS").unwrap_or(cpus.to_string()).parse::<usize>().unwrap_or(cpus),
+      enable_tls: env::var("ENABLE_SSL").unwrap_or(String::from("true")).parse::<bool>().unwrap_or(true),
       
       allowed_ips_list: env::var("ALLOWED_IPS").unwrap_or(String::from("")),
       allowed_ips: vec![],
       
       api_key: env::var("API_KEY").unwrap_or(String::from("")),
+      etc_dir: "./etc/".to_string(),
       tmp_dir: "./tmp/".to_string()
     };
 
     cfg.validate()?;
-    
+ 
     // Create list of allowed IPs.
     if cfg.allowed_ips_list.len() > 1 {
       let ips: Vec<&str> = cfg.allowed_ips_list.split(" ").collect();
@@ -82,7 +86,8 @@ impl Config {
       }  
     }
     
-    // Create temporary directory if it doesn't exists.
+    // Create config and temporary directories if don't exist.
+    fs::create_dir_all(&cfg.etc_dir)?;
     fs::create_dir_all(&cfg.tmp_dir)?;
 
     Ok(cfg)

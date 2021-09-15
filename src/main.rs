@@ -34,17 +34,17 @@ use std::sync::Arc;
 use config::Config;
 use actix_web::{App, HttpServer, middleware};
 use actix_web_requestid::{RequestIDService};
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use env_logger::Env;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let cfg = Arc::new(Config::new().unwrap());
-    let workers = cfg.workers;
-    let bind_to = cfg.bind_to();
+    let cfg_main_thread = cfg.clone();
     
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
-    HttpServer::new(move || {
+    let server = HttpServer::new( move || {
         App::new()
             .data(cfg.clone())
             .wrap(RequestIDService::default())
@@ -52,8 +52,16 @@ async fn main() -> std::io::Result<()> {
             .wrap(auth::Authorize)
             .configure(routes::routes_setup)
     })
-    .workers(workers)
-    .bind(bind_to)?
-    .run()
-    .await
+    .workers(cfg_main_thread.workers);
+    
+    if cfg_main_thread.enable_tls { 
+        let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+        builder.set_private_key_file(format!("{}/key.pem",cfg_main_thread.etc_dir), SslFiletype::PEM).unwrap();
+        builder.set_certificate_chain_file(format!("{}/cert.pem",cfg_main_thread.etc_dir)).unwrap();
+        
+        server.bind_openssl(cfg_main_thread.bind_to(), builder)?.run().await 
+    }
+    else { 
+        server.bind(cfg_main_thread.bind_to())?.run().await 
+    }
 }
