@@ -23,11 +23,17 @@ extern crate num_cpus;
 
 use std::env;
 use std::fs;
+use std::sync::Arc;
 
 use crate::errors::Result;
 
+use futures::lock::Mutex;
 // A trait that the Validate derive will impl
 use validator::Validate;
+
+pub struct MyMutex {
+  pub openvpn: Arc<Mutex<u8>>
+}
 
 #[derive(Validate)]
 pub struct Config {
@@ -52,7 +58,9 @@ pub struct Config {
   pub api_key: String,
 
   pub etc_dir: String,
-  pub tmp_dir: String
+  pub tmp_dir: String,
+
+  pub mutex: MyMutex
 }
 
 impl Config {
@@ -73,7 +81,11 @@ impl Config {
       
       api_key: env::var("API_KEY").unwrap_or(String::from("")),
       etc_dir: "./etc/".to_string(),
-      tmp_dir: "./tmp/".to_string()
+      tmp_dir: "./tmp/".to_string(),
+
+      mutex: MyMutex {
+        openvpn: Arc::new(Mutex::new(0))
+      }
     };
 
     cfg.validate()?;

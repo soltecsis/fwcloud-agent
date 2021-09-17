@@ -187,7 +187,9 @@ impl Drop for HttpFiles {
 
 #[cfg(test)]
 mod tests {
-    #[test]
+  use super::*;
+    
+  #[test]
     fn it_works() {
         assert_eq!(2 + 2, 4);
     }

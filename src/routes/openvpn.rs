@@ -24,14 +24,22 @@ use std::sync::Arc;
 
 use actix_web::{HttpResponse, post, web};
 use actix_multipart::Multipart;
+use log::info;
 
 use crate::config::Config;
 use crate::utils::http_files::HttpFiles;
 
 use crate::errors::Result;
+use std::{thread, time};
 
 #[post("/files/upload")]
 pub async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+  info!("Locking mutex ...");
+  cfg.mutex.openvpn.lock().await;
+  info!("Locked");
+
+  thread::sleep(time::Duration::from_millis(10_000));
+  
   HttpFiles::new(cfg.tmp_dir.clone()).process(payload).await?;  
   Ok(HttpResponse::Ok().finish())
 }
