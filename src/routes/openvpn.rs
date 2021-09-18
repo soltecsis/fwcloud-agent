@@ -24,32 +24,30 @@ use std::sync::Arc;
 
 use actix_web::{HttpResponse, post, web};
 use actix_multipart::Multipart;
-use log::info;
+use log::debug;
 
 use crate::config::Config;
 use crate::utils::http_files::HttpFiles;
 
 use crate::errors::Result;
-use std::{thread, time};
+//use std::{thread, time};
 use thread_id;
 
 #[post("/files/upload")]
 pub async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
-  info!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
+  debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
   let mutex_data = mutex.lock().unwrap();
-  info!("OpenVPN mutex locked (thread id: {})!", thread_id::get());
+  debug!("OpenVPN mutex locked (thread id: {})!", thread_id::get());
 
   // Only for debug purposes. It is useful for verify that the mutex makes its work.
-  thread::sleep(time::Duration::from_millis(10_000));
+  //thread::sleep(time::Duration::from_millis(10_000));
 
   HttpFiles::new(cfg.tmp_dir.clone()).process(payload).await?; 
 
-  thread::sleep(time::Duration::from_millis(10_000));
-
-  info!("Unlocking OpenVPM mutex (thread id: {}) ...", thread_id::get());
+  debug!("Unlocking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   drop(mutex_data);
-  info!("OpenVPN mutex unlocked (thread id: {})!", thread_id::get());
+  debug!("OpenVPN mutex unlocked (thread id: {})!", thread_id::get());
 
   Ok(HttpResponse::Ok().finish())
 }
