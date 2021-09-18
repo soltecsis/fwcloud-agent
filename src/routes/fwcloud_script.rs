@@ -23,6 +23,7 @@
 use std::sync::Arc;
 use actix_web::{post, HttpResponse, web};
 use actix_multipart::Multipart;
+use log::debug;
 
 use crate::config::Config;
 use crate::utils::http_files::HttpFiles;
@@ -31,7 +32,19 @@ use crate::errors::Result;
 
 #[post("/upload")]
 pub async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+  debug!("Locking FWCloud Script mutex (thread id: {}) ...", thread_id::get());
+  let mutex = Arc::clone(&cfg.mutex.fwcloud_script);
+  let mutex_data = mutex.lock().unwrap();
+  debug!("FWCloud Script mutex locked (thread id: {})!", thread_id::get());
+
   HttpFiles::new(cfg.tmp_dir.clone()).process(payload).await?;
+
+  // Execute FWCloud Script.
+
+  debug!("Unlocking FWCloud Script mutex (thread id: {}) ...", thread_id::get());
+  drop(mutex_data);
+  debug!("FWCloud Script mutex unlocked (thread id: {})!", thread_id::get());
+
   Ok(HttpResponse::Ok().finish())
 }
 

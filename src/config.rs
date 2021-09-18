@@ -27,12 +27,13 @@ use std::sync::Arc;
 
 use crate::errors::Result;
 
-use futures::lock::Mutex;
+use std::sync::Mutex;
 // A trait that the Validate derive will impl
 use validator::Validate;
 
 pub struct MyMutex {
-  pub openvpn: Arc<Mutex<u8>>
+  pub openvpn: Arc<Mutex<u8>>,
+  pub fwcloud_script: Arc<Mutex<u8>>
 }
 
 #[derive(Validate)]
@@ -84,7 +85,8 @@ impl Config {
       tmp_dir: "./tmp/".to_string(),
 
       mutex: MyMutex {
-        openvpn: Arc::new(Mutex::new(0))
+        openvpn: Arc::new(Mutex::new(0)),
+        fwcloud_script: Arc::new(Mutex::new(0))
       }
     };
 
