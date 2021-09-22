@@ -19,23 +19,9 @@
     You should have received a copy of the GNU General Public License
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
+use actix_web::{put, HttpResponse, Responder};
 
-mod ping;
-mod fwcloud_script;
-mod openvpn;
-
-use actix_web::web;
-
-pub fn routes_setup(config: &mut web::ServiceConfig) {
-    config.service(web::scope("/api/v1")
-        .service(ping::ping)
-
-        .service(web::scope("/fwcloud_script/")
-            .service(fwcloud_script::upload_and_run)
-        )
-
-        .service(web::scope("/openvpn/")
-            .service(openvpn::files_upload)
-        )
-    );
+#[put("/ping")]
+pub async fn ping() -> impl Responder {
+    HttpResponse::Ok().finish()
 }

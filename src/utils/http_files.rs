@@ -51,9 +51,9 @@ impl HttpFiles {
   pub fn new(tmp_dir: String) -> Self {
     HttpFiles {
       tmp_dir,
-      dst_dir: "".to_string(),
+      dst_dir: String::from(""),
       files: Vec::new(),
-      perms: "640".to_string(),
+      perms: String::from("640"),
       perms_u32: 420
     }
   } 
@@ -187,8 +187,19 @@ impl Drop for HttpFiles {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn unix_permissions_to_u32() {
+      let mut item = HttpFiles::new("".to_string());
+      
+      item.perms = String::from("777"); item.perms_to_u32();
+      assert_eq!(item.perms_u32, 511);
+
+      item.perms = String::from("644"); item.perms_to_u32();
+      assert_eq!(item.perms_u32, 420);
+
+      item.perms = String::from("650"); item.perms_to_u32();
+      assert_eq!(item.perms_u32, 424);
     }
 }
