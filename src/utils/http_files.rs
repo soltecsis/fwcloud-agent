@@ -29,6 +29,7 @@ use uuid::Uuid;
 use std::fs;
 use std::path::Path;
 use validator::Validate;
+use std::process::Command;
 
 use crate::errors::{FwcError, Result};
 
@@ -39,12 +40,19 @@ pub struct HttpFiles {
   files: Vec<FileData>,
   #[validate(regex(path = "crate::utils::myregex::FILE_PERMISSIONS", message = "Invalid file permissions"))]
   perms: String,
-  perms_u32: u32
+  perms_u32: u32,
+  max_files: u32,
+  max_file_size: usize,
+  expected_files: u32,
+  n_files: u32
 }
 
 struct FileData {
+  src_path: String,
   src_name: String,
-  dst_name: String
+  dst_path: String,
+  dst_name: String,
+  size: usize
 }
 
 impl HttpFiles {
@@ -54,11 +62,15 @@ impl HttpFiles {
       dst_dir: String::from(""),
       files: Vec::new(),
       perms: String::from("640"),
-      perms_u32: 420
+      perms_u32: 420,
+      max_files: 1000,
+      max_file_size: 10_485_760, // Ten megabytes.
+      expected_files: 0,
+      n_files: 0
     }
   } 
 
-  pub async fn process(&mut self, payload: Multipart) -> Result<()> {
+  pub async fn openvpn_ccd_files(&mut self, payload: Multipart) -> Result<()> {
     self.extract_multipart_data(payload).await?;
     self.check_data()?;
     self.move_tmp_files()?;
@@ -66,32 +78,75 @@ impl HttpFiles {
     Ok(())
   }
 
+  pub async fn fwcloud_script(&mut self, payload: Multipart) -> Result<String> {
+    self.expected_files = 1;
+    self.extract_multipart_data(payload).await?;
+    self.check_data()?;
+
+    if self.files[0].dst_name != "fwcloud.sh" {
+      return Err(FwcError::NotExpectedFileName)
+    }
+
+    self.move_tmp_files()?;
+
+    // Now run the FWCloud script with the install option.
+    let output = self.run(0)?;
+    
+    Ok(output)
+  }
+
   async fn extract_multipart_data(&mut self, mut payload: Multipart) -> Result<()> {
     // iterate over multipart stream
     while let Ok(Some(mut field)) = payload.try_next().await {
       let content_type = field.content_disposition().unwrap();
       
-      let filename = content_type.get_filename().unwrap_or("").to_string();
+      let filename = sanitize_filename::sanitize(content_type.get_filename().unwrap_or("").to_string());
       if filename.len() == 0 {
         let name = content_type.get_name().unwrap_or("").to_string();
         self.extract_field_data(field, name).await?;
         continue;
       }
+
+      // Parameter for destination dir (dst_dir) must go before any file contents in the
+      // multipart stream.
+      if self.dst_dir.len() == 0 {
+        return Err(FwcError::DstDirFirst);
+      }
+
+      // Apply controls over the amount of files before getting the next file.
+      self.n_files += 1;
+      if self.max_files > 0 && self.n_files > self.max_files {
+        return Err(FwcError::TooManyFiles);
+      }
+      if self.expected_files > 0 && self.n_files > self.expected_files {
+        return Err(FwcError::MoreFilesThanExpected);
+      }
       
-      let file_data = FileData {
-        src_name: format!("{}.tmp", Uuid::new_v4()),
-        dst_name: filename
+      let random_file_name = Uuid::new_v4();
+      let mut file_data = FileData {
+        src_path: format!("{}/{}.tmp", self.tmp_dir, random_file_name),
+        src_name: format!("{}.tmp", random_file_name),
+        dst_path: format!("{}/{}", self.dst_dir, filename),
+        dst_name: filename,
+        size: 0
       };
-      let filepath = format!("{}/{}", self.tmp_dir, sanitize_filename::sanitize(&file_data.src_name));
 
       // File::create is blocking operation, use threadpool
-      let mut f = web::block(|| std::fs::File::create(filepath))
+      let file_path = file_data.src_path.clone();
+      let mut f = web::block(|| std::fs::File::create(file_path))
         .await
         .unwrap();
 
       // Field in turn is stream of *Bytes* object
       while let Some(chunk) = field.next().await {
         let data = chunk.unwrap();
+        
+        // File size control.
+        file_data.size += data.len();
+        if self.max_file_size >0 && file_data.size > self.max_file_size {
+          return Err(FwcError::TooBigFile);
+        }
+
         // filesystem operations are blocking, we have to use threadpool
         f = web::block(move || f.write_all(&data).map(|_| f)).await?;
       }
@@ -127,15 +182,12 @@ impl HttpFiles {
 
   fn move_tmp_files(&mut self) -> Result<()> {
     for file_data in self.files.iter() {
-      let src = format!("{}/{}",self.tmp_dir,file_data.src_name);
-      let dst = format!("{}/{}",self.dst_dir,file_data.dst_name);
+      fs::copy(&file_data.src_path,&file_data.dst_path)?;
+      fs::remove_file(&file_data.src_path)?;
 
-      fs::copy(&src,&dst)?;
-      fs::remove_file(&src)?;
-
-      let mut perms = fs::metadata(&dst)?.permissions();
+      let mut perms = fs::metadata(&file_data.dst_path)?.permissions();
       perms.set_mode(self.perms_u32);
-      fs::set_permissions(&dst, perms)?;
+      fs::set_permissions(&file_data.dst_path, perms)?;
     }
 
     Ok(())
@@ -145,7 +197,9 @@ impl HttpFiles {
     // Validate data using the Validator crate and the marco annotations over struct fields.
     self.validate()?;
     
-    self.perms_to_u32();
+    if self.n_files < self.expected_files {
+      return Err(FwcError::LessFilesThanExpected);
+    }
 
     // Destination directory parameter is mandatory.
     if self.dst_dir.len() < 1 {
@@ -160,6 +214,8 @@ impl HttpFiles {
       return Err(FwcError::AtLeastOneFile);
     }
 
+    self.perms_to_u32();
+
     Ok(())
   }
 
@@ -169,7 +225,11 @@ impl HttpFiles {
     let d2 = (self.perms.as_bytes()[2] as u32) - 48;
 
     self.perms_u32 = (d0 * 64) + (d1 * 8) + d2;
-  } 
+  }
+  
+  fn run(&mut self, inx: usize) -> Result<String>{
+    Ok(self.files[inx].dst_name.clone())
+  }
 }
 
 // Make sure that temporary files are removed after the HttpFiles object instance goes out of scope.

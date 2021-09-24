@@ -45,8 +45,26 @@ pub enum FwcError {
   #[error("Directory not found")]
   DirNotFound,
 
+  #[error("Parameter dst_dir must come before any file in the multipart stream")]
+  DstDirFirst,
+
   #[error("At least one file must be included in the request")]
   AtLeastOneFile,
+
+  #[error("Too big file")]
+  TooBigFile,
+
+  #[error("Too many files")]
+  TooManyFiles,
+
+  #[error("Less files than expected")]
+  LessFilesThanExpected,
+
+  #[error("More files than expected")]
+  MoreFilesThanExpected,
+
+  #[error("File name was not the expected one")]
+  NotExpectedFileName,
 
   #[error("{0}")]
   Internal(&'static str),
@@ -64,7 +82,9 @@ pub enum FwcError {
 impl ResponseError for FwcError {
     fn status_code(&self) -> StatusCode {
       match self {
-        FwcError::NotAllowedParameter | FwcError::AtLeastOneFile | FwcError::Validation(_) 
+        FwcError::NotAllowedParameter | FwcError::AtLeastOneFile | FwcError::Validation(_) |
+        FwcError::TooBigFile | FwcError::TooManyFiles | FwcError::LessFilesThanExpected | 
+        FwcError::MoreFilesThanExpected | FwcError::NotExpectedFileName | FwcError::DstDirFirst
           => StatusCode::BAD_REQUEST,
         FwcError::ApiKeyNotValid | FwcError::ApiKeyNotFound | &FwcError::NotAllowedIP
           =>  StatusCode::FORBIDDEN,
