@@ -76,7 +76,10 @@ pub enum FwcError {
   IOError(#[from] std::io::Error),
 
   #[error(transparent)]
-  BlockingError(#[from] actix_web::error::BlockingError<std::io::Error>)
+  BlockingError(#[from] actix_web::error::BlockingError<std::io::Error>),
+
+  #[error(transparent)]
+  PopenError(#[from] subprocess::PopenError)
 }
 
 impl ResponseError for FwcError {

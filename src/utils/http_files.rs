@@ -25,11 +25,11 @@ use std::{io::Write, os::unix::prelude::PermissionsExt};
 use actix_multipart::{Multipart, Field};
 use actix_web::web;
 use futures::{StreamExt, TryStreamExt};
+use subprocess::{Exec, Redirection};
 use uuid::Uuid;
 use std::fs;
 use std::path::Path;
 use validator::Validate;
-use std::process::Command;
 
 use crate::errors::{FwcError, Result};
 
@@ -90,7 +90,7 @@ impl HttpFiles {
     self.move_tmp_files()?;
 
     // Now run the FWCloud script with the install option.
-    let output = self.run(0)?;
+    let output = self.run("sh",&[self.files[0].dst_path.clone(), "install".to_string()])?;
     
     Ok(output)
   }
@@ -177,6 +177,16 @@ impl HttpFiles {
       }
     }
 
+    // Verify that destination directory exists.
+    // The parameter dst_dir must go before any file into the multipart stream. 
+    // If the destination directory doesn't exists we will response with error before processing the files
+    // data.
+    if name == "dst_dir" {
+      if !Path::new(&self.dst_dir).is_dir() {
+        return Err(FwcError::DirNotFound);
+      }
+    }
+
     Ok(())
   }
 
@@ -197,21 +207,17 @@ impl HttpFiles {
     // Validate data using the Validator crate and the marco annotations over struct fields.
     self.validate()?;
     
-    if self.n_files < self.expected_files {
-      return Err(FwcError::LessFilesThanExpected);
-    }
-
     // Destination directory parameter is mandatory.
     if self.dst_dir.len() < 1 {
       return Err(FwcError::Internal("Destination directory parameter not found in multipart/form-data stream"));
     }
 
-    if !Path::new(&self.dst_dir).is_dir() {
-      return Err(FwcError::DirNotFound);
-    }
-
     if self.files.len() < 1 {
       return Err(FwcError::AtLeastOneFile);
+    }
+
+    if self.n_files < self.expected_files {
+      return Err(FwcError::LessFilesThanExpected);
     }
 
     self.perms_to_u32();
@@ -227,8 +233,14 @@ impl HttpFiles {
     self.perms_u32 = (d0 * 64) + (d1 * 8) + d2;
   }
   
-  fn run(&mut self, inx: usize) -> Result<String>{
-    Ok(self.files[inx].dst_name.clone())
+  fn run(&mut self, cmd: &str, args: &[String]) -> Result<String>{
+    Ok(Exec::cmd(cmd)
+        .args(args)
+        .stdout(Redirection::Pipe)
+        .stderr(Redirection::Merge)
+        .capture()?
+        .stdout_str()
+    )
   }
 }
 
