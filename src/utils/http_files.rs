@@ -70,7 +70,7 @@ impl HttpFiles {
     }
   } 
 
-  pub async fn openvpn_ccd_files(&mut self, payload: Multipart) -> Result<()> {
+  pub async fn files_upload(&mut self, payload: Multipart) -> Result<()> {
     self.extract_multipart_data(payload).await?;
     self.check_data()?;
     self.move_tmp_files()?;

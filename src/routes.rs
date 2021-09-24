@@ -35,7 +35,7 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
         )
 
         .service(web::scope("/openvpn/")
-            .service(openvpn::ccd_files_upload)
+            .service(openvpn::files_upload)
         )
     );
 }
