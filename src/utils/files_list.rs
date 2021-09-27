@@ -20,6 +20,31 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-pub mod myregex;
-pub mod http_files;
-pub mod files_list;
+use serde::Deserialize;
+use std::fs;
+use std::path::Path;
+
+use crate::errors::{FwcError, Result};
+
+#[derive(Deserialize)]
+pub struct FilesList {
+  dir: String,
+  files: Vec<String>
+}
+
+impl FilesList {
+  pub fn remove(&self) -> Result<()> {
+    if !Path::new(&self.dir).is_dir() {
+      return Err(FwcError::DirNotFound);
+    }
+
+    for file in self.files.iter() {
+      let path = format!("{}/{}",self.dir,file);
+      if Path::new(&path).is_file() {
+        fs::remove_file(path)?;
+      }
+    }
+
+    Ok(())
+  } 
+}
