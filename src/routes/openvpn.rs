@@ -22,7 +22,8 @@
 
 use std::sync::Arc;
 
-use actix_web::{HttpResponse, post, delete, web};
+use actix_web::http::header;
+use actix_web::{HttpResponse, post, delete, put, web};
 use actix_multipart::Multipart;
 use log::debug;
 
@@ -54,6 +55,7 @@ pub async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Re
   Ok(HttpResponse::Ok().finish())
 }
 
+
 #[delete("/files/remove")]
 pub async fn files_remove(files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
@@ -68,4 +70,31 @@ pub async fn files_remove(files_list: web::Json<FilesList>, cfg: web::Data<Arc<C
   debug!("OpenVPN mutex unlocked (thread id: {})!", thread_id::get());
 
   Ok(HttpResponse::Ok().finish())
+}
+
+
+#[put("/files/sha256")]
+pub async fn files_sha256(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+  debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
+  let mutex = Arc::clone(&cfg.mutex.openvpn);
+  let mutex_data = mutex.lock().unwrap();
+  debug!("OpenVPN mutex locked (thread id: {})!", thread_id::get());
+
+  // In no files supplied then compute the sha256 has of all files into the directory.
+  if files_list.len() == 0 {
+    files_list.get_files_in_dir()?;
+  }
+  let result = files_list.sha256()?;
+
+  debug!("Unlocking OpenVPM mutex (thread id: {}) ...", thread_id::get());
+  drop(mutex_data);
+  debug!("OpenVPN mutex unlocked (thread id: {})!", thread_id::get());
+
+  let mut resp = HttpResponse::Ok().body(result);
+  resp.headers_mut().insert(
+    header ::CONTENT_TYPE,
+    header::HeaderValue::from_static("text/csv"),
+  );
+
+  Ok(resp)
 }

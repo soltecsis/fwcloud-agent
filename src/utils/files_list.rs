@@ -21,8 +21,10 @@
 */
 
 use serde::Deserialize;
-use std::fs;
+use std::fs::{self, File};
+use std::io;
 use std::path::Path;
+use sha2::{Sha256, Digest};
 
 use crate::errors::{FwcError, Result};
 
@@ -46,5 +48,43 @@ impl FilesList {
     }
 
     Ok(())
-  } 
+  }
+
+  pub fn get_files_in_dir(&mut self) -> Result<()> {
+    if !Path::new(&self.dir).is_dir() {
+      return Err(FwcError::DirNotFound);
+    }
+
+    for entry in fs::read_dir(&self.dir)? {
+      let entry = entry?;
+      if entry.path().is_file() {
+        self.files.push(String::from(entry.path().file_name().unwrap().to_str().unwrap()));
+      }
+    }
+
+    Ok(())
+  }
+  
+  pub fn sha256(&self) -> Result<String> {
+    let mut csv = String::from("file,sha256\n");
+
+    for file in self.files.iter() {
+      let path = format!("{}/{}",self.dir,file);
+      if Path::new(&path).is_file() {
+        
+        let mut file_stream = File::open(&path)?;
+        let mut sha256 = Sha256::new();
+        io::copy(&mut file_stream, &mut sha256)?;
+        let hash = hex::encode(sha256.finalize().as_slice());
+
+        csv.push_str(&format!("{},{}\n",file,hash));
+      }
+    }
+
+    Ok(csv)
+  }
+
+  pub fn len(&self) -> usize {
+    self.files.len()
+  }
 }
