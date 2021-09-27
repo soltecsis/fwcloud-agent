@@ -23,14 +23,14 @@
 use std::{io::Write, os::unix::prelude::PermissionsExt};
 
 use actix_multipart::{Multipart, Field};
-use actix_web::web;
+use actix_web::{web,  HttpResponse};
 use futures::{StreamExt, TryStreamExt};
-use subprocess::{Exec, Redirection};
 use uuid::Uuid;
 use std::fs;
 use std::path::Path;
 use validator::Validate;
 
+use crate::utils::cmd::run_cmd;
 use crate::errors::{FwcError, Result};
 
 #[derive(Validate)]
@@ -78,7 +78,7 @@ impl HttpFiles {
     Ok(())
   }
 
-  pub async fn fwcloud_script(&mut self, payload: Multipart) -> Result<String> {
+  pub async fn fwcloud_script(&mut self, payload: Multipart) -> Result<HttpResponse> {
     self.expected_files = 1;
     self.extract_multipart_data(payload).await?;
     self.check_data()?;
@@ -90,9 +90,7 @@ impl HttpFiles {
     self.move_tmp_files()?;
 
     // Now run the FWCloud script with the install option.
-    let output = self.run("sh",&[self.files[0].dst_path.clone(), "install".to_string()])?;
-    
-    Ok(output)
+    Ok(run_cmd("sh", &[self.files[0].dst_path.clone(), String::from("install")])?)
   }
 
   async fn extract_multipart_data(&mut self, mut payload: Multipart) -> Result<()> {
@@ -231,17 +229,7 @@ impl HttpFiles {
     let d2 = (self.perms.as_bytes()[2] as u32) - 48;
 
     self.perms_u32 = (d0 * 64) + (d1 * 8) + d2;
-  }
-  
-  fn run(&mut self, cmd: &str, args: &[String]) -> Result<String>{
-    Ok(Exec::cmd(cmd)
-        .args(args)
-        .stdout(Redirection::Pipe)
-        .stderr(Redirection::Merge)
-        .capture()?
-        .stdout_str()
-    )
-  }
+  } 
 }
 
 // Make sure that temporary files are removed after the HttpFiles object instance goes out of scope.

@@ -20,34 +20,11 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-mod ping;
-mod fwcloud_script;
-mod openvpn;
-mod interfaces;
-mod iptables_save;
+use actix_web::{get, HttpResponse};
+use crate::utils::cmd::run_cmd;
+use crate::errors::Result;
 
-use actix_web::web;
-
-pub fn routes_setup(config: &mut web::ServiceConfig) {
-    config.service(web::scope("/api/v1")
-        .service(ping::ping)
-
-        .service(web::scope("/fwcloud_script/")
-            .service(fwcloud_script::upload_and_run)
-        )
-
-        .service(web::scope("/openvpn/")
-            .service(openvpn::files_upload)
-            .service(openvpn::files_remove)
-            .service(openvpn::files_sha256)
-        )
-
-        .service(web::scope("/interfaces/")
-            .service(interfaces::info)
-        )
-
-        .service(web::scope("/iptables-save/")
-            .service(iptables_save::data)
-        )
-    );
+#[get("/data")]
+pub async fn data() -> Result<HttpResponse> {
+  Ok(run_cmd("iptables-save", &[])?)
 }

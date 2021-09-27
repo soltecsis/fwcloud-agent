@@ -22,8 +22,7 @@
 
 use std::sync::Arc;
 
-use actix_web::http::header;
-use actix_web::{HttpResponse, post, delete, put, web};
+use actix_web::{http::header, HttpResponse, post, delete, put, web};
 use actix_multipart::Multipart;
 use log::debug;
 

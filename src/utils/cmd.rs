@@ -20,34 +20,25 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-mod ping;
-mod fwcloud_script;
-mod openvpn;
-mod interfaces;
-mod iptables_save;
+use actix_web::{http::header, HttpResponse};
+use subprocess::{Exec, Redirection};
+use crate::errors::Result;
 
-use actix_web::web;
 
-pub fn routes_setup(config: &mut web::ServiceConfig) {
-    config.service(web::scope("/api/v1")
-        .service(ping::ping)
+pub fn run_cmd(cmd: &str, args: &[String]) -> Result<HttpResponse> {
+  let output = Exec::cmd(cmd)
+    .args(args)
+    .stdout(Redirection::Pipe)
+    .stderr(Redirection::Merge)
+    .capture()?
+    .stdout_str();
 
-        .service(web::scope("/fwcloud_script/")
-            .service(fwcloud_script::upload_and_run)
-        )
+  let mut res = HttpResponse::Ok().body(output);
+  res.headers_mut().insert(
+    header ::CONTENT_TYPE,
+    header::HeaderValue::from_static("text/plain"),
+  );
 
-        .service(web::scope("/openvpn/")
-            .service(openvpn::files_upload)
-            .service(openvpn::files_remove)
-            .service(openvpn::files_sha256)
-        )
-
-        .service(web::scope("/interfaces/")
-            .service(interfaces::info)
-        )
-
-        .service(web::scope("/iptables-save/")
-            .service(iptables_save::data)
-        )
-    );
+  Ok(res)
 }
+
