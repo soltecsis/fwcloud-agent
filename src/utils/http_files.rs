@@ -90,7 +90,7 @@ impl HttpFiles {
     self.move_tmp_files()?;
 
     // Now run the FWCloud script with the install option.
-    Ok(run_cmd("sh", &[self.files[0].dst_path.clone(), String::from("install")])?)
+    Ok(run_cmd("sh", &[&self.files[0].dst_path[..], "install"])?)
   }
 
   async fn extract_multipart_data(&mut self, mut payload: Multipart) -> Result<()> {

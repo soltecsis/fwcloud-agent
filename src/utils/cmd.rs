@@ -25,7 +25,7 @@ use subprocess::{Exec, Redirection};
 use crate::errors::Result;
 
 
-pub fn run_cmd(cmd: &str, args: &[String]) -> Result<HttpResponse> {
+pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
   let output = Exec::cmd(cmd)
     .args(args)
     .stdout(Redirection::Pipe)

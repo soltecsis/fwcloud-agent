@@ -26,6 +26,6 @@ use crate::errors::Result;
 
 #[get("/info")]
 pub async fn info() -> Result<HttpResponse> {
-  Ok(run_cmd("ip", &[String::from("a")])?)
+  Ok(run_cmd("ip", &["a"])?)
 }
 

@@ -39,8 +39,6 @@ pub async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> 
 
   let res = HttpFiles::new(cfg.tmp_dir.clone()).fwcloud_script(payload).await?;
 
-  // Execute FWCloud Script.
-
   debug!("Unlocking FWCloud Script mutex (thread id: {}) ...", thread_id::get());
   drop(mutex_data);
   debug!("FWCloud Script mutex unlocked (thread id: {})!", thread_id::get());
