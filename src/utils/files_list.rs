@@ -22,7 +22,7 @@
 
 use serde::Deserialize;
 use std::fs::{self, File};
-use std::io;
+use std::io::{self, prelude::*, BufReader};
 use std::path::Path;
 use sha2::{Sha256, Digest};
 
@@ -65,7 +65,7 @@ impl FilesList {
     Ok(())
   }
   
-  pub fn sha256(&self) -> Result<String> {
+  pub fn sha256(&self, ignore_comments: bool) -> Result<String> {
     let mut csv = String::from("file,sha256\n");
 
     for file in self.files.iter() {
@@ -74,7 +74,21 @@ impl FilesList {
         
         let mut file_stream = File::open(&path)?;
         let mut sha256 = Sha256::new();
-        io::copy(&mut file_stream, &mut sha256)?;
+
+        if ignore_comments {
+          let reader = BufReader::new(file_stream);
+
+          for line in reader.lines() {
+            let line = line?;
+            if line.len() > 0 && line.chars().nth(0).unwrap() == '#' {
+              continue;
+            }
+            sha256.update(format!("{}\n",line));
+          }
+        } else {
+          io::copy(&mut file_stream, &mut sha256)?;
+        }
+
         let hash = hex::encode(sha256.finalize().as_slice());
 
         csv.push_str(&format!("{},{}\n",file,hash));

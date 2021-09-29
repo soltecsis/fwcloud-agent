@@ -83,7 +83,7 @@ pub async fn files_sha256(mut files_list: web::Json<FilesList>, cfg: web::Data<A
   if files_list.len() == 0 {
     files_list.get_files_in_dir()?;
   }
-  let result = files_list.sha256()?;
+  let result = files_list.sha256(true)?;
 
   debug!("Unlocking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   drop(mutex_data);
