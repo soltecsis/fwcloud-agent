@@ -83,7 +83,7 @@ impl FilesList {
             if line.len() > 0 && line.chars().nth(0).unwrap() == '#' {
               continue;
             }
-            sha256.update(format!("{}\n",line));
+            sha256.update(line+"\n");
           }
         } else {
           io::copy(&mut file_stream, &mut sha256)?;

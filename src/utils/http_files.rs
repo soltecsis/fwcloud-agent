@@ -35,7 +35,7 @@ use crate::errors::{FwcError, Result};
 
 #[derive(Validate)]
 pub struct HttpFiles {
-  tmp_dir: String,
+  tmp_dir: &'static str,
   dst_dir: String,
   files: Vec<FileData>,
   #[validate(regex(path = "crate::utils::myregex::FILE_PERMISSIONS", message = "Invalid file permissions"))]
@@ -56,7 +56,7 @@ struct FileData {
 }
 
 impl HttpFiles {
-  pub fn new(tmp_dir: String) -> Self {
+  pub fn new(tmp_dir: &'static str) -> Self {
     HttpFiles {
       tmp_dir,
       dst_dir: String::from(""),
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn unix_permissions_to_u32() {
-      let mut item = HttpFiles::new("".to_string());
+      let mut item = HttpFiles::new("");
       
       item.perms = String::from("777"); item.perms_to_u32();
       assert_eq!(item.perms_u32, 511);

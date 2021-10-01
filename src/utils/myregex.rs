@@ -33,4 +33,7 @@ lazy_static! {
   pub static ref ALPHA_NUM_2: Regex = Regex::new("^[a-zA-Z0-9\\-_]*$").unwrap();
 
   pub static ref FILE_PERMISSIONS: Regex = Regex::new("^[0-7]{3}$").unwrap();
+
+  pub static ref ABSOLUTE_PATH: Regex = Regex::new("^/{1}(((/{1}\\.{1})?[a-zA-Z0-9 -_]+/?)+(\\.{1}[a-zA-Z0-9]{2,4})?)$").unwrap();
+  pub static ref ABSOLUTE_PATH_LIST: Regex = Regex::new("^((/{1}(((/{1}\\.{1})?[a-zA-Z0-9 -_]+/?)+(\\.{1}[a-zA-Z0-9]{2,4})?))(,?))*$").unwrap();
 }

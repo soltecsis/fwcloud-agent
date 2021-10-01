@@ -38,6 +38,9 @@ pub struct MyMutex {
 
 #[derive(Validate)]
 pub struct Config {
+  pub etc_dir: &'static str,
+  pub tmp_dir: &'static str,
+
   #[validate(regex(path = "crate::utils::myregex::IPV4", message = "Bad IPv4 address"))]
   bind_ip: String,
 
@@ -51,15 +54,15 @@ pub struct Config {
 
   #[validate(regex(path = "crate::utils::myregex::IPV4_LIST", message = "Bad IPv4 address list"))]
   allowed_ips_list: String,
-  
   pub allowed_ips: Vec<String>,
 
   #[validate(regex = "crate::utils::myregex::ALPHA_NUM_2")]
   #[validate(length(min = 16, max = 128))]
   pub api_key: String,
 
-  pub etc_dir: String,
-  pub tmp_dir: String,
+  #[validate(regex(path = "crate::utils::myregex::ABSOLUTE_PATH_LIST", message = "Bad absolute path file names"))]
+  openvpn_status_files_list: String,
+  pub openvpn_status_files: Vec<String>,
 
   pub mutex: MyMutex
 }
@@ -72,6 +75,9 @@ impl Config {
     let cpus = num_cpus::get();
 
     let mut cfg = Config {
+      etc_dir: "./etc/",
+      tmp_dir: "./tmp/",
+
       bind_ip: env::var("BIND_IP").unwrap_or(String::from("0.0.0.0")),
       bind_port: env::var("BIND_PORT").unwrap_or(String::from("33033")).parse::<u16>().unwrap_or(33033),
       workers: env::var("WORKERS").unwrap_or(cpus.to_string()).parse::<usize>().unwrap_or(cpus),
@@ -81,8 +87,9 @@ impl Config {
       allowed_ips: vec![],
       
       api_key: env::var("API_KEY").unwrap_or(String::from("")),
-      etc_dir: "./etc/".to_string(),
-      tmp_dir: "./tmp/".to_string(),
+      
+      openvpn_status_files_list: env::var("OPENVPN_STATUS_FILES").unwrap_or(String::from("/etc/openvpn/openvpn-status.log")),
+      openvpn_status_files: vec![],
 
       mutex: MyMutex {
         openvpn: Arc::new(Mutex::new(0)),
@@ -92,7 +99,7 @@ impl Config {
 
     cfg.validate()?;
  
-    // Create list of allowed IPs.
+    // Create the list of allowed IPs.
     if cfg.allowed_ips_list.len() > 1 {
       let ips: Vec<&str> = cfg.allowed_ips_list.split(" ").collect();
       for ip in ips.into_iter() {
@@ -100,6 +107,14 @@ impl Config {
       }  
     }
     
+    // Create the list of OpenVPN status files.
+    if cfg.openvpn_status_files_list.len() > 1 {
+      let files: Vec<&str> = cfg.openvpn_status_files_list.split(",").collect();
+      for file in files.into_iter() {
+        cfg.openvpn_status_files.push(String::from(file));
+      }  
+    }
+
     // Create config and temporary directories if don't exist.
     fs::create_dir_all(&cfg.etc_dir)?;
     fs::create_dir_all(&cfg.tmp_dir)?;
