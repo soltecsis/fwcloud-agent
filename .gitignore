@@ -2,4 +2,5 @@
 /etc
 /logs
 /tmp
+/data
 .env

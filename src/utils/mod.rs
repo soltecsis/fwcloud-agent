@@ -24,3 +24,4 @@ pub mod myregex;
 pub mod http_files;
 pub mod files_list;
 pub mod cmd;
+pub mod workers;

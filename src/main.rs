@@ -31,11 +31,13 @@ mod utils;
 
 use log::{info, warn};
 use std::sync::Arc;
-use config::Config;
 use actix_web::{App, HttpServer, middleware};
 use actix_web_requestid::{RequestIDService};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use env_logger::Env;
+
+use config::Config;
+use utils::workers;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -45,6 +47,9 @@ async fn main() -> std::io::Result<()> {
 
     let cfg = Arc::new(Config::new().unwrap());
     let cfg_main_thread = cfg.clone();
+
+    // Start workers threads.
+    workers::openvpn_status_collector(cfg.clone());
     
     let server = HttpServer::new( move || {
         App::new()
