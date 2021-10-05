@@ -22,7 +22,7 @@
 
 use serde::Deserialize;
 use std::fs::{self, File};
-use std::io::{self, prelude::*, BufReader};
+use std::io::{self, BufReader, BufWriter, prelude::*};
 use std::path::Path;
 use sha2::{Sha256, Digest};
 
@@ -96,6 +96,56 @@ impl FilesList {
     }
 
     Ok(csv)
+  }
+
+
+  pub fn head_remove(&self, inx: usize, max_lines: usize) -> Result<Vec<String>> {
+    let mut data: Vec<String> = vec![];
+
+    let path = format!("{}/{}",self.dir,self.files[inx]);
+    let path_tmp = format!("{}.tmp",path);
+
+    {
+      let fr = File::open(&path)?;
+      let reader = BufReader::new(&fr);
+      
+      let fw = File::create(&path_tmp)?;
+      let mut writer = BufWriter::new(&fw);
+
+      for (n, l) in reader.lines().enumerate() {
+        let line = l?;
+
+        if n < max_lines {
+          data.push(line);
+        } else {
+          // If we arrive here we have more lines in the file that must be preserved.
+          writeln!(writer, "{}", line)?;
+        }
+      }
+    }
+
+    fs::copy(&path_tmp,&path)?;
+    fs::remove_file(&path_tmp)?;
+
+    Ok(data)
+  }
+
+
+  pub fn chdir(&mut self, new_dir: &str) {
+    self.dir = String::from(new_dir);
+  }
+
+
+  pub fn rename(&mut self, inx: usize, new_name: &str) {
+    self.files[inx] = String::from(new_name);
+  }
+
+  pub fn dir(&mut self) -> String {
+    String::from(&self.dir)
+  }
+
+  pub fn name(&mut self, inx: usize) -> String {
+    String::from(&self.files[inx])
   }
 
   pub fn len(&self) -> usize {

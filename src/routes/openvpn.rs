@@ -30,7 +30,7 @@ use crate::config::Config;
 use crate::utils::http_files::HttpFiles;
 use crate::utils::files_list::FilesList;
 
-use crate::errors::Result;
+use crate::errors::{FwcError, Result};
 //use std::{thread, time};
 use thread_id;
 
@@ -90,6 +90,39 @@ pub async fn files_sha256(mut files_list: web::Json<FilesList>, cfg: web::Data<A
   debug!("OpenVPN mutex unlocked (thread id: {})!", thread_id::get());
 
   let mut resp = HttpResponse::Ok().body(result);
+  resp.headers_mut().insert(
+    header ::CONTENT_TYPE,
+    header::HeaderValue::from_static("text/csv"),
+  );
+
+  Ok(resp)
+}
+
+
+#[put("/get/status")]
+pub async fn get_status(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+  debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
+  let mutex = Arc::clone(&cfg.mutex.openvpn);
+  let mutex_data = mutex.lock().unwrap();
+  debug!("OpenVPN mutex locked (thread id: {})!", thread_id::get());
+
+  // Only one OpenVPN status file must be indicated in the request.
+  if files_list.len() != 1 {
+    return Err(FwcError::OnlyOneFileExpected);
+  }  
+  
+  let file_name = format!("{}/{}.data",files_list.dir(),files_list.name(0)).replace("/", "_");
+  files_list.chdir(&cfg.data_dir);
+  files_list.rename(0, &file_name);
+  
+  let mut result = files_list.head_remove(0,cfg.openvpn_status_request_max_lines)?;
+  result.insert(0, String::from("Timestamp,Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since"));
+
+  debug!("Unlocking OpenVPM mutex (thread id: {}) ...", thread_id::get());
+  drop(mutex_data);
+  debug!("OpenVPN mutex unlocked (thread id: {})!", thread_id::get());
+
+  let mut resp = HttpResponse::Ok().body(result.join("\n"));
   resp.headers_mut().insert(
     header ::CONTENT_TYPE,
     header::HeaderValue::from_static("text/csv"),

@@ -62,7 +62,7 @@ impl OpenVPNStCollectorInner {
                     data_file: format!("{}/{}.data",cfg.data_dir,file.replace("/", "_")),
                     last_update: 0
                 });
-            }  
+            }
         }
 
         data
@@ -129,6 +129,7 @@ impl OpenVPNStCollectorInner {
 
     pub fn collect_all_files_data(&mut self) {
         for item in self.openvpn_status_files.iter_mut() {
+            debug!("Collecting OpenVPN status data from file: {}",item.st_file);
             match OpenVPNStCollectorInner::collect_status_data(item) {
                 Ok(_) => (),
                 Err(e) => error!("Collecting OpenVPN status data from file: {} ({}) ",item.st_file,e)
@@ -158,15 +159,15 @@ impl OpenVPNStCollector {
                 let mutex_data = mutex.lock().unwrap();
                 debug!("OpenVPN mutex locked (thread id: {})!", thread_id::get());
               
-                let mut recollector = local_self.lock().unwrap();
-                recollector.collect_all_files_data();
+                let mut collector = local_self.lock().unwrap();
+                collector.collect_all_files_data();
 
                 debug!("Unlocking OpenVPM mutex (thread id: {}) ...", thread_id::get());
                 drop(mutex_data);
                 debug!("OpenVPN mutex unlocked (thread id: {})!", thread_id::get());
 
                 // Pause between samplings.
-                thread::sleep(time::Duration::from_secs(recollector.sampling_interval));
+                thread::sleep(time::Duration::from_secs(collector.sampling_interval));
             }
         });
     }

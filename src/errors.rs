@@ -66,6 +66,9 @@ pub enum FwcError {
   #[error("File name was not the expected one")]
   NotExpectedFileName,
 
+  #[error("Only one file expected in request")]
+  OnlyOneFileExpected,
+
   #[error("{0}")]
   Internal(&'static str),
 
