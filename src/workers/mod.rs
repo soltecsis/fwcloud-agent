@@ -20,7 +20,4 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-pub mod myregex;
-pub mod http_files;
-pub mod files_list;
-pub mod cmd;
+pub mod openvpn_status_collector;

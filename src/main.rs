@@ -28,6 +28,7 @@ mod config;
 mod auth;
 mod routes;
 mod utils;
+mod workers;
 
 use log::{info, warn};
 use std::sync::Arc;
@@ -37,7 +38,8 @@ use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use env_logger::Env;
 
 use config::Config;
-use utils::workers;
+use crate::workers::openvpn_status_collector::OpenVPNStCollector;
+
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -49,7 +51,7 @@ async fn main() -> std::io::Result<()> {
     let cfg_main_thread = cfg.clone();
 
     // Start workers threads.
-    workers::openvpn_status_collector(cfg.clone());
+    OpenVPNStCollector::new(&cfg).start(cfg.clone());
     
     let server = HttpServer::new( move || {
         App::new()

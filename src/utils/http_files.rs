@@ -33,6 +33,14 @@ use validator::Validate;
 use crate::utils::cmd::run_cmd;
 use crate::errors::{FwcError, Result};
 
+struct FileData {
+  src_path: String,
+  src_name: String,
+  dst_path: String,
+  dst_name: String,
+  size: usize
+}
+
 #[derive(Validate)]
 pub struct HttpFiles {
   tmp_dir: &'static str,
@@ -45,14 +53,6 @@ pub struct HttpFiles {
   max_file_size: usize,
   expected_files: u32,
   n_files: u32
-}
-
-struct FileData {
-  src_path: String,
-  src_name: String,
-  dst_path: String,
-  dst_name: String,
-  size: usize
 }
 
 impl HttpFiles {
