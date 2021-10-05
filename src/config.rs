@@ -65,7 +65,7 @@ pub struct Config {
   pub openvpn_status_files_list: String,
 
   #[validate(range(min = 1))]
-  pub openvpn_status_sampling_interval: usize,
+  pub openvpn_status_sampling_interval: u64,
 
   pub mutex: MyMutex
 }
@@ -93,7 +93,7 @@ impl Config {
       api_key: env::var("API_KEY").unwrap_or(String::from("")),
       
       openvpn_status_files_list: env::var("OPENVPN_STATUS_FILES").unwrap_or(String::from("/etc/openvpn/openvpn-status.log")),
-      openvpn_status_sampling_interval: env::var("OPENVPN_STATUS_SAMPLING_INTERVAL").unwrap_or(String::from("30")).parse::<usize>().unwrap_or(30),
+      openvpn_status_sampling_interval: env::var("OPENVPN_STATUS_SAMPLING_INTERVAL").unwrap_or(String::from("30")).parse::<u64>().unwrap_or(30),
 
       mutex: MyMutex {
         openvpn: Arc::new(Mutex::new(0)),

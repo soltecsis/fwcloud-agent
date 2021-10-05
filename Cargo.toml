@@ -37,6 +37,7 @@ thread-id = "4.0.0"
 subprocess = "0.2.7"
 sha2 = "0.9.8"
 hex = "0.4.3"
+chrono = "0.4.19"
 
 [dev-dependencies]
 actix-rt = "2.2.0"
