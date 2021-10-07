@@ -70,6 +70,9 @@ pub struct Config {
   #[validate(range(min = 1, max = 10_000))]
   pub openvpn_status_request_max_lines: usize,
 
+  #[validate(range(min = 1))]
+  pub openvpn_status_cache_max_size: usize,
+
   pub mutex: MyMutex
 }
 
@@ -97,7 +100,8 @@ impl Config {
       
       openvpn_status_files_list: env::var("OPENVPN_STATUS_FILES").unwrap_or(String::from("/etc/openvpn/openvpn-status.log")),
       openvpn_status_sampling_interval: env::var("OPENVPN_STATUS_SAMPLING_INTERVAL").unwrap_or(String::from("30")).parse::<u64>().unwrap_or(30),
-      openvpn_status_request_max_lines: env::var("OPENVPN_STATUS_REQUEST_MAX_LINES").unwrap_or(String::from("1000")).parse::<usize>().unwrap_or(30),
+      openvpn_status_request_max_lines: env::var("OPENVPN_STATUS_REQUEST_MAX_LINES").unwrap_or(String::from("1000")).parse::<usize>().unwrap_or(1000),
+      openvpn_status_cache_max_size: env::var("OPENVPN_STATUS_CACHE_MAX_SIZE").unwrap_or(String::from("10_485_760")).parse::<usize>().unwrap_or(10_485_760),
 
       mutex: MyMutex {
         openvpn: Arc::new(Mutex::new(0)),

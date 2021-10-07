@@ -33,12 +33,13 @@ use crate::config::Config;
 struct OpenVPNStFile {
     st_file: String,
     tmp_file: String,
-    data_file: String,
+    cache_file: String,
     last_update: i64
 }
 
 struct OpenVPNStCollectorInner {
     openvpn_status_files: Vec<OpenVPNStFile>,
+    max_size: usize,
     sampling_interval: u64
 }
 pub struct OpenVPNStCollector { 
@@ -50,6 +51,7 @@ impl OpenVPNStCollectorInner {
     pub fn new(cfg: &Config) -> Self { 
         let mut data = OpenVPNStCollectorInner {
             openvpn_status_files: vec![],
+            max_size: cfg.openvpn_status_cache_max_size,
             sampling_interval: cfg.openvpn_status_sampling_interval
         }; 
 
@@ -60,7 +62,7 @@ impl OpenVPNStCollectorInner {
                 data.openvpn_status_files.push( OpenVPNStFile {
                     st_file: String::from(file),
                     tmp_file: format!("{}/{}.tmp",cfg.tmp_dir,file.replace("/", "_")),
-                    data_file: format!("{}/{}.data",cfg.data_dir,file.replace("/", "_")),
+                    cache_file: format!("{}/{}.data",cfg.data_dir,file.replace("/", "_")),
                     last_update: 0
                 });
             }
@@ -69,7 +71,12 @@ impl OpenVPNStCollectorInner {
         data
     }
 
-    fn collect_status_data(item: &mut OpenVPNStFile) -> std::io::Result<()> {
+    fn collect_status_data(item: &mut OpenVPNStFile, max_size: usize) -> std::io::Result<()> {
+        if fs::metadata(&item.cache_file)?.len() > max_size as u64 {
+            error!("OpenVPN status cache file for '{}' too big",item.st_file);
+            return Ok(())
+        }
+
         // Copy tye current OpenVPN status data into a temporary file.
         fs::copy(&item.st_file,&item.tmp_file)?;
 
@@ -80,7 +87,7 @@ impl OpenVPNStCollectorInner {
             .write(true)
             .append(true)
             .create(true)
-            .open(&item.data_file)?;
+            .open(&item.cache_file)?;
 
         let mut current_update: i64 = 0;
         for (n, l) in reader.lines().enumerate().skip(1) {
@@ -131,7 +138,7 @@ impl OpenVPNStCollectorInner {
     pub fn collect_all_files_data(&mut self) {
         for item in self.openvpn_status_files.iter_mut() {
             debug!("Collecting OpenVPN status data from file: {}",item.st_file);
-            match OpenVPNStCollectorInner::collect_status_data(item) {
+            match OpenVPNStCollectorInner::collect_status_data(item, self.max_size) {
                 Ok(_) => (),
                 Err(e) => error!("Collecting OpenVPN status data from file: {} ({}) ",item.st_file,e)
             }
