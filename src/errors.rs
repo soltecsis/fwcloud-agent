@@ -82,7 +82,10 @@ pub enum FwcError {
   BlockingError(#[from] actix_web::error::BlockingError<std::io::Error>),
 
   #[error(transparent)]
-  PopenError(#[from] subprocess::PopenError)
+  PopenError(#[from] subprocess::PopenError),
+
+  #[error(transparent)]
+  SendError(#[from] std::sync::mpsc::SendError<u8>)
 }
 
 impl ResponseError for FwcError {

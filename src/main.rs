@@ -38,7 +38,7 @@ use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use env_logger::Env;
 
 use config::Config;
-use crate::workers::openvpn_status_collector::OpenVPNStCollector;
+use crate::workers::{ WorkersChannels, openvpn_status_collector::OpenVPNStCollector};
 
 
 #[actix_web::main]
@@ -51,11 +51,14 @@ async fn main() -> std::io::Result<()> {
     let cfg_main_thread = cfg.clone();
 
     // Start workers threads.
-    OpenVPNStCollector::new(&cfg).start(cfg.clone());
-    
+    let workers_channels = WorkersChannels {
+        openvpn_st_collector: OpenVPNStCollector::new(&cfg).start(cfg.clone())
+    };
+
     let server = HttpServer::new( move || {
         App::new()
             .data(cfg.clone())
+            .data(workers_channels.clone())
             .wrap(RequestIDService::default())
             .wrap(middleware::Logger::default())
             .wrap(auth::Authorize)

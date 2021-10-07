@@ -41,6 +41,7 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(openvpn::files_remove)
             .service(openvpn::files_sha256)
             .service(openvpn::get_status)
+            .service(openvpn::update_status)
         )
 
         .service(web::scope("/interfaces/")

@@ -20,4 +20,11 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+use std::sync::mpsc::Sender;
+
 pub mod openvpn_status_collector;
+
+#[derive(Clone)]
+pub struct WorkersChannels {
+    pub openvpn_st_collector: Sender<u8>
+}

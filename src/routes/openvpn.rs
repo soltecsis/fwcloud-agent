@@ -21,7 +21,6 @@
 */
 
 use std::sync::Arc;
-
 use actix_web::{http::header, HttpResponse, post, delete, put, web};
 use actix_multipart::Multipart;
 use log::debug;
@@ -31,6 +30,7 @@ use crate::utils::http_files::HttpFiles;
 use crate::utils::files_list::FilesList;
 
 use crate::errors::{FwcError, Result};
+use crate::workers::WorkersChannels;
 //use std::{thread, time};
 use thread_id;
 
@@ -129,4 +129,11 @@ pub async fn get_status(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc
   );
 
   Ok(resp)
+}
+
+
+#[put("/update/status")]
+pub async fn update_status(workers_channels: web::Data<WorkersChannels>) -> Result<HttpResponse> {
+  workers_channels.openvpn_st_collector.send(1)?;
+  Ok(HttpResponse::Ok().finish())
 }

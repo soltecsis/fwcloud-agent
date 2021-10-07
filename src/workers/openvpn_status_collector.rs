@@ -26,6 +26,7 @@ use std::sync::Arc;
 use log::{info, warn, error, debug};
 use std::io::{BufReader, BufRead, Write};
 use chrono::NaiveDateTime;
+use std::sync::mpsc::{self, Sender};
 
 use crate::config::Config;
 
@@ -147,8 +148,10 @@ impl OpenVPNStCollector {
         } 
     }
 
-    pub fn start(&self, cfg: Arc<Config>) {
+    pub fn start(&self, cfg: Arc<Config>) -> Sender<u8> {
         let local_self = self.inner.clone();
+
+        let (tx, rx) = mpsc::channel();
 
         thread::spawn(move || {
             info!("Starting OpenVPN status data collector thread (id: {})", thread_id::get());
@@ -167,8 +170,18 @@ impl OpenVPNStCollector {
                 debug!("OpenVPN mutex unlocked (thread id: {})!", thread_id::get());
 
                 // Pause between samplings.
-                thread::sleep(time::Duration::from_secs(collector.sampling_interval));
+                for _n in 0..collector.sampling_interval {
+                    thread::sleep(time::Duration::from_secs(1));
+
+                    let cmd = rx.try_recv().unwrap_or(0);
+                    if cmd == 1 {
+                        debug!("OpenVPN status data update requested");
+                        break; 
+                    }
+                }
             }
         });
+
+        tx
     }
 }
