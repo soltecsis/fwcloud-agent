@@ -99,6 +99,23 @@ impl FilesList {
   }
 
 
+  pub fn dump(&self, inx: usize) -> Result<Vec<String>> {
+    let mut data: Vec<String> = vec![];
+
+    let path = format!("{}/{}",self.dir,self.files[inx]);
+
+    let fr = File::open(&path)?;
+    let reader = BufReader::new(&fr);
+    
+    for l in reader.lines() {
+      let line = l?;
+      data.push(line);
+    }
+
+    Ok(data)
+  }
+
+
   pub fn head_remove(&self, inx: usize, max_lines: usize) -> Result<Vec<String>> {
     let mut data: Vec<String> = vec![];
 

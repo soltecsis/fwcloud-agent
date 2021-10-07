@@ -137,3 +137,22 @@ pub async fn update_status(workers_channels: web::Data<WorkersChannels>) -> Resu
   workers_channels.openvpn_st_collector.send(1)?;
   Ok(HttpResponse::Ok().finish())
 }
+
+
+#[put("/get/status/rt")]
+pub async fn get_status_rt(files_list: web::Json<FilesList>) -> Result<HttpResponse> {
+  // Only one OpenVPN status file must be indicated in the request.
+  if files_list.len() != 1 {
+    return Err(FwcError::OnlyOneFileExpected);
+  }  
+  
+  let result = files_list.dump(0)?;
+
+  let mut resp = HttpResponse::Ok().body(result.join("\n"));
+  resp.headers_mut().insert(
+    header ::CONTENT_TYPE,
+    header::HeaderValue::from_static("text/plain"),
+  );
+
+  Ok(resp)
+}
