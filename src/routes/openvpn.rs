@@ -150,7 +150,7 @@ pub async fn get_status_rt(files_list: web::Json<FilesList>) -> Result<HttpRespo
 
   let mut resp = HttpResponse::Ok().body(result.join("\n"));
   resp.headers_mut().insert(
-    header ::CONTENT_TYPE,
+    header::CONTENT_TYPE,
     header::HeaderValue::from_static("text/plain"),
   );
 
