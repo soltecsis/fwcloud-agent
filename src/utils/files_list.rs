@@ -120,6 +120,11 @@ impl FilesList {
     let mut data: Vec<String> = vec![];
 
     let path = format!("{}/{}",self.dir,self.files[inx]);
+    // If OpenVPN status cache file doesn't exists return empty data.
+    if !Path::new(&path).is_file() { 
+      return Ok(data)
+    }
+
     let path_tmp = format!("{}.tmp",path);
 
     {

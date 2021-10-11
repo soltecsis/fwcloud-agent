@@ -20,7 +20,7 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::{fs, fs::File, sync::Mutex, thread, time};
+use std::{fs, fs::File, path::Path, sync::Mutex, thread, time};
 use thread_id;
 use std::sync::Arc;
 use log::{info, warn, error, debug};
@@ -72,7 +72,7 @@ impl OpenVPNStCollectorInner {
     }
 
     fn collect_status_data(item: &mut OpenVPNStFile, max_size: usize) -> std::io::Result<()> {
-        if fs::metadata(&item.cache_file)?.len() > max_size as u64 {
+        if Path::new(&item.cache_file).is_file() && fs::metadata(&item.cache_file)?.len() > max_size as u64 {
             error!("OpenVPN status cache file for '{}' too big",item.st_file);
             return Ok(())
         }
