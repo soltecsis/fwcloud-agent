@@ -61,8 +61,13 @@ pub struct Config {
   #[validate(length(min = 16, max = 128))]
   pub api_key: String,
 
-  #[validate(regex(path = "crate::utils::myregex::ABSOLUTE_PATH_LIST", message = "Bad absolute path file names"))]
-  pub openvpn_status_files_list: String,
+  #[validate(regex(path = "crate::utils::myregex::ABSOLUTE_PATH_LIST", message = "Bad absolute path file names for FWCLOUD_SCRIPT_PATHS"))]
+  fwcloud_script_paths_list: String,
+  pub fwcloud_script_paths: Vec<String>,
+
+  #[validate(regex(path = "crate::utils::myregex::ABSOLUTE_PATH_LIST", message = "Bad absolute path file names OPENVPN_STATUS_FILES"))]
+  openvpn_status_files_list: String,
+  pub openvpn_status_files: Vec<String>,
 
   #[validate(range(min = 1))]
   pub openvpn_status_sampling_interval: u64,
@@ -97,8 +102,12 @@ impl Config {
       allowed_ips: vec![],
       
       api_key: env::var("API_KEY").unwrap_or(String::from("")),
+
+      fwcloud_script_paths_list: env::var("FWCLOUD_SCRIPT_PATHS").unwrap_or(String::from("/etc/fwcloud/fwcloud.sh,/config/scripts/post-config.d/fwcloud.sh")),
+      fwcloud_script_paths: vec![],
       
-      openvpn_status_files_list: env::var("OPENVPN_STATUS_FILES").unwrap_or(String::from("/etc/openvpn/openvpn-status.log")),
+      openvpn_status_files_list: env::var("OPENVPN_STATUS_FILES").unwrap_or(String::from("")),
+      openvpn_status_files: vec![],
       openvpn_status_sampling_interval: env::var("OPENVPN_STATUS_SAMPLING_INTERVAL").unwrap_or(String::from("30")).parse::<u64>().unwrap_or(30),
       openvpn_status_request_max_lines: env::var("OPENVPN_STATUS_REQUEST_MAX_LINES").unwrap_or(String::from("1000")).parse::<usize>().unwrap_or(1000),
       openvpn_status_cache_max_size: env::var("OPENVPN_STATUS_CACHE_MAX_SIZE").unwrap_or(String::from("10_485_760")).parse::<usize>().unwrap_or(10_485_760),
@@ -112,13 +121,18 @@ impl Config {
     cfg.validate()?;
  
     // Create the list of allowed IPs.
-    if cfg.allowed_ips_list.len() > 1 {
-      let ips: Vec<&str> = cfg.allowed_ips_list.split(" ").collect();
-      for ip in ips.into_iter() {
-        cfg.allowed_ips.push(String::from(ip));
-      }  
-    }
+    for ip in cfg.allowed_ips_list.split(" ").filter(|&x| !x.is_empty()) {
+      cfg.allowed_ips.push(String::from(ip));
+    }  
     
+    for file in cfg.fwcloud_script_paths_list.split(",").filter(|&x| !x.is_empty()) {
+      cfg.fwcloud_script_paths.push(String::from(file.trim()));
+    }  
+
+    for file in cfg.openvpn_status_files_list.split(",").filter(|&x| !x.is_empty()) {
+      cfg.openvpn_status_files.push(String::from(file.trim()));
+    }  
+
     // Create config and temporary directories if don't exist.
     fs::create_dir_all(cfg.etc_dir)?;
     fs::create_dir_all(cfg.tmp_dir)?;

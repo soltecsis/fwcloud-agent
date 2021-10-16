@@ -78,7 +78,7 @@ impl HttpFiles {
     Ok(())
   }
 
-  pub async fn fwcloud_script(&mut self, payload: Multipart) -> Result<HttpResponse> {
+  pub async fn fwcloud_script(&mut self, payload: Multipart, fwcloud_script_paths: &Vec<String>) -> Result<HttpResponse> {
     self.expected_files = 1;
     self.extract_multipart_data(payload).await?;
     self.check_data()?;
@@ -89,8 +89,18 @@ impl HttpFiles {
 
     self.move_tmp_files()?;
 
-    // Now run the FWCloud script with the install option.
-    Ok(run_cmd("sh", &[&self.files[0].dst_path[..], "install"])?)
+    // Install de FWCloud script.
+    let mut res = run_cmd("sh", &[&self.files[0].dst_path[..], "install"])?;
+
+    // Load policy.
+    for file in fwcloud_script_paths.iter() {
+      if Path::new(file).is_file() {
+        res = run_cmd("sh", &[&file[..], "start"])?;
+        break;
+      }
+    }
+
+    Ok(res)
   }
 
   async fn extract_multipart_data(&mut self, mut payload: Multipart) -> Result<()> {

@@ -56,16 +56,13 @@ impl OpenVPNStCollectorInner {
         }; 
 
         // Create the list of OpenVPN status files.
-        if cfg.openvpn_status_files_list.len() > 1 {
-            let files: Vec<&str> = cfg.openvpn_status_files_list.split(",").collect();
-            for file in files.into_iter() {
-                data.openvpn_status_files.push( OpenVPNStFile {
-                    st_file: String::from(file),
-                    tmp_file: format!("{}/{}.tmp",cfg.tmp_dir,file.replace("/", "_")),
-                    cache_file: format!("{}/{}.data",cfg.data_dir,file.replace("/", "_")),
-                    last_update: 0
-                });
-            }
+        for file in cfg.openvpn_status_files.iter() {
+            data.openvpn_status_files.push( OpenVPNStFile {
+                st_file: String::from(file),
+                tmp_file: format!("{}/{}.tmp",cfg.tmp_dir,file.replace("/", "_")),
+                cache_file: format!("{}/{}.data",cfg.data_dir,file.replace("/", "_")),
+                last_update: 0
+            });
         }
 
         data
@@ -143,7 +140,10 @@ impl OpenVPNStCollectorInner {
                 Err(e) => error!("Collecting OpenVPN status data from file: {} ({}) ",item.st_file,e)
             }
         }
+    }
 
+    pub fn len(&self) -> usize {
+        self.openvpn_status_files.len()
     }
 }
 
@@ -162,6 +162,9 @@ impl OpenVPNStCollector {
 
         thread::spawn(move || {
             info!("Starting OpenVPN status data collector thread (id: {})", thread_id::get());
+            if local_self.lock().unwrap().len() == 0 {
+                info!("List of OpenVPN status files is empty")
+            } 
 
             loop {
                 debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
