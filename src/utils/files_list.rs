@@ -36,7 +36,7 @@ pub struct FilesList {
 
 impl FilesList {
   pub fn remove(&self) -> Result<()> {
-    if !Path::new(&self.dir).is_dir() {
+    if !self.dir_exists() {
       return Err(FwcError::DirNotFound);
     }
 
@@ -51,7 +51,7 @@ impl FilesList {
   }
 
   pub fn get_files_in_dir(&mut self) -> Result<()> {
-    if !Path::new(&self.dir).is_dir() {
+    if !self.dir_exists() {
       return Err(FwcError::DirNotFound);
     }
 
@@ -164,6 +164,10 @@ impl FilesList {
 
   pub fn dir(&mut self) -> String {
     String::from(&self.dir)
+  }
+
+  pub fn dir_exists(&self) -> bool {
+    if Path::new(&self.dir).is_dir() { true } else { false }
   }
 
   pub fn name(&mut self, inx: usize) -> String {

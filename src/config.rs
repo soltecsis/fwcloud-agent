@@ -61,11 +61,11 @@ pub struct Config {
   #[validate(length(min = 16, max = 128))]
   pub api_key: String,
 
-  #[validate(regex(path = "crate::utils::myregex::ABSOLUTE_PATH_LIST", message = "Bad absolute path file names for FWCLOUD_SCRIPT_PATHS"))]
+  #[validate(regex(path = "crate::utils::myregex::ABSOLUTE_PATH_LIST", message = "Bad absolute path file names in FWCLOUD_SCRIPT_PATHS"))]
   fwcloud_script_paths_list: String,
   pub fwcloud_script_paths: Vec<String>,
 
-  #[validate(regex(path = "crate::utils::myregex::ABSOLUTE_PATH_LIST", message = "Bad absolute path file names OPENVPN_STATUS_FILES"))]
+  #[validate(regex(path = "crate::utils::myregex::ABSOLUTE_PATH_LIST", message = "Bad absolute path file names in OPENVPN_STATUS_FILES"))]
   openvpn_status_files_list: String,
   pub openvpn_status_files: Vec<String>,
 

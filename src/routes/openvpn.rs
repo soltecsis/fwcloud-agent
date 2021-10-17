@@ -79,11 +79,18 @@ pub async fn files_sha256(mut files_list: web::Json<FilesList>, cfg: web::Data<A
   let mutex_data = mutex.lock().unwrap();
   debug!("OpenVPN mutex locked (thread id: {})!", thread_id::get());
 
-  // In no files supplied then compute the sha256 has of all files into the directory.
-  if files_list.len() == 0 {
-    files_list.get_files_in_dir()?;
+  let result: String;
+
+  if files_list.dir_exists() {
+    // If no files supplied then compute the sha256 has of all files into the directory.
+    if files_list.len() == 0 {
+      files_list.get_files_in_dir()?;
+    }
+    result = files_list.sha256(true)?;
   }
-  let result = files_list.sha256(true)?;
+  else { // If the dir doesn't exists return an empty result.
+    result = String::from("file,sha256\n");
+  }
 
   debug!("Unlocking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   drop(mutex_data);

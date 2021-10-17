@@ -200,6 +200,11 @@ impl HttpFiles {
 
   fn move_tmp_files(&mut self) -> Result<()> {
     for file_data in self.files.iter() {
+      // If destination directory doesn't exists try to create it.
+      if !Path::new(&file_data.dst_path).is_dir() {
+        fs::create_dir_all(&file_data.dst_path)?;
+      }
+
       fs::copy(&file_data.src_path,&file_data.dst_path)?;
       fs::remove_file(&file_data.src_path)?;
 
