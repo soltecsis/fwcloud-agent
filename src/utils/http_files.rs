@@ -45,6 +45,7 @@ struct FileData {
 pub struct HttpFiles {
   tmp_dir: &'static str,
   dst_dir: String,
+  create_dst_dir: bool,
   files: Vec<FileData>,
   #[validate(regex(path = "crate::utils::myregex::FILE_PERMISSIONS", message = "Invalid file permissions"))]
   perms: String,
@@ -56,10 +57,11 @@ pub struct HttpFiles {
 }
 
 impl HttpFiles {
-  pub fn new(tmp_dir: &'static str) -> Self {
+  pub fn new(tmp_dir: &'static str, create_dst_dir: bool) -> Self {
     HttpFiles {
       tmp_dir,
       dst_dir: String::from(""),
+      create_dst_dir,
       files: Vec::new(),
       perms: String::from("640"),
       perms_u32: 420,
@@ -190,8 +192,13 @@ impl HttpFiles {
     // If the destination directory doesn't exists we will response with error before processing the files
     // data.
     if name == "dst_dir" {
-      if !Path::new(&self.dst_dir).is_dir() {
-        return Err(FwcError::DirNotFound);
+      if !Path::new(&self.dst_dir).is_dir() { // If destination directory doesn't exists.
+        if self.create_dst_dir {
+          // Create the destination directory if it doesn't exists.
+          fs::create_dir_all(&self.dst_dir)?;
+        } else {
+          return Err(FwcError::DirNotFound);
+        }
       }
     }
 
@@ -200,11 +207,6 @@ impl HttpFiles {
 
   fn move_tmp_files(&mut self) -> Result<()> {
     for file_data in self.files.iter() {
-      // If destination directory doesn't exists try to create it.
-      if !Path::new(&file_data.dst_path).is_dir() {
-        fs::create_dir_all(&file_data.dst_path)?;
-      }
-
       fs::copy(&file_data.src_path,&file_data.dst_path)?;
       fs::remove_file(&file_data.src_path)?;
 
