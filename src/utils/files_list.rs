@@ -40,8 +40,8 @@ impl FilesList {
       return Err(FwcError::DirNotFound);
     }
 
-    for file in self.files.iter() {
-      let path = format!("{}/{}",self.dir,file);
+    for inx in 0..self.len() {
+      let path = self.path(inx);
       if Path::new(&path).is_file() {
         fs::remove_file(path)?;
       }
@@ -68,8 +68,8 @@ impl FilesList {
   pub fn sha256(&self, ignore_comments: bool) -> Result<String> {
     let mut csv = String::from("file,sha256\n");
 
-    for file in self.files.iter() {
-      let path = format!("{}/{}",self.dir,file);
+    for inx in 0..self.len() {
+      let path = self.path(inx);
       if Path::new(&path).is_file() {
         
         let mut file_stream = File::open(&path)?;
@@ -91,7 +91,7 @@ impl FilesList {
 
         let hash = hex::encode(sha256.finalize().as_slice());
 
-        csv.push_str(&format!("{},{}\n",file,hash));
+        csv.push_str(&format!("{},{}\n",self.name(inx),hash));
       }
     }
 
@@ -102,9 +102,7 @@ impl FilesList {
   pub fn dump(&self, inx: usize) -> Result<Vec<String>> {
     let mut data: Vec<String> = vec![];
 
-    let path = format!("{}/{}",self.dir,self.files[inx]);
-
-    let fr = File::open(&path)?;
+    let fr = File::open(self.path(inx))?;
     let reader = BufReader::new(&fr);
     
     for l in reader.lines() {
@@ -119,7 +117,7 @@ impl FilesList {
   pub fn head_remove(&self, inx: usize, max_lines: usize) -> Result<Vec<String>> {
     let mut data: Vec<String> = vec![];
 
-    let path = format!("{}/{}",self.dir,self.files[inx]);
+    let path = self.path(inx);
     // If OpenVPN status cache file doesn't exists return empty data.
     if !Path::new(&path).is_file() { 
       return Ok(data)
@@ -152,17 +150,19 @@ impl FilesList {
     Ok(data)
   }
 
+  pub fn path(&self, inx: usize) -> String {
+    format!("{}/{}",self.dir(),self.name(inx))
+  }
 
   pub fn chdir(&mut self, new_dir: &str) {
     self.dir = String::from(new_dir);
   }
 
-
   pub fn rename(&mut self, inx: usize, new_name: &str) {
     self.files[inx] = String::from(new_name);
   }
 
-  pub fn dir(&mut self) -> String {
+  pub fn dir(&self) -> String {
     String::from(&self.dir)
   }
 
@@ -170,7 +170,7 @@ impl FilesList {
     if Path::new(&self.dir).is_dir() { true } else { false }
   }
 
-  pub fn name(&mut self, inx: usize) -> String {
+  pub fn name(&self, inx: usize) -> String {
     String::from(&self.files[inx])
   }
 
@@ -185,10 +185,14 @@ mod tests {
   use super::*;
   use rand::Rng;
   use uuid::Uuid;
+  use sha2::Sha256;
+  use std::fs::OpenOptions;
 
-  fn files_list_factory(dir: &str, n: usize) -> FilesList {
+  fn files_list_factory(n: usize) -> FilesList {
+    // Directory with a random name.
+    let dir = format!("./tests/playground/tmp/{}",Uuid::new_v4().to_string());
     let mut fl = FilesList {
-      dir: String::from(dir),
+      dir,
       files: vec![]
     };
 
@@ -199,18 +203,18 @@ mod tests {
     fl
   }
 
-  fn create_files(fl: &mut FilesList, content: &str) -> Result<()> {
+  fn create_files(fl: &mut FilesList) -> Result<()> {
+    fs::create_dir(&fl.dir())?;
+
     for inx in 0..fl.len() {
-      let path = format!("{}/{}",fl.dir(),fl.name(inx));
-      let fw = File::create(&path)?;
+      let fw = File::create(fl.path(inx))?;
       let mut writer = BufWriter::new(&fw);
-      writeln!(writer, "{}", content)?;
+      writeln!(writer, "{}_{}\n", Uuid::new_v4().to_string(),Uuid::new_v4().to_string())?;
     }
 
     // Verify that the files have been created.
     for inx in 0..fl.len() {
-      let path = format!("{}/{}",fl.dir(),fl.name(inx));
-      if !Path::new(&path).is_file() {
+      if !Path::new(&fl.path(inx)).is_file() {
         return Err(FwcError::Internal("File not created"));
       }
     }
@@ -218,10 +222,23 @@ mod tests {
     Ok(())
   }
 
+  fn sha256_cvs_string(fl: &mut FilesList) -> Result<String> {
+    let mut cvs = String::from("file,sha256\n");
+    for inx in 0..fl.len() {
+      let mut file = File::open(&fl.path(inx))?;
+      let mut sha256 = Sha256::new();
+      io::copy(&mut file, &mut sha256)?;
+      let line = format!("{},{}\n",&fl.name(inx),hex::encode(sha256.finalize()));
+      cvs.push_str(&line);
+    }
+
+    Ok(cvs)
+  }
+
 
   #[test]
   fn len_for_zero_files() {
-    let fl = files_list_factory("", 0);
+    let fl = files_list_factory(0);
     assert_eq!(fl.len(),0);
   }
 
@@ -229,43 +246,45 @@ mod tests {
   #[test]
   fn len_for_some_files() { 
     let n = rand::thread_rng().gen_range(1..6);
-    let fl = files_list_factory("", n);
+    let fl = files_list_factory(n);
     assert_eq!(fl.len(),n);
   }
 
 
   #[test]
   fn right_file_name() { 
-    let n = rand::thread_rng().gen_range(1..6);
-    let mut fl = files_list_factory("", n);
-    assert_eq!(fl.name(n-1),fl.files[n-1]);
+    let fl = files_list_factory(5);
+    let inx = rand::thread_rng().gen_range(0..5);
+    assert_eq!(fl.name(inx),fl.files[inx]);
   }
 
 
   #[test]
   fn directory_exists() { 
-    let fl = files_list_factory("./tests/playground/tmp", 0);
+    let fl = files_list_factory(0);
+    fs::create_dir(&fl.dir()).unwrap();
     assert!(fl.dir_exists());
+    fs::remove_dir(fl.dir()).unwrap();
   }
 
 
   #[test]
   fn directory_not_exists() { 
-    let fl = files_list_factory("./tests/playground/dir_not_exists", 0);
+    let fl = files_list_factory(0);
     assert!(!fl.dir_exists());
   }
 
 
   #[test]
   fn get_directory() { 
-    let mut fl = files_list_factory("./tests/playground/tmp", 0);
-    assert_eq!(fl.dir(),"./tests/playground/tmp");
+    let fl = files_list_factory(0);
+    assert_eq!(fl.dir(),fl.dir);
   }
 
 
   #[test]
   fn rename_file() { 
-    let mut fl = files_list_factory("", 5);
+    let mut fl = files_list_factory(5);
     let inx = rand::thread_rng().gen_range(0..5);
     let new_file_name = "new_file_name";
 
@@ -276,7 +295,7 @@ mod tests {
 
   #[test]
   fn change_directory() { 
-    let mut fl = files_list_factory("./directory", 0);
+    let mut fl = files_list_factory(0);
     let new_directory_name = "./new_directory_name";
 
     fl.chdir(new_directory_name);
@@ -287,26 +306,27 @@ mod tests {
   #[test]
   fn remove_all_files() -> Result<()> { 
     let n = rand::thread_rng().gen_range(1..6);
-    let mut fl = files_list_factory("./tests/playground/tmp", n);
+    let mut fl = files_list_factory(n);
 
-    create_files(&mut fl, "")?;
+    create_files(&mut fl)?;
 
     // Check that the files have been removed from the directory.
     fl.remove()?;
     for inx in 0..fl.len() {
-      let path = format!("{}/{}",fl.dir(),fl.name(inx));
-      if Path::new(&path).is_file() {
+      if Path::new(&fl.path(inx)).is_file() {
+        fs::remove_dir(fl.dir())?;
         return Err(FwcError::Internal("File not removed"));
       }
     }
 
+    fs::remove_dir(fl.dir())?;
     Ok(())
   }
 
 
   #[test]
   fn remove_returns_error_if_dir_not_exists() {
-    let fl = files_list_factory("./tests/playground/dir_not_exists", 0);
+    let fl = files_list_factory(0);
 
     match fl.remove() {
       Err(e) => { match e {
@@ -320,17 +340,16 @@ mod tests {
 
   #[test]
   fn get_files_in_dir_gets_all_files() -> Result<()> { 
-    let dir = format!("./tests/playground/tmp/{}",Uuid::new_v4().to_string());
     let n = rand::thread_rng().gen_range(1..6);
-    let mut fl1 = files_list_factory(&dir, n);
+    let mut fl1 = files_list_factory(n);
 
-    fs::create_dir(&dir)?;
-    create_files(&mut fl1, "")?;
+    create_files(&mut fl1)?;
 
-    let mut fl2 = files_list_factory(&dir, 0);
+    let mut fl2 = files_list_factory(0);
+    fl2.chdir(&fl1.dir());
     fl2.get_files_in_dir()?;
     fl1.remove()?;
-    fs::remove_dir(dir)?;
+    fs::remove_dir(&fl1.dir())?;
 
     // Check that all directory files have been read.
     if fl1.files.sort() == fl2.files.sort() {
@@ -343,7 +362,7 @@ mod tests {
 
   #[test]
   fn get_files_in_dir_returns_error_if_dir_not_exists() {
-    let mut fl = files_list_factory("./tests/playground/dir_not_exists", 0);
+    let mut fl = files_list_factory(0);
 
     match fl.get_files_in_dir() {
       Err(e) => { match e {
@@ -357,20 +376,64 @@ mod tests {
 
   #[test]
   fn sha256_gives_empty_result_if_dir_is_empty() {
-    let dir = format!("./tests/playground/tmp/{}",Uuid::new_v4().to_string());
-    let fl = files_list_factory(&dir, 0);
+    let fl = files_list_factory(0);
 
-    fs::create_dir(&dir).unwrap();
+    fs::create_dir(&fl.dir()).unwrap();
     assert_eq!(fl.sha256(false).unwrap(),String::from("file,sha256\n"));
-    fs::remove_dir(dir).unwrap();
+    fs::remove_dir(fl.dir()).unwrap();
   }
 
 
   #[test]
   fn sha256_gives_empty_result_if_dir_not_exists() {
-    let dir = format!("./tests/playground/tmp/{}",Uuid::new_v4().to_string());
-    let fl = files_list_factory(&dir, 0);
-
+    let fl = files_list_factory(0);
     assert_eq!(fl.sha256(false).unwrap(),String::from("file,sha256\n"));
+  }
+
+
+  #[test]
+  fn sha256_files_without_comments() -> Result<()> {
+    let mut fl = files_list_factory(5);
+
+    create_files(&mut fl)?;
+    let result = fl.sha256(false)?;
+    let result_ignore_comments = fl.sha256(true)?;
+    let compare = sha256_cvs_string(&mut fl)?;
+    fl.remove()?;
+    fs::remove_dir(fl.dir())?;
+
+    assert_eq!(result,compare);
+    // No comments in files, then the result must be the same.
+    assert_eq!(result_ignore_comments,compare);
+
+    Ok(())
+  }
+
+
+  #[test]
+  fn sha256_files_with_comments() -> Result<()> {
+    let mut fl = files_list_factory(5);
+
+    create_files(&mut fl)?;
+
+    // Add comments to one file.
+    let mut file = OpenOptions::new()
+      .write(true)
+      .append(true)
+      .open(fl.path(3))
+      .unwrap();
+    writeln!(file, "# Comment line!")?;
+
+    let result = fl.sha256(false)?;
+    let result_ignore_comments = fl.sha256(true)?;
+    let compare = sha256_cvs_string(&mut fl)?;
+    fl.remove()?;
+    fs::remove_dir(fl.dir())?;
+
+    assert_eq!(result,compare);
+    // No comments in files, then the result must be different.
+    assert_ne!(result_ignore_comments,compare);
+
+    Ok(())
   }
 }
