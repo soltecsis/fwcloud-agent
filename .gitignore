@@ -4,3 +4,5 @@
 /tmp
 /data
 .env
+/tests/playground/tmp/*
+/tests/playground/data/*

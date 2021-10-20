@@ -178,3 +178,199 @@ impl FilesList {
     self.files.len()
   }
 }
+
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use rand::Rng;
+  use uuid::Uuid;
+
+  fn files_list_factory(dir: &str, n: usize) -> FilesList {
+    let mut fl = FilesList {
+      dir: String::from(dir),
+      files: vec![]
+    };
+
+    for _ in 0..n {
+      fl.files.push(Uuid::new_v4().to_string());
+    }
+
+    fl
+  }
+
+  fn create_files(fl: &mut FilesList, content: &str) -> Result<()> {
+    for inx in 0..fl.len() {
+      let path = format!("{}/{}",fl.dir(),fl.name(inx));
+      let fw = File::create(&path)?;
+      let mut writer = BufWriter::new(&fw);
+      writeln!(writer, "{}", content)?;
+    }
+
+    // Verify that the files have been created.
+    for inx in 0..fl.len() {
+      let path = format!("{}/{}",fl.dir(),fl.name(inx));
+      if !Path::new(&path).is_file() {
+        return Err(FwcError::Internal("File not created"));
+      }
+    }
+
+    Ok(())
+  }
+
+
+  #[test]
+  fn len_for_zero_files() {
+    let fl = files_list_factory("", 0);
+    assert_eq!(fl.len(),0);
+  }
+
+
+  #[test]
+  fn len_for_some_files() { 
+    let n = rand::thread_rng().gen_range(1..6);
+    let fl = files_list_factory("", n);
+    assert_eq!(fl.len(),n);
+  }
+
+
+  #[test]
+  fn right_file_name() { 
+    let n = rand::thread_rng().gen_range(1..6);
+    let mut fl = files_list_factory("", n);
+    assert_eq!(fl.name(n-1),fl.files[n-1]);
+  }
+
+
+  #[test]
+  fn directory_exists() { 
+    let fl = files_list_factory("./tests/playground/tmp", 0);
+    assert!(fl.dir_exists());
+  }
+
+
+  #[test]
+  fn directory_not_exists() { 
+    let fl = files_list_factory("./tests/playground/dir_not_exists", 0);
+    assert!(!fl.dir_exists());
+  }
+
+
+  #[test]
+  fn get_directory() { 
+    let mut fl = files_list_factory("./tests/playground/tmp", 0);
+    assert_eq!(fl.dir(),"./tests/playground/tmp");
+  }
+
+
+  #[test]
+  fn rename_file() { 
+    let mut fl = files_list_factory("", 5);
+    let inx = rand::thread_rng().gen_range(0..5);
+    let new_file_name = "new_file_name";
+
+    fl.rename(inx, new_file_name);
+    assert_eq!(fl.files[inx],new_file_name);
+  }
+
+
+  #[test]
+  fn change_directory() { 
+    let mut fl = files_list_factory("./directory", 0);
+    let new_directory_name = "./new_directory_name";
+
+    fl.chdir(new_directory_name);
+    assert_eq!(fl.dir,new_directory_name);
+  }
+
+
+  #[test]
+  fn remove_all_files() -> Result<()> { 
+    let n = rand::thread_rng().gen_range(1..6);
+    let mut fl = files_list_factory("./tests/playground/tmp", n);
+
+    create_files(&mut fl, "")?;
+
+    // Check that the files have been removed from the directory.
+    fl.remove()?;
+    for inx in 0..fl.len() {
+      let path = format!("{}/{}",fl.dir(),fl.name(inx));
+      if Path::new(&path).is_file() {
+        return Err(FwcError::Internal("File not removed"));
+      }
+    }
+
+    Ok(())
+  }
+
+
+  #[test]
+  fn remove_returns_error_if_dir_not_exists() {
+    let fl = files_list_factory("./tests/playground/dir_not_exists", 0);
+
+    match fl.remove() {
+      Err(e) => { match e {
+        FwcError::DirNotFound => assert!(true),
+        _ => return assert!(false)
+      }}, 
+      Ok(_) => panic!("Error expected")
+    }
+  }
+
+
+  #[test]
+  fn get_files_in_dir_gets_all_files() -> Result<()> { 
+    let dir = format!("./tests/playground/tmp/{}",Uuid::new_v4().to_string());
+    let n = rand::thread_rng().gen_range(1..6);
+    let mut fl1 = files_list_factory(&dir, n);
+
+    fs::create_dir(&dir)?;
+    create_files(&mut fl1, "")?;
+
+    let mut fl2 = files_list_factory(&dir, 0);
+    fl2.get_files_in_dir()?;
+    fl1.remove()?;
+    fs::remove_dir(dir)?;
+
+    // Check that all directory files have been read.
+    if fl1.files.sort() == fl2.files.sort() {
+      Ok(())
+    } else {
+      Err(FwcError::Internal("Getting files"))
+    }
+  }
+
+
+  #[test]
+  fn get_files_in_dir_returns_error_if_dir_not_exists() {
+    let mut fl = files_list_factory("./tests/playground/dir_not_exists", 0);
+
+    match fl.get_files_in_dir() {
+      Err(e) => { match e {
+        FwcError::DirNotFound => assert!(true),
+        _ => return assert!(false)
+      }}, 
+      Ok(_) => panic!("Error expected")
+    }
+  }
+
+
+  #[test]
+  fn sha256_gives_empty_result_if_dir_is_empty() {
+    let dir = format!("./tests/playground/tmp/{}",Uuid::new_v4().to_string());
+    let fl = files_list_factory(&dir, 0);
+
+    fs::create_dir(&dir).unwrap();
+    assert_eq!(fl.sha256(false).unwrap(),String::from("file,sha256\n"));
+    fs::remove_dir(dir).unwrap();
+  }
+
+
+  #[test]
+  fn sha256_gives_empty_result_if_dir_not_exists() {
+    let dir = format!("./tests/playground/tmp/{}",Uuid::new_v4().to_string());
+    let fl = files_list_factory(&dir, 0);
+
+    assert_eq!(fl.sha256(false).unwrap(),String::from("file,sha256\n"));
+  }
+}
