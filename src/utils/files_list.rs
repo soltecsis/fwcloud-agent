@@ -203,7 +203,7 @@ mod tests {
     fl
   }
 
-  fn create_files(fl: &mut FilesList) -> Result<()> {
+  fn create_files(fl: &FilesList) -> Result<()> {
     fs::create_dir(&fl.dir())?;
 
     for inx in 0..fl.len() {
@@ -306,9 +306,9 @@ mod tests {
   #[test]
   fn remove_all_files() -> Result<()> { 
     let n = rand::thread_rng().gen_range(1..6);
-    let mut fl = files_list_factory(n);
+    let fl = files_list_factory(n);
 
-    create_files(&mut fl)?;
+    create_files(&fl)?;
 
     // Check that the files have been removed from the directory.
     fl.remove()?;
@@ -343,7 +343,7 @@ mod tests {
     let n = rand::thread_rng().gen_range(1..6);
     let mut fl1 = files_list_factory(n);
 
-    create_files(&mut fl1)?;
+    create_files(&fl1)?;
 
     let mut fl2 = files_list_factory(0);
     fl2.chdir(&fl1.dir());
@@ -395,7 +395,7 @@ mod tests {
   fn sha256_files_without_comments() -> Result<()> {
     let mut fl = files_list_factory(5);
 
-    create_files(&mut fl)?;
+    create_files(&fl)?;
     let result = fl.sha256(false)?;
     let result_ignore_comments = fl.sha256(true)?;
     let compare = sha256_cvs_string(&mut fl)?;
@@ -414,7 +414,7 @@ mod tests {
   fn sha256_files_with_comments() -> Result<()> {
     let mut fl = files_list_factory(5);
 
-    create_files(&mut fl)?;
+    create_files(&fl)?;
 
     // Add comments to one file.
     let mut file = OpenOptions::new()
@@ -422,7 +422,8 @@ mod tests {
       .append(true)
       .open(fl.path(3))
       .unwrap();
-    writeln!(file, "# Comment line!")?;
+    writeln!(file, "# First comment line!")?;
+    writeln!(file, "# Second comment line!")?;
 
     let result = fl.sha256(false)?;
     let result_ignore_comments = fl.sha256(true)?;
@@ -431,7 +432,7 @@ mod tests {
     fs::remove_dir(fl.dir())?;
 
     assert_eq!(result,compare);
-    // No comments in files, then the result must be different.
+    // We have comments in one file, then the result when we ignore the comments must be different.
     assert_ne!(result_ignore_comments,compare);
 
     Ok(())
