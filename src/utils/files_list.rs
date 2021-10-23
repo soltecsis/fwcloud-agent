@@ -118,7 +118,8 @@ impl FilesList {
     let mut data: Vec<String> = vec![];
 
     let path = self.path(inx);
-    // If OpenVPN status cache file doesn't exists return empty data.
+
+    // If file doesn't exists return empty data.
     if !Path::new(&path).is_file() { 
       return Ok(data)
     }
@@ -209,7 +210,7 @@ mod tests {
     for inx in 0..fl.len() {
       let fw = File::create(fl.path(inx))?;
       let mut writer = BufWriter::new(&fw);
-      writeln!(writer, "{}_{}\n", Uuid::new_v4().to_string(),Uuid::new_v4().to_string())?;
+      writeln!(writer, "{}\n{}\n{}", Uuid::new_v4().to_string(),Uuid::new_v4().to_string(),Uuid::new_v4().to_string())?;
     }
 
     // Verify that the files have been created.
@@ -233,6 +234,82 @@ mod tests {
     }
 
     Ok(cvs)
+  }
+
+  #[test]
+  fn head_remove_empty_result_if_file_not_exists() {
+    let fl = files_list_factory(5);
+    let inx = rand::thread_rng().gen_range(0..5);
+    let empty: Vec<String> = vec![];
+    assert_eq!(fl.head_remove(inx, 100).unwrap(),empty);
+  }
+
+
+  #[test]
+  fn head_remove_returns_full_file_and_empties_file() -> Result<()> {
+    let fl = files_list_factory(5);
+    let inx = rand::thread_rng().gen_range(0..5);
+
+    create_files(&fl)?;
+
+    let file_content = fl.dump(inx).unwrap().join("\n");
+    let result = fl.head_remove(inx,100).unwrap().join("\n");
+    let file_len = fs::metadata(fl.path(inx))?.len();
+
+    fl.remove()?;
+    fs::remove_dir(fl.dir())?;
+
+    assert_eq!(result,file_content);
+    assert_eq!(file_len,0);
+
+    Ok(())
+  }
+
+
+  #[test]
+  fn head_remove_line_by_line() -> Result<()> {
+    let fl = files_list_factory(5);
+    let inx = rand::thread_rng().gen_range(0..5);
+
+    create_files(&fl)?;
+
+    let file_content = fl.dump(inx)?;
+    let file_lines_count = file_content.len();
+    for i in 0..file_lines_count {
+      let result = fl.head_remove(inx,1)?;
+      let new_lines_count = fl.dump(inx)?.len();
+      assert_eq!(file_content[i as usize],result[0]);
+      assert_eq!(new_lines_count,file_lines_count-(i+1));
+    }
+
+    fl.remove()?;
+    fs::remove_dir(fl.dir())?;
+
+    Ok(())
+  }
+
+
+  #[test]
+  fn head_remove_two_lines_max() -> Result<()> {
+    let fl = files_list_factory(5);
+    let inx = rand::thread_rng().gen_range(0..5);
+
+    create_files(&fl)?;
+
+    let file_content = fl.dump(inx)?;
+    let file_lines_count = file_content.len();
+
+    let _result = fl.head_remove(inx,2)?;
+    let new_file_content = fl.dump(inx)?;
+    let new_lines_count = new_file_content.len();
+
+    fl.remove()?;
+    fs::remove_dir(fl.dir())?;
+
+    assert_eq!(file_content[2],new_file_content[0]);
+    assert_eq!(new_lines_count,file_lines_count-2);
+
+    Ok(())
   }
 
 
@@ -434,6 +511,30 @@ mod tests {
     assert_eq!(result,compare);
     // We have comments in one file, then the result when we ignore the comments must be different.
     assert_ne!(result_ignore_comments,compare);
+
+    Ok(())
+  }
+
+
+  #[test]
+  fn dumps_the_file_content() -> Result<()> {
+    let fl = files_list_factory(5);
+    let inx = rand::thread_rng().gen_range(0..5);
+
+    create_files(&fl)?;
+
+    // Modify one of the files.
+    let mut fw = File::create(&fl.path(inx))?;
+    let compare = format!("{}\n{}", Uuid::new_v4().to_string(),Uuid::new_v4().to_string());
+    fw.write_all(compare.as_bytes())?;
+    drop(&fw);
+
+    let result = fl.dump(inx).unwrap().join("\n");
+
+    fl.remove()?;
+    fs::remove_dir(fl.dir())?;
+
+    assert_eq!(result,compare);
 
     Ok(())
   }
