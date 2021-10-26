@@ -106,7 +106,7 @@ impl Config {
       fwcloud_script_paths_list: env::var("FWCLOUD_SCRIPT_PATHS").unwrap_or(String::from("/etc/fwcloud/fwcloud.sh,/config/scripts/post-config.d/fwcloud.sh")),
       fwcloud_script_paths: vec![],
       
-      openvpn_status_files_list: env::var("OPENVPN_STATUS_FILES").unwrap_or(String::from("")),
+      openvpn_status_files_list: env::var("OPENVPN_STATUS_FILES").unwrap_or(String::from("/etc/openvpn/openvpn-status.log")),
       openvpn_status_files: vec![],
       openvpn_status_sampling_interval: env::var("OPENVPN_STATUS_SAMPLING_INTERVAL").unwrap_or(String::from("30")).parse::<u64>().unwrap_or(30),
       openvpn_status_request_max_lines: env::var("OPENVPN_STATUS_REQUEST_MAX_LINES").unwrap_or(String::from("1000")).parse::<usize>().unwrap_or(1000),

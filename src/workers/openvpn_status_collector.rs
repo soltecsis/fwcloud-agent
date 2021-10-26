@@ -137,7 +137,17 @@ impl OpenVPNStCollectorInner {
             debug!("Collecting OpenVPN status data from file: {}",item.st_file);
             match OpenVPNStCollectorInner::collect_status_data(item, self.max_size) {
                 Ok(_) => (),
-                Err(e) => error!("Collecting OpenVPN status data from file: {} ({}) ",item.st_file,e)
+                Err(e) => {
+                    /* If the default openvpn status log file doesn't exists then only display error
+                    at the debug level. This simplifies the setup because we can leave the default value
+                    for OPENVPN_STATUS_FILES and not full the logs with repetitive messages when the default file
+                    doesn't exists. */
+                    if item.st_file == "/etc/openvpn/openvpn-status.log" && e.to_string() == "No such file or directory (os error 2)" {
+                        debug!("Collecting OpenVPN status data from file: {} ({}) ",item.st_file,e)
+                    } else {
+                        error!("Collecting OpenVPN status data from file: {} ({}) ",item.st_file,e)
+                    }  
+                }                
             }
         }
     }
