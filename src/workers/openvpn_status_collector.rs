@@ -94,7 +94,17 @@ impl OpenVPNStCollectorInner {
                 // End of the OpenVPN status data.
                 if &line[..] == "ROUTING TABLE" { break }
 
-                writeln!(writer, "{},{}", current_update, line)?;
+                // Convert the Connected Since date string to timestamp.
+                let data: Vec<&str> = line.split(",").collect();
+                let connected_since = match NaiveDateTime::parse_from_str(&data[4][..], "%a %b %e %T %Y") {
+                    Ok(date_time) => date_time.timestamp(),
+                    Err(e) => { 
+                        error!("Bad OpenVPN status file ({}): invalid connected since date ({})",item.st_file,e);
+                        break;
+                    }
+                };
+
+                writeln!(writer, "{},{},{}", current_update, data[..4].join(","), connected_since)?;
                 continue;                    
             }
 
