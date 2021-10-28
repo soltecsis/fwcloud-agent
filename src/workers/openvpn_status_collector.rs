@@ -23,7 +23,7 @@
 use std::{fs, fs::File, path::Path, sync::Mutex, thread, time};
 use thread_id;
 use std::sync::Arc;
-use log::{info, warn, error, debug};
+use log::{info, error, debug};
 use std::io::{BufReader, BufRead, Write};
 use chrono::NaiveDateTime;
 use std::sync::mpsc::{self, Sender};
@@ -127,8 +127,14 @@ impl OpenVPNStCollectorInner {
                 }
             };
 
+            // Skip the first sampling cycle, this way we avoid collect that of an OpenVPN status
+            // file that doesn't change in time (for example, because the OpenVPN server is not running).
+            if item.last_update == 0 {
+                break;
+            }
+
             if current_update == item.last_update {
-                warn!("No new OpenVPN status data found in file: {}",item.st_file);
+                debug!("No new OpenVPN status data found in file: {}",item.st_file);
                 break;
             }    
         }
