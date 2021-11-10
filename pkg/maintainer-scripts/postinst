@@ -18,6 +18,10 @@ chmod 600 key.pem cert.pem
 KEY=`openssl rand -base64 48|sed 's/[[:punct:]]/x/g'`
 sed -i -E "s|API_KEY=\"([a-zA-Z0-9[:punct:]]){64}\"|API_KEY=\"$KEY\"|" /opt/fwcloud/agent/.env
 
+# Build man page.
+cd /usr/share/man/man1
+zcat fwcloud-agent.1.gz
+
 # Enable and start FWCloud-Agent daemon.
 systemctl enable fwcloud-agent
 systemctl start fwcloud-agent

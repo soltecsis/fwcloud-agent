@@ -7,7 +7,7 @@ readme = "README.md"
 homepage = "https://fwcloud.net"
 repository = "https://github.com/soltecsis/fwcloud-agent"
 authors = ["Carles Munyoz <cmunyoz@soltecsis.com>"]
-keywords = ["fwcloud", "fwcloud-agent"]
+keywords = ["fwcloud", "fwcloud-agent", "firewall", "firewall cloud", "iptables", "nftables", "openvpn"]
 edition = "2018"
 
 [package.metadata.deb] 
@@ -16,7 +16,8 @@ copyright = "2021, Carles Munyoz <cmunyoz@soltecsis.com>"
 extended-description = """\
 FWCloud Agent daemon for simplify and improve \
 firewalls management from a FWCloud console."""
-depends = "libssl-dev, openssl, pkg-config"
+#depends = "libssl-dev, openssl, pkg-config"
+depends = "openssl"
 section = "utility"
 priority = "optional"
 assets = [
@@ -25,6 +26,7 @@ assets = [
     ["pkg/fwcloud-agent.service", "lib/systemd/system/", "644"],
     ["pkg/fwcloud-agent.conf", "etc/rsyslog.d/", "644"],
     ["pkg/fwcloud-agent", "etc/logrotate.d/", "644"],
+    ["pkg/fwcloud-agent.1", "usr/share/man/man1/", "644"],
 ]
 maintainer-scripts = "pkg/maintainer-scripts"
 
