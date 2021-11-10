@@ -13,7 +13,7 @@ edition = "2018"
 [package.metadata.deb] 
 maintainer = "Carles Munyoz <cmunyoz@soltecsis.com>"
 copyright = "2021, Carles Munyoz <cmunyoz@soltecsis.com>"
-depends = "$auto"
+depends = "libssl-dev, openssl, pkg-config"
 section = "utility"
 priority = "optional"
 assets = [
@@ -23,6 +23,7 @@ assets = [
     ["pkg/fwcloud-agent.conf", "etc/rsyslog.d/", "644"],
     ["pkg/fwcloud-agent", "etc/logrotate.d/", "644"],
 ]
+maintainer-scripts = "pkg/maintainer-scripts"
 
 [dependencies]
 thiserror = "1.0.28"

@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+systemctl stop fwcloud-agent
+rm /opt/fwcloud/agent/etc/cert.pem
+rm /opt/fwcloud/agent/etc/key.pem
+rm /opt/fwcloud/agent/log/*
+
+#DEBHELPER#
+
+exit 0
