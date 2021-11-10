@@ -5,8 +5,9 @@ ROOT_DIR="/opt/fwcloud/agent"
 
 systemctl stop fwcloud-agent
 
-rm "${ROOT_DIR}/etc/*"
-rm "${ROOT_DIR}/log/*"
+rm ${ROOT_DIR}/etc/cert.pem
+rm ${ROOT_DIR}/etc/key.pem
+rm ${ROOT_DIR}/log/*
 
 #DEBHELPER#
 
