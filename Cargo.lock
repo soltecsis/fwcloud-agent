@@ -819,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "fwcloud-agent"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "actix-multipart",
  "actix-rt 2.2.0",
