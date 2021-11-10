@@ -13,6 +13,9 @@ edition = "2018"
 [package.metadata.deb] 
 maintainer = "Carles Munyoz <cmunyoz@soltecsis.com>"
 copyright = "2021, Carles Munyoz <cmunyoz@soltecsis.com>"
+extended-description = """\
+FWCloud Agent daemon for simplify and improve \
+firewalls management from a FWCloud console."""
 depends = "libssl-dev, openssl, pkg-config"
 section = "utility"
 priority = "optional"

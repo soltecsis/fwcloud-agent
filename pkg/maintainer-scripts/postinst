@@ -3,14 +3,14 @@ set -e
 
 ROOT_DIR="/opt/fwcloud/agent"
 
-DIR_LIST="${ROOTDIR}/etc ${ROOTDIR}/tmp ${ROOTDIR}/data ${ROOTDIR}/log"
+DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log"
 for DIR in $DIR_LIST; do
   mkdir "$DIR"
   chmod 700 "$DIR"
 done
 
 # Generate self-signed certificate.
-cd "${ROOTDIR}/etc"
+cd "${ROOT_DIR}/etc"
 openssl req -x509 -newkey rsa:4096 -nodes -keyout key.pem -out cert.pem -days 36500 -subj '/CN=fwcloud-agent' > /dev/null 2>&1
 chmod 600 key.pem cert.pem
 
