@@ -1,0 +1,16 @@
+[Unit]
+Description=fwcloud-agent
+
+[Service]
+ExecStart=/opt/fwcloud/agent/fwcloud-agent
+ExecStop=/bin/kill -TERM "$MAINPID"
+WorkingDirectory=/opt/fwcloud/agent/
+StandardOutput=append:/opt/fwcloud/agent/log/fwcloud-agent.log
+StandardError=append:/opt/fwcloud/agent/log/fwcloud-agent.log
+SyslogIdentifier=fwcloud-agent
+User=root
+Group=root
+Type=simple
+
+[Install]
+WantedBy=multi-user.target
