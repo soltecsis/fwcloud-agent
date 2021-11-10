@@ -2,7 +2,6 @@
 name = "fwcloud-agent"
 version = "1.0.0"
 license = "GNU AFFERO GENERAL PUBLIC LICENSE"
-license-file = "LICENSE"
 description = "FWCloud Agent for firewalls management"
 readme = "README.md"
 homepage = "https://fwcloud.net"
@@ -18,12 +17,6 @@ depends = "$auto"
 section = "utility"
 priority = "optional"
 assets = [
-    ["", "opt/fwcloud/", "700"],
-    ["", "opt/fwcloud/agent/", "700"],
-    ["", "opt/fwcloud/agent/data/", "700"],
-    ["", "opt/fwcloud/agent/etc/", "700"],
-    ["", "opt/fwcloud/agent/log/", "700"],
-    ["", "opt/fwcloud/agent/tmp/", "700"],
     ["target/release/fwcloud-agent", "opt/fwcloud/agent/", "700"],
     [".env.example", "opt/fwcloud/agent/.env", "600"],
     ["pkg/fwcloud-agent.service", "lib/systemd/system/", "644"],
