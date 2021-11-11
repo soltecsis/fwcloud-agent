@@ -33,23 +33,23 @@ jobs:
     - name: Run tests
       run: cargo test
 
-  debbuild:
+  debian-amd64:
     needs: [build]
     runs-on: ubuntu-latest
-    name: Amd64Deb
+    name: Debian amd64
     steps:
     - uses: actions/checkout@v2
-    - name: BuildDeb
-      id: debbuild
+    - name: Build package
+      id: debian
       uses: ebbflow-io/cargo-deb-amd64-ubuntu@1.0
-    - name: Upload Deb Artifact
+    - name: Upload package
       uses: actions/upload-artifact@v2
       with:
-        name: amd64deb
+        name: debian/amd64
         path: ./target/x86_64-unknown-linux-musl/debian/*
 
   upload:
-    needs: [debbuild]
+    needs: [debian-amd64]
     runs-on: ubuntu-latest
     name: Deploy
     steps:
@@ -57,12 +57,12 @@ jobs:
     - name: Download packages
       uses: actions/download-artifact@v2
     - name: List packages
-      run: ls -lha amd64deb
+      run: ls -lha 
     - name: Upload packages
       uses: SamKirkland/FTP-Deploy-Action@4.0.0
       with:
         server: pkg.fwcloud.net
         username: fwcloud-pkg
         password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
-        local-dir: ./amd64deb/
-        server-dir: ./fwcloud-agent/amd64deb/
+        local-dir: ./debian/amd64/
+        server-dir: ./fwcloud-agent/debian/amd64/
