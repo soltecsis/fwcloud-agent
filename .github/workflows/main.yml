@@ -8,6 +8,7 @@ on:
 
 jobs:
   quickcheck:
+    name: Quick checks
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.rustversion.outputs.rustversion }}
@@ -45,11 +46,26 @@ jobs:
     - name: Upload package
       uses: actions/upload-artifact@v2
       with:
-        name: debian/amd64
+        name: debian
         path: ./target/x86_64-unknown-linux-musl/debian/*
 
+  raspbian-armv7:
+    needs: [build]
+    runs-on: ubuntu-latest
+    name: Raspbian armv7
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build package
+      id: debbuild
+      uses: ebbflow-io/cargo-deb-armv7-debian@1.0
+    - name: Upload package
+      uses: actions/upload-artifact@v2
+      with:
+        name: raspbian
+        path: ./target/armv7-unknown-linux-musleabihf/debian/*
+
   upload:
-    needs: [debian-amd64]
+    needs: [debian-amd64, raspbian-armv7]
     runs-on: ubuntu-latest
     name: Deploy
     steps:
