@@ -46,26 +46,27 @@ jobs:
     - name: Upload package
       uses: actions/upload-artifact@v2
       with:
-        name: debian
+        name: debian-amd64
         path: ./target/x86_64-unknown-linux-musl/debian/*
 
-  raspbian-armv7:
-    needs: [build]
-    runs-on: ubuntu-latest
-    name: Raspbian armv7
-    steps:
-    - uses: actions/checkout@v2
-    - name: Build package
-      id: debbuild
-      uses: ebbflow-io/cargo-deb-armv7-debian@1.0
-    - name: Upload package
-      uses: actions/upload-artifact@v2
-      with:
-        name: raspbian
-        path: ./target/armv7-unknown-linux-musleabihf/debian/*
+  # raspbian-armv7:
+  #   needs: [build]
+  #   runs-on: ubuntu-latest
+  #   name: Raspbian armv7
+  #   steps:
+  #   - uses: actions/checkout@v2
+  #   - name: Build package
+  #     id: debbuild
+  #     uses: ebbflow-io/cargo-deb-armv7-debian@1.0
+  #   - name: Upload package
+  #     uses: actions/upload-artifact@v2
+  #     with:
+  #       name: raspbian
+  #       path: ./target/armv7-unknown-linux-musleabihf/debian/*
 
   upload:
-    needs: [debian-amd64, raspbian-armv7]
+#    needs: [debian-amd64, raspbian-armv7]
+    needs: debian-amd64
     runs-on: ubuntu-latest
     name: Deploy
     steps:
@@ -80,5 +81,5 @@ jobs:
         server: pkg.fwcloud.net
         username: fwcloud-pkg
         password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
-        local-dir: ./debian/amd64/
-        server-dir: ./fwcloud-agent/debian/amd64/
+        local-dir: ./debian-amd64/
+        server-dir: ./fwcloud-agent/dbm/
