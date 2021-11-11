@@ -22,11 +22,8 @@ jobs:
   
   build:
     needs: quickcheck
-    name: 'build-${{matrix.os}}'
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
+    name: Build
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
     - name: Build
