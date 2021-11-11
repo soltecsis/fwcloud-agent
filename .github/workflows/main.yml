@@ -1,0 +1,106 @@
+name: FWCloud-Agent CI
+
+on:
+  push:
+    branches: [main, devel]
+  pull_request:
+    branches: [main, devel]
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.rustversion.outputs.rustversion }}
+    steps:
+    - uses: actions/checkout@v2
+    - run: cargo check
+    - run: cargo pkgid
+    - run: 'echo "$(cargo pkgid | cut -d# -f2)"'
+    - id: rustversion
+      run: 'echo "::set-output name=rustversion::$(cargo pkgid | cut -d# -f2)"'
+  
+  build:
+    needs: checks
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build
+      run: cargo build
+    - name: Run tests
+      run: cargo test
+
+  ubuntu-amd64:
+    needs: [build]
+    runs-on: ubuntu-latest
+    name: Ubuntu amd64
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build package
+      id: ubuntu
+      uses: ebbflow-io/cargo-deb-amd64-ubuntu@1.0
+    - name: Upload package
+      uses: actions/upload-artifact@v2
+      with:
+        name: ubuntu-amd64
+        path: ./target/x86_64-unknown-linux-musl/debian/*
+
+  # fedora-amd64:
+  #   needs: [build]
+  #   runs-on: ubuntu-latest
+  #   name: Fedora amd64
+  #   steps:
+  #   - uses: actions/checkout@v2
+  #   - name: Build package
+  #     id: fedora
+  #     uses: ebbflow-io/cargo-rpm-amd64-fedora@1.1
+  #   - name: Upload RPM Artifact
+  #     uses: actions/upload-artifact@v2
+  #     with:
+  #       name: fedora-amd64
+  #       path: ./target/x86_64-unknown-linux-musl/release/rpmbuild/RPMS/x86_64/*
+
+  # raspbian-armv7:
+  #   needs: [build]
+  #   runs-on: ubuntu-latest
+  #   name: Raspbian armv7
+  #   steps:
+  #   - uses: actions/checkout@v2
+  #   - name: Build package
+  #     id: debbuild
+  #     uses: ebbflow-io/cargo-deb-armv7-debian@1.0
+  #   - name: Upload package
+  #     uses: actions/upload-artifact@v2
+  #     with:
+  #       name: raspbian
+  #       path: ./target/armv7-unknown-linux-musleabihf/debian/*
+
+  upload:
+  #  needs: [ubuntu-amd64, fedora-amd64]
+    needs: [ubuntu-amd64]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    name: Deploy
+    steps:
+    - uses: actions/checkout@v2
+    - name: Download packages
+      uses: actions/download-artifact@v2
+    - name: List packages
+      run: ls -lha 
+    - name: Upload Ubuntu amd64 package
+      uses: SamKirkland/FTP-Deploy-Action@4.0.0
+      with:
+        server: pkg.fwcloud.net
+        username: fwcloud-pkg
+        password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
+        local-dir: ./ubuntu-amd64/
+        server-dir: ./fwcloud-agent/deb/
+    # - name: Upload Fedora amd64 package
+    #   uses: SamKirkland/FTP-Deploy-Action@4.0.0
+    #   with:
+    #     server: pkg.fwcloud.net
+    #     username: fwcloud-pkg
+    #     password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
+    #     local-dir: ./fedora-amd64/
+    #     server-dir: ./fwcloud-agent/rpm/

@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+ROOT_DIR="/opt/fwcloud/agent"
+
+systemctl stop fwcloud-agent
+
+rm ${ROOT_DIR}/etc/cert.pem
+rm ${ROOT_DIR}/etc/key.pem
+rm ${ROOT_DIR}/log/*
+
+#DEBHELPER#
+
+exit 0

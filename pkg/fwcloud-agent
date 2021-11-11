@@ -1,0 +1,9 @@
+/opt/fwcloud/agent/log/*.log {
+	daily
+	missingok
+	rotate 10
+	compress	
+	notifempty
+	create 0600 root root
+}
+

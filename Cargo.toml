@@ -1,15 +1,52 @@
 [package]
 name = "fwcloud-agent"
 version = "1.0.0"
-edition = "2018"
-authors = ["Carles Munyoz <cmunyoz@soltecsis.com>"]
 license = "GNU AFFERO GENERAL PUBLIC LICENSE"
 description = "FWCloud Agent for firewalls management"
-keywords = ["fwcloud", "fwcloud-agent"]
-repository = "https://github.com/soltecsis/fwcloud-agent"
 readme = "README.md"
+homepage = "https://fwcloud.net"
+repository = "https://github.com/soltecsis/fwcloud-agent"
+authors = ["Carles Munyoz <cmunyoz@soltecsis.com>"]
+keywords = ["fwcloud", "fwcloud-agent", "firewall", "firewall cloud", "iptables", "nftables", "openvpn"]
+edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package.metadata.deb] 
+maintainer = "Carles Munyoz <cmunyoz@soltecsis.com>"
+copyright = "2021, Carles Munyoz <cmunyoz@soltecsis.com>"
+extended-description = """\
+FWCloud Agent daemon for simplify and improve \
+firewalls management from a FWCloud console."""
+depends = "openssl"
+section = "utility"
+priority = "optional"
+assets = [
+    ["target/release/fwcloud-agent", "opt/fwcloud/agent/", "700"],
+    [".env.example", "opt/fwcloud/agent/.env", "600"],
+    ["pkg/fwcloud-agent.service", "lib/systemd/system/", "644"],
+    ["pkg/fwcloud-agent.conf", "etc/rsyslog.d/", "644"],
+    ["pkg/fwcloud-agent", "etc/logrotate.d/", "644"],
+    ["pkg/fwcloud-agent.1", "usr/share/man/man1/", "644"],
+]
+maintainer-scripts = "pkg/maintainer-scripts"
+
+[package.metadata.rpm] 
+maintainer = "Carles Munyoz <cmunyoz@soltecsis.com>"
+copyright = "2021, Carles Munyoz <cmunyoz@soltecsis.com>"
+extended-description = """\
+FWCloud Agent daemon for simplify and improve \
+firewalls management from a FWCloud console."""
+depends = "openssl"
+section = "utility"
+priority = "optional"
+assets = [
+    ["target/release/fwcloud-agent", "opt/fwcloud/agent/", "700"],
+    [".env.example", "opt/fwcloud/agent/.env", "600"],
+    ["pkg/fwcloud-agent.service", "lib/systemd/system/", "644"],
+    ["pkg/fwcloud-agent.conf", "etc/rsyslog.d/", "644"],
+    ["pkg/fwcloud-agent", "etc/logrotate.d/", "644"],
+    ["pkg/fwcloud-agent.1", "usr/share/man/man1/", "644"],
+]
+maintainer-scripts = "pkg/maintainer-scripts"
 
 [dependencies]
 thiserror = "1.0.28"

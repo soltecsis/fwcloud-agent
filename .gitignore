@@ -4,5 +4,9 @@
 /tmp
 /data
 .env
+
 /tests/playground/tmp/*
+!/tests/playground/tmp/.gitkeep
+
 /tests/playground/data/*
+!/tests/playground/data/.gitkeep

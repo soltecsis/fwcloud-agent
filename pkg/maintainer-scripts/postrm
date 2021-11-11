@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+if [ ! -e /opt ]; then
+  if mkdir /opt 2>/dev/null; then
+    chown root:root /opt
+    chmod 755 /opt
+  fi
+fi
+
+#DEBHELPER#
+
+exit 0

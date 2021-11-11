@@ -1,0 +1,71 @@
+\" This is the man page for FWCloud-agent 1.0.
+.TH FWCloud-Agent "1" "September 2021" "fwcloud-agent 1.0" "User Commands"
+.SH NAME
+fwcloud-agent - FWCloud Agent daemon for remote firewalls management
+.SH SYNOPSIS
+.B fwcloud-agent
+.SH DESCRIPTION
+.B FWCloud 
+is a web application that allows centralized and secure management of Linux-based firewalls. It’s a cloud application, which is essential  to allow it to be used from anywhere, anytime and with any device. When possible FWCloud-API will comunicate with 
+.B fwcloud-agent 
+in order to manage and monitor the firewalls.
+.PP
+Same features of 
+.B fwcloud-agent 
+can be configured using .env file
+.RS
+.PP
+- BIND_IP: IP to which the server will attend API service request.
+.BR
+  By default it listen on all system interfaces 
+.PP
+- BIND_PORT: TCP port it listen to.
+.BR
+The default port is 33033
+.PP
+- WORKERS: Amount of worker threads.
+.BR
+If not set, as many threads as CPU cores will be started.
+.PP
+- ENABLE_SSL: Enables SSL
+.BR
+ By default SSL will be enabled.
+.PP
+- ALLOWED_IPS: Space separated list of IPs from which FWCloud-Agent will allow API requests.
+.BR
+By default any IP is allowed.
+.PP
+- API_KEY: API Key used for API requests authentication.
+.BR
+IMPORTANT: Change this value to a new random generated one for your FWCloud-Agent installation. If 
+.B fwcloud-agent 
+is installed from the .deb file or using apt utility, a new API_KEY is generated 
+.PP
+- FWCLOUD_SCRIPT_PATHS: Comma separated list of paths allowed for a fwcloud.sh script.
+.BR
+Default PATH are: "/etc/fwcloud/fwcloud.sh,/config/scripts/post-config.d/fwcloud.sh"
+.PP
+.PP
+- OPENVPN_STATUS_FILES: Comma separated list of full paths of OpenVPN server status files that the will be tracked by the OpenVPN status collector thread.
+.BR
+The default file is "/etc/openvpn/openvpn-status.log"
+.PP
+- OPENVPN_STATUS_SAMPLING_INTERVAL: Sampling interval in seconds for the OpenVPN status collector thread.
+.BR
+The default value is 30 seconds
+.PP
+- OPENVPN_STATUS_REQUEST_MAX_LINES: Maximum number of lines that FWCloud-Agent will accept for an OpenVPN get status request.
+.BR
+The defaul value is 1000 lines
+.PP
+- OPENVPN_STATUS_CACHE_MAX_SIZE: Maximum size in bytes for the OpenVPN status cache files.
+.BR
+The default value is 10485760
+.RE
+.SH SEE ALSO
+For more information, please refer to FWCloud documentation, available online at https://fwcloud.net
+.SH AUTHORS
+Original work by Soltecsis, 2021
+.PP
+SOLTECSIS - SOLUCIONES TECNOLOGICAS, S.L..
+
