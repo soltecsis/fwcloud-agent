@@ -52,6 +52,8 @@ jobs:
     needs: [debbuild]
     runs-on: ubuntu-latest
     name: Deploy
+    steps:
+    - uses: actions/checkout@v2
     - name: Download packages
       uses: actions/download-artifact@v2
       run: ls -lha
