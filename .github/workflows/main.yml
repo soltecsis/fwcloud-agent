@@ -82,4 +82,4 @@ jobs:
         username: fwcloud-pkg
         password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
         local-dir: ./debian-amd64/
-        server-dir: ./fwcloud-agent/dbm/
+        server-dir: ./fwcloud-agent/deb/
