@@ -64,5 +64,5 @@ jobs:
         server: pkg.fwcloud.net
         username: fwcloud-pkg
         password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
-        local-dir: ./amd64deb
-        server-dir: ./fwcloud-agent/amd64deb
+        local-dir: ./amd64deb/
+        server-dir: ./fwcloud-agent/amd64deb/
