@@ -57,12 +57,12 @@ jobs:
     - name: Download packages
       uses: actions/download-artifact@v2
     - name: List packages
-      run: ls -lha
+      run: ls -lha amd64deb
     - name: Upload packages
       uses: SamKirkland/FTP-Deploy-Action@4.0.0
       with:
         server: pkg.fwcloud.net
         username: fwcloud-pkg
         password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
-        local-dir: ./
-        server-dir: ./
+        local-dir: ./amd64deb
+        server-dir: ./fwcloud-agent/amd64deb
