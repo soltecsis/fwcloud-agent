@@ -34,19 +34,19 @@ jobs:
     - name: Run tests
       run: cargo test
 
-  debian-amd64:
+  ubuntu-amd64:
     needs: [build]
     runs-on: ubuntu-latest
-    name: Debian amd64
+    name: Ubuntu amd64
     steps:
     - uses: actions/checkout@v2
     - name: Build package
-      id: debian
+      id: ubuntu
       uses: ebbflow-io/cargo-deb-amd64-ubuntu@1.0
     - name: Upload package
       uses: actions/upload-artifact@v2
       with:
-        name: debian-amd64
+        name: ubuntu-amd64
         path: ./target/x86_64-unknown-linux-musl/debian/*
 
   fedora-amd64:
@@ -56,7 +56,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Build package
-      id: fefdora
+      id: fedora
       uses: ebbflow-io/cargo-rpm-amd64-fedora@1.1
     - name: Upload RPM Artifact
       uses: actions/upload-artifact@v2
@@ -89,13 +89,13 @@ jobs:
       uses: actions/download-artifact@v2
     - name: List packages
       run: ls -lha 
-    - name: Upload Debian amd64 package
+    - name: Upload Ubuntu amd64 package
       uses: SamKirkland/FTP-Deploy-Action@4.0.0
       with:
         server: pkg.fwcloud.net
         username: fwcloud-pkg
         password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
-        local-dir: ./debian-amd64/
+        local-dir: ./ubuntu-amd64/
         server-dir: ./fwcloud-agent/deb/
     - name: Upload Fedora amd64 package
       uses: SamKirkland/FTP-Deploy-Action@4.0.0
