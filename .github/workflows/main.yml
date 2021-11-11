@@ -47,3 +47,18 @@ jobs:
       with:
         name: amd64deb
         path: ./target/x86_64-unknown-linux-musl/debian/*
+
+  upload:
+    needs: [debbuild]
+    runs-on: ubuntu-latest
+    - name: Download packages
+      uses: actions/download-artifact@v2
+      run: ls -lha
+    - name: Upload packages
+      uses: SamKirkland/FTP-Deploy-Action@4.0.0
+      with:
+        server: fwcloud-ui-doc.fwcloud.net
+        username: fwcloud-ui-doc
+        password: ${{ secrets.FWCLOUD_UI_DOC_FTP_PASSWORD }}
+        local-dir: src/.vuepress/dist/
+        server-dir: ./
