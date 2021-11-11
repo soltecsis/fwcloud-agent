@@ -80,7 +80,7 @@ jobs:
   #       path: ./target/armv7-unknown-linux-musleabihf/debian/*
 
   upload:
-    needs: [debian-amd64, fedora-amd64]
+    needs: [ubuntu-amd64, fedora-amd64]
     runs-on: ubuntu-latest
     name: Deploy
     steps:
