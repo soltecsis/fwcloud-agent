@@ -77,13 +77,9 @@ jobs:
   #       path: ./target/armv7-unknown-linux-musleabihf/debian/*
 
   upload:
-    on:
-      push:
-        branches: [main]
-      pull_request:
-        branches: [main]
     needs: [ubuntu-amd64, fedora-amd64]
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     name: Deploy
     steps:
     - uses: actions/checkout@v2
