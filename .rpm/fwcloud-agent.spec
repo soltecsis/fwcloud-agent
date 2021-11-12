@@ -10,11 +10,14 @@ License: GNU AFFERO GENERAL PUBLIC LICENSE
 Group: Applications/System
 Source0: %{name}-%{version}.tar.gz
 URL: https://fwcloud.net
+Vendor: SOLTECSIS, SL
+Packager: Carles Munyoz <cmunyoz@soltecsis.com>
 
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 
 %description
-%{summary}
+FWCloud Agent daemon for simplify and improve
+firewalls management from a FWCloud console.
 
 %prep
 %setup -q

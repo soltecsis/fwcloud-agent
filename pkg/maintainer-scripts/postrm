@@ -1,11 +1,17 @@
 #!/bin/sh
 set -e
 
-if [ ! -e /opt ]; then
+if [ ! -d /opt ]; then
   if mkdir /opt 2>/dev/null; then
     chown root:root /opt
     chmod 755 /opt
   fi
+else
+  rmdir /opt/fwcloud/agent/etc
+  rmdir /opt/fwcloud/agent/data
+  rmdir /opt/fwcloud/agent/tmp
+  rmdir /opt/fwcloud/agent/log
+  rmdir /opt/fwcloud/agent
 fi
 
 #DEBHELPER#

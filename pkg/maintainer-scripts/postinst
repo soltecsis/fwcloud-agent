@@ -2,6 +2,7 @@
 set -e
 
 ROOT_DIR="/opt/fwcloud/agent"
+chmod 700 "$ROOT_DIR"
 
 DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log"
 for DIR in $DIR_LIST; do

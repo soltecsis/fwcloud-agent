@@ -12,7 +12,7 @@ edition = "2018"
 
 [package.metadata.deb] 
 maintainer = "Carles Munyoz <cmunyoz@soltecsis.com>"
-copyright = "2021, Carles Munyoz <cmunyoz@soltecsis.com>"
+copyright = "SOLTECSIS, SL"
 extended-description = """\
 FWCloud Agent daemon for simplify and improve \
 firewalls management from a FWCloud console."""
@@ -36,7 +36,7 @@ package = "fwcloud-agent"
 buildflags = ["--release"]
 
 [package.metadata.rpm.targets]
-fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent" }
+fwcloud-agent = { path = "/usr/bin/fwcloud-agent" }
 
 [dependencies]
 thiserror = "1.0.28"
@@ -47,7 +47,7 @@ serde_json = "1.0.67"
 lazy_static = "1.4.0"
 actix-web = { version = "3", features = ["openssl"] }
 openssl = { version = "0.10", features = ["v110"] }
-actix-service = "1"
+actix-service = "1.0.6"
 actix-multipart = "0.3.0"
 actix-web-requestid = "1.1.0"
 rand = "0.8.4"
@@ -59,7 +59,7 @@ sanitize-filename = "0.3.0"
 futures = "0.3.1"
 uuid = { version = "0.8.2", features = ["serde", "v4"] }
 tracing = "0.1.26"
-tracing-subscriber = "0.2.0"
+tracing-subscriber = "0.3.1"
 thread-id = "4.0.0"
 subprocess = "0.2.7"
 sha2 = "0.9.8"
