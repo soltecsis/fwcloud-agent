@@ -80,7 +80,7 @@ jobs:
   #  needs: [ubuntu-amd64, fedora-amd64]
     needs: [ubuntu-amd64]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/master'
     name: Deploy
     steps:
     - uses: actions/checkout@v2
