@@ -3,8 +3,6 @@ name: FWCloud-Agent CI
 on:
   push:
     branches: [main, devel]
-  pull_request:
-    branches: [main, devel]
 
 jobs:
   checks:
