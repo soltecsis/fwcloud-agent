@@ -36,7 +36,7 @@ package = "fwcloud-agent"
 buildflags = ["--release"]
 
 [package.metadata.rpm.targets]
-fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent" }
+fwcloud-agent = { path = "/usr/bin/fwcloud-agent" }
 
 [dependencies]
 thiserror = "1.0.28"
