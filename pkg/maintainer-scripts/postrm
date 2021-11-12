@@ -12,6 +12,9 @@ else
   rmdir /opt/fwcloud/agent/tmp
   rmdir /opt/fwcloud/agent/log
   rmdir /opt/fwcloud/agent
+  if [ -z "$(ls -A /opt/fwcloud)" ]; then
+    rmdir /opt/fwcloud
+  fi
 fi
 
 #DEBHELPER#
