@@ -14,7 +14,8 @@ URL: https://fwcloud.net
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 
 %description
-%{summary}
+FWCloud Agent daemon for simplify and improve
+firewalls management from a FWCloud console.
 
 %prep
 %setup -q
