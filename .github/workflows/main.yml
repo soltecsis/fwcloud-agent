@@ -51,7 +51,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Install required packages
-      run: apt install libssl-dev pkg-config
+      run: sudo apt install -y libssl-dev pkg-config
     - name: Build package
       id: fedora
       uses: ebbflow-io/cargo-rpm-amd64-fedora@1.1

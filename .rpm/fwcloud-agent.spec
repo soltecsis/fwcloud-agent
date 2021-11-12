@@ -10,6 +10,8 @@ License: GNU AFFERO GENERAL PUBLIC LICENSE
 Group: Applications/System
 Source0: %{name}-%{version}.tar.gz
 URL: https://fwcloud.net
+Vendor: SOLTECSIS, SL
+Packager: Carles Munyoz <cmunyoz@soltecsis.com>
 
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 
