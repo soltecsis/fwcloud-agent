@@ -2,11 +2,9 @@
 Description=fwcloud-agent
 
 [Service]
-ExecStart=/opt/fwcloud/agent/fwcloud-agent
+ExecStart=/bin/bash -ce "exec /opt/fwcloud/agent/fwcloud-agent >> /opt/fwcloud/agent/log/fwcloud-agent.log 2>&1"
 ExecStop=/bin/kill -TERM "$MAINPID"
 WorkingDirectory=/opt/fwcloud/agent/
-StandardOutput=append:/opt/fwcloud/agent/log/fwcloud-agent.log
-StandardError=append:/opt/fwcloud/agent/log/fwcloud-agent.log
 SyslogIdentifier=fwcloud-agent
 User=root
 Group=root

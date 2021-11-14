@@ -1,6 +1,7 @@
 /target
 /etc
 /logs
+/log
 /tmp
 /data
 .env

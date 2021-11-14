@@ -22,11 +22,11 @@ priority = "optional"
 assets = [
     ["target/release/fwcloud-agent", "opt/fwcloud/agent/", "700"],
     [".env.example", "opt/fwcloud/agent/.env", "600"],
-    ["pkg/fwcloud-agent.service", "lib/systemd/system/", "644"],
-    ["pkg/fwcloud-agent", "etc/logrotate.d/", "644"],
-    ["pkg/fwcloud-agent.1", "usr/share/man/man1/", "644"],
+    [".deb/fwcloud-agent.service", "lib/systemd/system/", "644"],
+    [".deb/fwcloud-agent", "etc/logrotate.d/", "644"],
+    [".deb/fwcloud-agent.1", "usr/share/man/man1/", "644"],
 ]
-maintainer-scripts = "pkg/maintainer-scripts"
+maintainer-scripts = ".deb/maintainer-scripts"
 
 [package.metadata.rpm]
 package = "fwcloud-agent"
