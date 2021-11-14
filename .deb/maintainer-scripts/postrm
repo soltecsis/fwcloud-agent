@@ -10,7 +10,7 @@ else
   ROOT_DIR="/opt/fwcloud/agent"
   DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log ${ROOT_DIR}"
   for DIR in $DIR_LIST; do
-    if [ -d "$DIR" -a -z "$(ls -A ${DIR})" ]; then
+    if [ -d "$DIR" ]; then
       rmdir "$DIR"
     fi
   done
