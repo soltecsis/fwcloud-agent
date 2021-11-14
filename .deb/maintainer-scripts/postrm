@@ -8,10 +8,13 @@ if [ ! -d /opt ]; then
   fi
 else
   ROOT_DIR="/opt/fwcloud/agent"
-  DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log ${ROOT_DIR}"
+  DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log ${ROOT_DIR} /opt/fwcloud"
   for DIR in $DIR_LIST; do
     if [ -d "$DIR" ]; then
-      rmdir "$DIR"
+      FL=`ls $DIR`
+      if [ -z "$FL" ]; then
+        rmdir "$DIR"
+      fi
     fi
   done
 fi
