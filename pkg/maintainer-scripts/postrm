@@ -7,14 +7,13 @@ if [ ! -d /opt ]; then
     chmod 755 /opt
   fi
 else
-  rmdir /opt/fwcloud/agent/etc
-  rmdir /opt/fwcloud/agent/data
-  rmdir /opt/fwcloud/agent/tmp
-  rmdir /opt/fwcloud/agent/log
-  rmdir /opt/fwcloud/agent
-  if [ -z "$(ls -A /opt/fwcloud)" ]; then
-    rmdir /opt/fwcloud
-  fi
+  ROOT_DIR="/opt/fwcloud/agent"
+  DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log ${ROOT_DIR}"
+  for DIR in $DIR_LIST; do
+    if [ -d "$DIR" -a -z "$(ls -A ${DIR})" ]; then
+      rmdir "$DIR"
+    fi
+  done
 fi
 
 #DEBHELPER#

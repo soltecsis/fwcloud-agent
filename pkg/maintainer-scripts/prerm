@@ -1,13 +1,15 @@
 #!/bin/sh
 set -e
 
-ROOT_DIR="/opt/fwcloud/agent"
-
 systemctl stop fwcloud-agent
 
-rm ${ROOT_DIR}/etc/cert.pem
-rm ${ROOT_DIR}/etc/key.pem
-rm ${ROOT_DIR}/log/*
+ROOT_DIR="/opt/fwcloud/agent"
+DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log"
+for DIR in $DIR_LIST; do
+  if [ -d "$DIR" -a ! -z "$(ls -A ${DIR})" ]; then
+    rm "${DIR}/*"
+  fi
+done
 
 #DEBHELPER#
 
