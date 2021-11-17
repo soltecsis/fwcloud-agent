@@ -307,7 +307,7 @@ mod tests {
    #[serial]
    fn cache_file_too_big() -> Result<()> {
         let list = status_files_list_factory(1);
-        let mut collector = collector_factory(vec![("OPENVPN_STATUS_CACHE_MAX_SIZE",String::from("10")), ("OPENVPN_STATUS_FILES",list.join(","))], true);
+        let mut collector = collector_factory(vec![("OPENVPN_STATUS_CACHE_MAX_SIZE",String::from("20")), ("OPENVPN_STATUS_FILES",list.join(","))], true);
         
         let path = collector.openvpn_status_files[0].cache_file.clone();
         {
