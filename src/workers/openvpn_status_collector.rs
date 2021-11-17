@@ -238,6 +238,7 @@ mod tests {
             env::set_var(v.0, &v.1);
         }
 
+        env::set_var("API_KEY", "d64c88318c8f213f427af857d0013f93");
         let cfg = Arc::new(Config::new().unwrap());
 
         for v in env_list.iter() {
