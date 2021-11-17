@@ -221,3 +221,109 @@ impl OpenVPNStCollector {
         tx
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{env, io::BufWriter};
+    use serial_test::serial;
+    use rand::Rng;
+    use uuid::Uuid;
+    use crate::errors::Result;
+  
+    fn collector_factory(env_list: Vec<(&str,String)>, change_paths: bool) -> OpenVPNStCollectorInner {
+        for v in env_list.iter() {
+            env::set_var(v.0, &v.1);
+        }
+
+        let cfg = Arc::new(Config::new().unwrap());
+
+        for v in env_list.iter() {
+            env::remove_var(v.0);
+        }
+
+        let mut collector = OpenVPNStCollectorInner::new(&cfg);
+
+        if change_paths {
+            for inx in 0..collector.len() {
+                collector.openvpn_status_files[inx].tmp_file = collector.openvpn_status_files[inx].tmp_file.replace("./tmp/", "./tests/playground/tmp/");
+                collector.openvpn_status_files[inx].cache_file = collector.openvpn_status_files[inx].cache_file.replace("./data/", "./tests/playground/data/");
+            }
+        }
+
+        collector
+    }
+
+    fn status_files_list_factory(n: usize) -> Vec<String> {
+        let mut list:Vec<String> = vec![];
+    
+        for _ in 0..n {
+            list.push(format!("{}/tests/playground/tmp/{}.log",env::current_dir().unwrap().display(),Uuid::new_v4().to_string()));
+        }
+    
+        list
+    }
+    
+    #[test]
+    #[serial]
+    fn generates_right_default_openvpn_status_file_vector() {
+        let collector = collector_factory(vec![],false);
+        assert_eq!(collector.openvpn_status_files.len(), 1);
+        assert_eq!(collector.openvpn_status_files[0].st_file, String::from("/etc/openvpn/openvpn-status.log"));
+        assert_eq!(collector.openvpn_status_files[0].tmp_file, String::from("./tmp/_etc_openvpn_openvpn-status.log.tmp"));
+        assert_eq!(collector.openvpn_status_files[0].cache_file, String::from("./data/_etc_openvpn_openvpn-status.log.data"));
+        assert_eq!(collector.openvpn_status_files[0].last_update, 0);
+    }      
+
+
+    #[test]
+    #[serial]
+    fn empty_openvpn_status_file_vector_if_config_option_is_empty() {
+        let collector = collector_factory(vec![("OPENVPN_STATUS_FILES",String::from(""))], false);
+        assert_eq!(collector.openvpn_status_files.len(), 0);
+    }      
+
+
+    #[test]
+    #[serial]
+    fn customized_openvpn_status_files_config() {
+        let n = rand::thread_rng().gen_range(0..5);
+        let list = status_files_list_factory(n);
+        let collector = collector_factory(vec![("OPENVPN_STATUS_FILES",list.join(","))], false);
+        assert_eq!(collector.openvpn_status_files.len(), n);
+
+        for inx in 0..n {
+            assert_eq!(collector.openvpn_status_files[inx].st_file, list[inx]);
+            assert_eq!(collector.openvpn_status_files[inx].tmp_file, format!("./tmp/{}.tmp",list[inx].replace("/", "_")));
+            assert_eq!(collector.openvpn_status_files[inx].cache_file, format!("./data/{}.data",list[inx].replace("/", "_")));
+            assert_eq!(collector.openvpn_status_files[inx].last_update, 0);    
+        }
+   }      
+
+
+   #[test]
+   #[serial]
+   fn cache_file_too_big() -> Result<()> {
+        let list = status_files_list_factory(1);
+        let mut collector = collector_factory(vec![("OPENVPN_STATUS_CACHE_MAX_SIZE",String::from("10")), ("OPENVPN_STATUS_FILES",list.join(","))], true);
+        
+        let path = collector.openvpn_status_files[0].cache_file.clone();
+        {
+            let fw = File::create(&path)?;
+            let mut writer = BufWriter::new(&fw);
+            writeln!(writer, "{}\n", Uuid::new_v4().to_string())?;
+        }
+
+        let size = fs::metadata(&path)?.len();
+        collector.collect_all_files_data();
+        let new_size = fs::metadata(&path)?.len();
+        fs::remove_file(path)?;
+
+        assert_ne!(size,0);
+        assert_eq!(size,new_size);
+
+        Ok(())
+    }      
+}
