@@ -227,7 +227,7 @@ impl OpenVPNStCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{env, io::BufWriter};
+    use std::env;
     use serial_test::serial;
     use rand::Rng;
     use uuid::Uuid;
@@ -266,7 +266,25 @@ mod tests {
     
         list
     }
-    
+
+
+    fn remove_collector_files(collector: &OpenVPNStCollectorInner) -> Result<()> {
+        for inx in 0..collector.len() {
+            if Path::new(&collector.openvpn_status_files[inx].st_file).is_file() {
+                fs::remove_file(&collector.openvpn_status_files[inx].st_file)?;
+            }
+            if Path::new(&collector.openvpn_status_files[inx].tmp_file).is_file() {
+                fs::remove_file(&collector.openvpn_status_files[inx].tmp_file)?;    
+            }
+            if Path::new(&collector.openvpn_status_files[inx].cache_file).is_file() {
+                fs::remove_file(&collector.openvpn_status_files[inx].cache_file)?;    
+            }
+        }
+
+        Ok(())
+    }
+
+
     #[test]
     #[serial]
     fn generates_right_default_openvpn_status_file_vector() {
@@ -306,21 +324,40 @@ mod tests {
 
    #[test]
    #[serial]
+   fn should_ignore_fist_sample_set() -> Result<()> {
+        let list = status_files_list_factory(1);
+        let mut collector = collector_factory(vec![("OPENVPN_STATUS_FILES",list.join(","))], true);
+        
+        fs::copy("./tests/templates/openvpn-status.log", &collector.openvpn_status_files[0].st_file)?;
+
+        collector.collect_all_files_data();
+
+        // This is the first data collection, and then the cache file should be created but with 0 bytes.
+        let size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
+        assert_eq!(size,0);
+        // The last_updated timestamp must be updated with the one into the OpenVPN status file.
+        assert_eq!(collector.openvpn_status_files[0].last_update,1633366402);
+        
+        remove_collector_files(&collector)?;
+
+        Ok(())
+    }      
+
+
+   #[test]
+   #[serial]
    fn cache_file_too_big() -> Result<()> {
         let list = status_files_list_factory(1);
-        let mut collector = collector_factory(vec![("OPENVPN_STATUS_CACHE_MAX_SIZE",String::from("20")), ("OPENVPN_STATUS_FILES",list.join(","))], true);
+        let mut collector = collector_factory(vec![("OPENVPN_STATUS_CACHE_MAX_SIZE",String::from("1")), ("OPENVPN_STATUS_FILES",list.join(","))], true);
         
-        let path = collector.openvpn_status_files[0].cache_file.clone();
-        {
-            let fw = File::create(&path)?;
-            let mut writer = BufWriter::new(&fw);
-            writeln!(writer, "{}\n", Uuid::new_v4().to_string())?;
-        }
+        fs::copy("./tests/templates/openvpn-status.log", &collector.openvpn_status_files[0].st_file)?;
 
+        let path = collector.openvpn_status_files[0].cache_file.clone();
         let size = fs::metadata(&path)?.len();
         collector.collect_all_files_data();
         let new_size = fs::metadata(&path)?.len();
-        fs::remove_file(path)?;
+        
+        remove_collector_files(&collector)?;
 
         assert_ne!(size,0);
         assert_eq!(size,new_size);
