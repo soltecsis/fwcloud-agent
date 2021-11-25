@@ -1,18 +1,67 @@
 \" This is the man page for FWCloud-agent 1.0.
 .TH FWCloud-Agent "1" "September 2021" "fwcloud-agent 1.0" "User Commands"
 .SH NAME
-fwcloud-agent - FWCloud Agent daemon for remote firewalls management
+fwcloud-agent -
+.B FWCloud-Agent
+is a service that optimizes communication with firewalls managed from
+.B FWCloud,
+also improves security and allows additional functionalities
 .SH SYNOPSIS
 .B fwcloud-agent
 .SH DESCRIPTION
-.B FWCloud 
-is a web application that allows centralized and secure management of Linux-based firewalls. It’s a cloud application, which is essential  to allow it to be used from anywhere, anytime and with any device. When possible FWCloud-API will comunicate with 
-.B fwcloud-agent 
-in order to manage and monitor the firewalls.
+.PP
+.B FWCloud
+allows you to centrally manage Linux-based firewalls that can be located anywhere. You can have your
+.B FWCloud
+console at the headquarters of your company and the firewalls managed from it scattered over remote locations throughout the world.
+.PP
+Therefore, you need a way to communicate your
+.B FWCloud
+console with the firewalls it manages to carry out actions on them such as loading the security policy, obtaining the network configuration, managing VPN configuration, blocking VPN connections, etc.
+
+This
+.B FWCloud
+– FireWalls communication can be carried out in two ways:
+.RS
+.PP
+    SSH
+    FWCloud-Agent
+.RE
+.PP
+Communication via SSH protocol is the simplest since it does not require to carry out any installation on the firewall to be managed, but it has the disadvantage that you are using a service such as SSH that allows full access to the managed firewall. In addition to that, if you do not want to save the access credentials in
+.B FWCloud
+for security, every time you have to carry out some action on the firewall, you have to enter these credentials.
+.PP
+The communication option through
+.B FWCloud-Agent
+is the most recommended, since it simplifies and optimizes communication with the managed firewall. It is a service that is installed on the firewall through which the
+.B FWCloud
+console carries out the necessary actions on the managed firewalls. This service is installed using the .deb or .rpm packages corresponding to the Linux distribution that you are using.
+.PP
+.B FWCloud-Agent
+improves security in the
+.B FWCloud
+– FireWalls interaction, since it does not require SSH credentials, instead of it an automatically generated during the package installation process in the firewall API Key is used. In addition, it is possible to restrict access to this service only to the IP of the
+.B FWCloud
+console.
+.PP
+Using
+.B FWCloud-Agent
+instead of SSH also means that you restrict the actions that can be done on the firewall only to those that the
+.B FWCloud-Agent
+service allows. That is, you are not using a general scope protocol like SSH that allows you to do much more than what is needed in the
+.B FWCloud
+– FireWalls communication.
+.PP
+You also optimize and improve the interaction with the firewalls, since it is not necessary to establish an SSH connection every time you have to do something with the target firewall.
+.PP
+In addition, thanks to
+.B FWCloud-Agent
+you can do many more things that are not feasible through SSH communication, such as maintaining a history of the status of VPN connections.
 .PP
 Same features of 
-.B fwcloud-agent 
-can be configured using .env file
+.B FWCloud-Agent 
+can be configured using .env file located in the base directory of the installation (/opt/fwcloud/agent):
 .RS
 .PP
 - BIND_IP: IP to which the server will attend API service request.
@@ -31,13 +80,17 @@ If not set, as many threads as CPU cores will be started.
 .BR
  By default SSL will be enabled.
 .PP
-- ALLOWED_IPS: Space separated list of IPs from which FWCloud-Agent will allow API requests.
+- ALLOWED_IPS: Space separated list of IPs from which
+.B FWCloud-Agent
+will allow API requests.
 .BR
 By default any IP is allowed.
 .PP
 - API_KEY: API Key used for API requests authentication.
 .BR
-IMPORTANT: Change this value to a new random generated one for your FWCloud-Agent installation. If 
+IMPORTANT: Change this value to a new random generated one for your
+.B FWCloud-Agent
+installation. If 
 .B fwcloud-agent 
 is installed from the .deb file or using apt utility, a new API_KEY is generated 
 .PP
@@ -54,7 +107,9 @@ The default file is "/etc/openvpn/openvpn-status.log"
 .BR
 The default value is 30 seconds
 .PP
-- OPENVPN_STATUS_REQUEST_MAX_LINES: Maximum number of lines that FWCloud-Agent will accept for an OpenVPN get status request.
+- OPENVPN_STATUS_REQUEST_MAX_LINES: Maximum number of lines that
+.B FWCloud-Agent
+will accept for an OpenVPN get status request.
 .BR
 The defaul value is 1000 lines
 .PP
@@ -63,7 +118,9 @@ The defaul value is 1000 lines
 The default value is 10485760
 .RE
 .SH SEE ALSO
-For more information, please refer to FWCloud documentation, available online at https://fwcloud.net
+For more information, please refer to
+.B FWCloud
+documentation, available online at https://fwcloud.net
 .SH AUTHORS
 Original work by Soltecsis, 2021
 .PP

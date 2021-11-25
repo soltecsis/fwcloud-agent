@@ -69,5 +69,24 @@ systemctl start fwcloud-agent
 
 %preun
 systemctl stop fwcloud-agent
-rm -r /opt/fwcloud
+ROOT_DIR="/opt/fwcloud/agent"
+DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log"
+for DIR in $DIR_LIST; do
+  if [ -d "$DIR" ]; then
+    FL=`ls $DIR`
+    for F in $FL; do
+      rm "${DIR}/${F}" 
+    done
+  fi
+done
+
+%postun
+if [ -d /opt/fwcloud/agent ]; then
+  if [ ! "$(ls /opt/fwcloud/agent)" ]; then
+    rmdir /opt/fwcloud/agent
+  fi
+fi
+if [ ! "$(ls /opt/fwcloud)" ]; then
+  rmdir /opt/fwcloud
+fi
 
