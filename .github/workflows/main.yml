@@ -35,7 +35,7 @@ jobs:
     name: Ubuntu amd64
     steps:
     - uses: actions/checkout@v2
-    - name: Build package
+    - name: Build DEB package
       id: ubuntu
       uses: ebbflow-io/cargo-deb-amd64-ubuntu@1.0
     - name: Upload package
@@ -44,22 +44,22 @@ jobs:
         name: ubuntu-amd64
         path: ./target/x86_64-unknown-linux-musl/debian/*
 
-  # fedora-amd64:
-  #   needs: [build]
-  #   runs-on: ubuntu-latest
-  #   name: Fedora amd64
-  #   steps:
-  #   - uses: actions/checkout@v2
-  #   - name: Install required packages
-  #     run: sudo apt install -y libssl-dev pkg-config openssl
-  #   - name: Build package
-  #     id: fedora
-  #     uses: ebbflow-io/cargo-rpm-amd64-fedora@1.1
-  #   - name: Upload RPM Artifact
-  #     uses: actions/upload-artifact@v2
-  #     with:
-  #       name: fedora-amd64
-  #       path: ./target/x86_64-unknown-linux-musl/release/rpmbuild/RPMS/x86_64/*
+  fedora-amd64:
+    needs: [build]
+    runs-on: ubuntu-latest
+    name: Fedora amd64
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install required packages
+      run: sudo apt install -y cargo rpm libssl-dev pkg-config
+    - name: Build RPM package
+      id: fedora
+      uses: ebbflow-io/cargo-rpm-amd64-fedora@1.1
+    - name: Upload RPM Artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: fedora-amd64
+        path: ./target/x86_64-unknown-linux-musl/release/rpmbuild/RPMS/x86_64/*
 
   # raspbian-armv7:
   #   needs: [build]
@@ -77,8 +77,7 @@ jobs:
   #       path: ./target/armv7-unknown-linux-musleabihf/debian/*
 
   upload:
-    # needs: [ubuntu-amd64, fedora-amd64]
-    needs: [ubuntu-amd64]
+    needs: [ubuntu-amd64, fedora-amd64]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     name: Deploy
@@ -96,11 +95,11 @@ jobs:
         password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
         local-dir: ./ubuntu-amd64/
         server-dir: ./fwcloud-agent/deb/
-    # - name: Upload Fedora amd64 package
-    #   uses: SamKirkland/FTP-Deploy-Action@4.0.0
-    #   with:
-    #     server: pkg.fwcloud.net
-    #     username: fwcloud-pkg
-    #     password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
-    #     local-dir: ./fedora-amd64/
-    #     server-dir: ./fwcloud-agent/rpm/
+    - name: Upload Fedora amd64 package
+      uses: SamKirkland/FTP-Deploy-Action@4.0.0
+      with:
+        server: pkg.fwcloud.net
+        username: fwcloud-pkg
+        password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
+        local-dir: ./fedora-amd64/
+        server-dir: ./fwcloud-agent/rpm/
