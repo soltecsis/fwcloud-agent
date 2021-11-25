@@ -60,7 +60,7 @@ jobs:
       uses: actions/upload-artifact@v2
       with:
         name: fedora-amd64
-        path: ./target/x86_64-unknown-linux-musl/release/rpmbuild/RPMS/x86_64/*
+        path: ./target/release/rpmbuild/RPMS/x86_64/*
 
   # raspbian-armv7:
   #   needs: [build]
