@@ -52,9 +52,9 @@ jobs:
     - uses: actions/checkout@v2
     - name: Install required packages
       run: sudo apt install -y cargo rpm libssl-dev pkg-config
+      run: sudo cargo install cargo-rpm
     - name: Build RPM package
-      id: fedora
-      uses: ebbflow-io/cargo-rpm-amd64-fedora@1.1
+      run: cargo rpm build
     - name: Upload RPM Artifact
       uses: actions/upload-artifact@v2
       with:
