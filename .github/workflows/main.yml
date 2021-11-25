@@ -53,7 +53,7 @@ jobs:
     - name: Install required packages
       run: sudo apt install -y cargo rpm libssl-dev pkg-config
     - name: Install cargo-rpm
-      run: sudo cargo install cargo-rpm
+      run: cargo install cargo-rpm
     - name: Build RPM package
       run: cargo rpm build
     - name: Upload RPM Artifact
