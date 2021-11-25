@@ -89,9 +89,9 @@ impl Config {
     let cpus = num_cpus::get();
 
     let mut cfg = Config {
-      etc_dir: "./etc/",
-      tmp_dir: "./tmp/",
-      data_dir: "./data/",
+      etc_dir: "./etc",
+      tmp_dir: "./tmp",
+      data_dir: "./data",
 
       bind_ip: env::var("BIND_IP").unwrap_or(String::from("0.0.0.0")),
       bind_port: env::var("BIND_PORT").unwrap_or(String::from("33033")).parse::<u16>().unwrap_or(33033),

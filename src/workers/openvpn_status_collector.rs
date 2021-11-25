@@ -221,3 +221,228 @@ impl OpenVPNStCollector {
         tx
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use serial_test::serial;
+    use rand::Rng;
+    use uuid::Uuid;
+    use crate::errors::Result;
+  
+    fn collector_factory(env_list: Vec<(&str,String)>, change_paths: bool) -> OpenVPNStCollectorInner {
+        for v in env_list.iter() {
+            env::set_var(v.0, &v.1);
+        }
+
+        env::set_var("API_KEY", "d64c88318c8f213f427af857d0013f93");
+        let cfg = Arc::new(Config::new().unwrap());
+
+        for v in env_list.iter() {
+            env::remove_var(v.0);
+        }
+
+        let mut collector = OpenVPNStCollectorInner::new(&cfg);
+
+        if change_paths {
+            for inx in 0..collector.len() {
+                collector.openvpn_status_files[inx].tmp_file = collector.openvpn_status_files[inx].tmp_file.replace("./tmp/", "./tests/playground/tmp/");
+                collector.openvpn_status_files[inx].cache_file = collector.openvpn_status_files[inx].cache_file.replace("./data/", "./tests/playground/data/");
+            }
+        }
+
+        collector
+    }
+
+    fn status_files_list_factory(n: usize) -> Vec<String> {
+        let mut list:Vec<String> = vec![];
+    
+        for _ in 0..n {
+            list.push(format!("{}/tests/playground/tmp/{}.log",env::current_dir().unwrap().display(),Uuid::new_v4().to_string()));
+        }
+    
+        list
+    }
+
+
+    fn remove_collector_files(collector: &OpenVPNStCollectorInner) -> Result<()> {
+        for inx in 0..collector.len() {
+            if Path::new(&collector.openvpn_status_files[inx].st_file).is_file() {
+                fs::remove_file(&collector.openvpn_status_files[inx].st_file)?;
+            }
+            if Path::new(&collector.openvpn_status_files[inx].tmp_file).is_file() {
+                fs::remove_file(&collector.openvpn_status_files[inx].tmp_file)?;    
+            }
+            if Path::new(&collector.openvpn_status_files[inx].cache_file).is_file() {
+                fs::remove_file(&collector.openvpn_status_files[inx].cache_file)?;    
+            }
+        }
+
+        Ok(())
+    }
+
+
+    #[test]
+    #[serial]
+    fn generates_right_default_openvpn_status_file_vector() {
+        let collector = collector_factory(vec![],false);
+        assert_eq!(collector.openvpn_status_files.len(), 1);
+        assert_eq!(collector.openvpn_status_files[0].st_file, String::from("/etc/openvpn/openvpn-status.log"));
+        assert_eq!(collector.openvpn_status_files[0].tmp_file, String::from("./tmp/_etc_openvpn_openvpn-status.log.tmp"));
+        assert_eq!(collector.openvpn_status_files[0].cache_file, String::from("./data/_etc_openvpn_openvpn-status.log.data"));
+        assert_eq!(collector.openvpn_status_files[0].last_update, 0);
+    }      
+
+
+    #[test]
+    #[serial]
+    fn empty_openvpn_status_file_vector_if_config_option_is_empty() {
+        let collector = collector_factory(vec![("OPENVPN_STATUS_FILES",String::from(""))], false);
+        assert_eq!(collector.openvpn_status_files.len(), 0);
+    }      
+
+
+    #[test]
+    #[serial]
+    fn customized_openvpn_status_files_config() {
+        let n = rand::thread_rng().gen_range(0..5);
+        let list = status_files_list_factory(n);
+        let collector = collector_factory(vec![("OPENVPN_STATUS_FILES",list.join(","))], false);
+        assert_eq!(collector.openvpn_status_files.len(), n);
+
+        for inx in 0..n {
+            assert_eq!(collector.openvpn_status_files[inx].st_file, list[inx]);
+            assert_eq!(collector.openvpn_status_files[inx].tmp_file, format!("./tmp/{}.tmp",list[inx].replace("/", "_")));
+            assert_eq!(collector.openvpn_status_files[inx].cache_file, format!("./data/{}.data",list[inx].replace("/", "_")));
+            assert_eq!(collector.openvpn_status_files[inx].last_update, 0);    
+        }
+   }      
+
+
+   #[test]
+   #[serial]
+   fn should_ignore_fist_sample_set() -> Result<()> {
+        let list = status_files_list_factory(1);
+        let mut collector = collector_factory(vec![("OPENVPN_STATUS_FILES",list.join(","))], true);
+        
+        fs::copy("./tests/templates/openvpn-status.log_ts1", &collector.openvpn_status_files[0].st_file)?;
+
+        collector.collect_all_files_data();
+
+        // This is the first data collection, and then the cache file should be created but with 0 bytes.
+        let size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
+        assert_eq!(size,0);
+        // The last_updated timestamp must be updated with the one into the OpenVPN status file.
+        assert_eq!(collector.openvpn_status_files[0].last_update,1633366402);
+        
+        remove_collector_files(&collector)?;
+        Ok(())
+    }      
+
+
+    #[test]
+    #[serial]
+    fn should_append_to_cache_file_if_timestamp_changes() -> Result<()> {
+        let list = status_files_list_factory(1);
+        let mut collector = collector_factory(vec![("OPENVPN_STATUS_FILES",list.join(","))], true);
+        
+        fs::copy("./tests/templates/openvpn-status.log_ts1", &collector.openvpn_status_files[0].st_file)?;
+        collector.collect_all_files_data();
+
+        // This is the first data collection, and then the cache file should be created but with 0 bytes.
+        let mut size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
+        assert_eq!(size,0);
+        // The last_updated timestamp must be updated with the one into the OpenVPN status file.
+        assert_eq!(collector.openvpn_status_files[0].last_update,1633366402);
+        
+        // Change the status file by a new one with different timestamp.
+        fs::copy("./tests/templates/openvpn-status.log_ts2", &collector.openvpn_status_files[0].st_file)?;
+        collector.collect_all_files_data();
+        size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
+        assert_eq!(size,262);
+        assert_eq!(collector.openvpn_status_files[0].last_update,1633366441);
+
+        // Change the status file by a new one with different timestamp.
+        fs::copy("./tests/templates/openvpn-status.log_ts3", &collector.openvpn_status_files[0].st_file)?;
+        collector.collect_all_files_data();
+        size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
+        assert_eq!(size,524);
+        assert_eq!(collector.openvpn_status_files[0].last_update,1633366496);
+
+        // Change the status file by a new one with lower timestamp.
+        fs::copy("./tests/templates/openvpn-status.log_ts1", &collector.openvpn_status_files[0].st_file)?;
+        collector.collect_all_files_data();
+        size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
+        assert_eq!(size,786);
+        assert_eq!(collector.openvpn_status_files[0].last_update,1633366402);
+        
+        remove_collector_files(&collector)?;
+        Ok(())
+    }    
+
+
+    #[test]
+    #[serial]
+    fn should_not_append_to_cache_file_if_timestamp_is_equal() -> Result<()> {
+        let list = status_files_list_factory(1);
+        let mut collector = collector_factory(vec![("OPENVPN_STATUS_FILES",list.join(","))], true);
+        
+        fs::copy("./tests/templates/openvpn-status.log_ts1", &collector.openvpn_status_files[0].st_file)?;
+        collector.collect_all_files_data();
+
+        // This is the first data collection, and then the cache file should be created but with 0 bytes.
+        let mut size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
+        assert_eq!(size,0);
+        // The last_updated timestamp must be updated with the one into the OpenVPN status file.
+        assert_eq!(collector.openvpn_status_files[0].last_update,1633366402);
+        
+        // Change the status file by a new one with different timestamp.
+        fs::copy("./tests/templates/openvpn-status.log_ts2", &collector.openvpn_status_files[0].st_file)?;
+        collector.collect_all_files_data();
+        size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
+        assert_eq!(size,262);
+        assert_eq!(collector.openvpn_status_files[0].last_update,1633366441);
+
+        // Don't change OpenVPN status log file, then timestamp is the same.
+        collector.collect_all_files_data();
+        size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
+        assert_eq!(size,262);
+        assert_eq!(collector.openvpn_status_files[0].last_update,1633366441);
+
+        remove_collector_files(&collector)?;
+        Ok(())
+    }    
+
+    
+   #[test]
+   #[serial]
+   fn control_cache_file_size() -> Result<()> {
+        let list = status_files_list_factory(1);
+        let mut collector = collector_factory(vec![("OPENVPN_STATUS_CACHE_MAX_SIZE",String::from("1")), ("OPENVPN_STATUS_FILES",list.join(","))], true);
+        
+        fs::copy("./tests/templates/openvpn-status.log_ts1", &collector.openvpn_status_files[0].st_file)?;
+        collector.collect_all_files_data();
+        let mut size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
+        assert_eq!(size,0);
+        assert_eq!(collector.openvpn_status_files[0].last_update,1633366402);
+
+        fs::copy("./tests/templates/openvpn-status.log_ts2", &collector.openvpn_status_files[0].st_file)?;
+        collector.collect_all_files_data();
+        size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
+        assert_eq!(size,262);
+        assert_eq!(collector.openvpn_status_files[0].last_update,1633366441);
+
+        fs::copy("./tests/templates/openvpn-status.log_ts3", &collector.openvpn_status_files[0].st_file)?;
+        collector.collect_all_files_data();
+        size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
+        // The cache file size control takes effect and no more status data is collected.
+        assert_eq!(size,262);
+        assert_eq!(collector.openvpn_status_files[0].last_update,1633366441);
+        
+        remove_collector_files(&collector)?;
+        Ok(())
+    }      
+}
