@@ -41,6 +41,12 @@ struct Plugin {
     action: String
 }
 
+/* 
+  curl -k -i -X POST -H 'X-API-Key: **************************' \
+    -H "Content-Type: application/json" \
+    -d '{"name":"openvpn", "action":"enable"}' \
+    https://localhost:33033/api/v1/plugin
+*/
 #[post("/plugin")]
 async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   // Validate input.
