@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -22,6 +22,6 @@
 use actix_web::{put, HttpResponse, Responder};
 
 #[put("/ping")]
-pub async fn ping() -> impl Responder {
+async fn ping() -> impl Responder {
     HttpResponse::Ok().finish()
 }

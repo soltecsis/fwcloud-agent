@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -25,12 +25,14 @@ mod fwcloud_script;
 mod openvpn;
 mod interfaces;
 mod iptables_save;
+mod plugin;
 
 use actix_web::web;
 
 pub fn routes_setup(config: &mut web::ServiceConfig) {
     config.service(web::scope("/api/v1")
         .service(ping::ping)
+        .service(plugin::plugin)
 
         .service(web::scope("/fwcloud_script/")
             .service(fwcloud_script::upload_and_run)

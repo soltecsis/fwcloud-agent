@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -36,7 +36,7 @@ use thread_id;
 
 
 #[post("/files/upload")]
-pub async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
   let mutex_data = mutex.lock().unwrap();
@@ -56,7 +56,7 @@ pub async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Re
 
 
 #[delete("/files/remove")]
-pub async fn files_remove(files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+async fn files_remove(files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
   let mutex_data = mutex.lock().unwrap();
@@ -73,7 +73,7 @@ pub async fn files_remove(files_list: web::Json<FilesList>, cfg: web::Data<Arc<C
 
 
 #[put("/files/sha256")]
-pub async fn files_sha256(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+async fn files_sha256(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
   let mutex_data = mutex.lock().unwrap();
@@ -107,7 +107,7 @@ pub async fn files_sha256(mut files_list: web::Json<FilesList>, cfg: web::Data<A
 
 
 #[put("/get/status")]
-pub async fn get_status(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+async fn get_status(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
   let mutex_data = mutex.lock().unwrap();
@@ -140,14 +140,14 @@ pub async fn get_status(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc
 
 
 #[put("/update/status")]
-pub async fn update_status(workers_channels: web::Data<WorkersChannels>) -> Result<HttpResponse> {
+async fn update_status(workers_channels: web::Data<WorkersChannels>) -> Result<HttpResponse> {
   workers_channels.openvpn_st_collector.send(1)?;
   Ok(HttpResponse::Ok().finish())
 }
 
 
 #[put("/get/status/rt")]
-pub async fn get_status_rt(files_list: web::Json<FilesList>) -> Result<HttpResponse> {
+async fn get_status_rt(files_list: web::Json<FilesList>) -> Result<HttpResponse> {
   // Only one OpenVPN status file must be indicated in the request.
   if files_list.len() != 1 {
     return Err(FwcError::OnlyOneFileExpected);

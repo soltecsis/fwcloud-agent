@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -31,7 +31,7 @@ use crate::utils::http_files::HttpFiles;
 use crate::errors::Result;
 
 #[post("/upload")]
-pub async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking FWCloud Script mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.fwcloud_script);
   let mutex_data = mutex.lock().unwrap();

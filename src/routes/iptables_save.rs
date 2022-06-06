@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -25,6 +25,6 @@ use crate::utils::cmd::run_cmd;
 use crate::errors::Result;
 
 #[get("/data")]
-pub async fn data() -> Result<HttpResponse> {
+async fn data() -> Result<HttpResponse> {
   Ok(run_cmd("iptables-save", &[])?)
 }

@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -33,7 +33,8 @@ use validator::Validate;
 
 pub struct MyMutex {
   pub openvpn: Arc<Mutex<u8>>,
-  pub fwcloud_script: Arc<Mutex<u8>>
+  pub fwcloud_script: Arc<Mutex<u8>>,
+  pub plugins: Arc<Mutex<u8>>
 }
 
 #[derive(Validate)]
@@ -41,6 +42,7 @@ pub struct Config {
   pub etc_dir: &'static str,
   pub tmp_dir: &'static str,
   pub data_dir: &'static str,
+  pub plugins_dir: &'static str,
 
   #[validate(regex(path = "crate::utils::myregex::IPV4", message = "Bad IPv4 address"))]
   bind_ip: String,
@@ -92,6 +94,7 @@ impl Config {
       etc_dir: "./etc",
       tmp_dir: "./tmp",
       data_dir: "./data",
+      plugins_dir: "./plugins",
 
       bind_ip: env::var("BIND_IP").unwrap_or(String::from("0.0.0.0")),
       bind_port: env::var("BIND_PORT").unwrap_or(String::from("33033")).parse::<u16>().unwrap_or(33033),
@@ -114,7 +117,8 @@ impl Config {
 
       mutex: MyMutex {
         openvpn: Arc::new(Mutex::new(0)),
-        fwcloud_script: Arc::new(Mutex::new(0))
+        fwcloud_script: Arc::new(Mutex::new(0)),
+        plugins: Arc::new(Mutex::new(0))
       }
     };
 
