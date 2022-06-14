@@ -22,7 +22,7 @@
 
 //use std::fmt::{self, Debug};
 
-use actix_web::{HttpResponse, ResponseError, http::{StatusCode, header}};
+use actix_web::{HttpResponse, ResponseError, http::{StatusCode, header}, body::BoxBody};
 use thiserror::Error;
 use log::error;
 
@@ -79,7 +79,7 @@ pub enum FwcError {
   IOError(#[from] std::io::Error),
 
   #[error(transparent)]
-  BlockingError(#[from] actix_web::error::BlockingError<std::io::Error>),
+  BlockingError(#[from] actix_web::error::BlockingError),
 
   #[error(transparent)]
   PopenError(#[from] subprocess::PopenError),
@@ -109,6 +109,6 @@ impl ResponseError for FwcError {
       );
       
       error!("{}",self);
-      resp.set_body(actix_web::dev::Body::from(format!("{{\"message\":\"{}\"}}",self)))
+      resp.set_body(BoxBody::new(format!("{{\"message\":\"{}\"}}",self).to_string()))
     }
 }

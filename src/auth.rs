@@ -32,22 +32,23 @@ use futures::Future;
 use crate::errors::FwcError;
 use crate::config::Config;
 
+
 // There are two steps in middleware processing.
 // 1. Middleware initialization, middleware factory gets called with
 //    next service in chain as parameter.
 // 2. Middleware's call method gets called with normal request.
 pub struct Authorize;
 
-// Middleware factory is `Transform` trait from actix-service crate
+// Middleware factory is `Transform` trait
 // `S` - type of the next service
 // `B` - type of response's body
-impl<S, B> Transform<S> for Authorize
+impl<S, B> Transform<S, ServiceRequest> for Authorize
 where
-    S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
     B: 'static,
 {
-    type Request = ServiceRequest;
+    //type Request = ServiceRequest;
     type Response = ServiceResponse<B>;
     type Error = Error;
     type InitError = ();
@@ -67,22 +68,22 @@ macro_rules! err {
     ($x: expr) => { Box::pin(async { Err(Error::from($x)) }) };
 }
 
-impl<S, B> Service for AuthorizeMiddleware<S>
+impl<S, B> Service<ServiceRequest> for AuthorizeMiddleware<S>
 where
-    S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
     B: 'static,
 {
-    type Request = ServiceRequest;
+    //type Request = ServiceRequest;
     type Response = ServiceResponse<B>;
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, req: ServiceRequest) -> Self::Future {
+    fn call(&self, req: ServiceRequest) -> Self::Future {
         let api_key: String; 
 
         let cfg: &web::Data<Arc<Config>> = match req.app_data() {
@@ -105,7 +106,7 @@ where
         if cfg.allowed_ips.len() > 0 { 
             let mut found = false;
 
-            let remote_ip = match req.connection_info().remote_addr() {
+            let remote_ip = match req.connection_info().peer_addr() {
                 Some(data) => {
                         let ip_and_port: Vec<&str> = data.split(":").collect(); 
                         String::from(ip_and_port[0])

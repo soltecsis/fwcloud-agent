@@ -32,8 +32,7 @@ mod workers;
 
 use log::{info, warn};
 use std::sync::Arc;
-use actix_web::{App, HttpServer, middleware};
-use actix_web_requestid::{RequestIDService};
+use actix_web::{App, HttpServer, middleware, web};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use env_logger::Env;
 
@@ -57,9 +56,8 @@ async fn main() -> std::io::Result<()> {
 
     let server = HttpServer::new( move || {
         App::new()
-            .data(cfg.clone())
-            .data(workers_channels.clone())
-            .wrap(RequestIDService::default())
+            .app_data(web::Data::new(cfg.clone()))
+            .app_data(web::Data::new(workers_channels.clone()))
             .wrap(middleware::Logger::default())
             .wrap(auth::Authorize)
             .configure(routes::routes_setup)

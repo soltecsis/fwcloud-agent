@@ -20,7 +20,7 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::{io::Write, os::unix::prelude::PermissionsExt};
+use std::{os::unix::prelude::PermissionsExt, io::Write};
 
 use actix_multipart::{Multipart, Field};
 use actix_web::{web,  HttpResponse};
@@ -108,7 +108,7 @@ impl HttpFiles {
   async fn extract_multipart_data(&mut self, mut payload: Multipart) -> Result<()> {
     // iterate over multipart stream
     while let Ok(Some(mut field)) = payload.try_next().await {
-      let content_type = field.content_disposition().unwrap();
+      let content_type = field.content_disposition();
       
       let filename = sanitize_filename::sanitize(content_type.get_filename().unwrap_or("").to_string());
       if filename.len() == 0 {
@@ -144,7 +144,7 @@ impl HttpFiles {
       // File::create is blocking operation, use threadpool
       let file_path = file_data.src_path.clone();
       let mut f = web::block(|| std::fs::File::create(file_path))
-        .await
+        .await?
         .unwrap();
 
       // Field in turn is stream of *Bytes* object
@@ -158,7 +158,9 @@ impl HttpFiles {
         }
 
         // filesystem operations are blocking, we have to use threadpool
-        f = web::block(move || f.write_all(&data).map(|_| f)).await?;
+        f = web::block(move || f.write_all(&data).map(|_| f))
+          .await?
+          .unwrap();
       }
 
       self.files.push(file_data);

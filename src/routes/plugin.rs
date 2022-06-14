@@ -73,9 +73,9 @@ mod tests {
 
     use super::*;
 
-    #[test]
+    #[actix_web::test]
     async fn test_index_post() {
-        let app = test::init_service(App::new().route("/api/v1/plugin", web::get().to(plugin))).await;
+        let app = test::init_service(App::new().route("/api/v1/plugin", web::post().to(plugin))).await;
         let req = test::TestRequest::post().uri("/api/v1/plugin").to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_client_error());
