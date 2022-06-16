@@ -28,3 +28,25 @@ use actix_web::{put, HttpResponse, Responder};
 async fn ping() -> impl Responder {
     HttpResponse::Ok().finish()
 }
+
+
+#[cfg(test)]
+mod tests {
+    use actix_web::{test, App};
+
+    use super::*;
+
+    #[actix_web::test]
+    async fn put_ping() {
+      let app = test::init_service(
+        App::new()
+        .service(ping)
+      ).await;
+      
+      let req = test::TestRequest::put()
+        .uri("/ping")
+        .to_request();
+      let resp = test::call_service(&app, req).await;      
+      assert!(resp.status().is_success());
+  }
+}
