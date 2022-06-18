@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plugins ecosystem support.
 - Plugin for OpenVPN.
 - Plugin for GeoIP.
+- Improve CI pipeline.
 
 ### Changed
 - Updated all crates, including the Actix-Web ones.

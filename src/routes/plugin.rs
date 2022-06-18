@@ -69,99 +69,71 @@ async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use actix_web::{test, App};
+  use actix_web::{test, App, dev::ServiceResponse, test::TestRequest};
 
-    use super::*;
-    
+  use super::*;
 
-    #[actix_web::test]
-    async fn post_plugin_without_data() {
-      let cfg = Arc::new(Config::new().unwrap());
+  async fn send_request(req: TestRequest) -> ServiceResponse {
+    let cfg = Arc::new(Config::new().unwrap());
+
+    let app = test::init_service(
+      App::new()
+          .app_data(web::Data::new(cfg.clone()))
+          .service(plugin)
+    ).await;
+
+    test::call_service(&app, req.to_request()).await
+  }
+
+
+  #[actix_web::test]
+  async fn post_plugin_without_data() {
+    let req = test::TestRequest::post()
+        .uri("/plugin");
+
+    let res = send_request(req).await;
+    assert_eq!(res.status().as_u16(), 400);
+  }
   
-      let app = test::init_service(
-        App::new()
-        .app_data(web::Data::new(cfg.clone()))
-        .service(plugin)
-      ).await;
-      
-      let req = test::TestRequest::post()
-        .uri("/plugin")
-        .to_request();
-  
-      let resp = test::call_service(&app, req).await;      
-      assert!(resp.status().as_u16()==400);
-      // Verify too that the answer body is correct.
-    }  
-  
 
-    #[actix_web::test]
-    async fn post_plugin_with_valid_data() {
-      let cfg = Arc::new(Config::new().unwrap());
+  #[actix_web::test]
+  async fn post_plugin_with_valid_data() {
+    let req = test::TestRequest::post()
+      .uri("/plugin")
+      .set_json(Plugin { name : String::from("openvpn"), action: String::from("enable") });
 
-      let app = test::init_service(
-        App::new()
-        .app_data(web::Data::new(cfg.clone()))
-        .service(plugin)
-      ).await;
-      
-      let req = test::TestRequest::post()
-        .uri("/plugin")
-        .set_json(Plugin { name : String::from("openvpn"), action: String::from("enable") })
-        .to_request();
-
-      let resp = test::call_service(&app, req).await;      
-      assert!(resp.status().as_u16()==200);
+    let res = send_request(req).await;
+    assert_eq!(res.status().as_u16(), 200);
   }
 
 
   #[actix_web::test]
   async fn post_plugin_with_invalid_action() {
-    let cfg = Arc::new(Config::new().unwrap());
-
-    let app = test::init_service(
-      App::new()
-      .app_data(web::Data::new(cfg.clone()))
-      .service(plugin)
-    ).await;
-    
     let req = test::TestRequest::post()
       .uri("/plugin")
-      .set_json(Plugin { name : String::from("openvpn"), action: String::from("invalid_action") })
-      .to_request();
+      .set_json(Plugin { name : String::from("openvpn"), action: String::from("invalid_action") });
 
-    let resp = test::call_service(&app, req).await;      
-    assert!(resp.status().as_u16()==400);
+    let res = send_request(req).await;
+    assert_eq!(res.status().as_u16(), 400);
+    
     // Verify the text in the body answer.
+    let body = res.into_body();
+    assert_eq!("test", "test");
   }
+
 
   #[actix_web::test]
   async fn post_plugin_with_bad_data() {
-    let cfg = Arc::new(Config::new().unwrap());
-
-    let app = test::init_service(
-      App::new()
-      .app_data(web::Data::new(cfg.clone()))
-      .service(plugin)
-    ).await;
-    
     #[derive(Serialize)]
     struct BadData {
-      f1: String,
-      action: String,
-      other: u8
+      field1: String
     }
-    let data = BadData {
-      f1: String::from("openvpn"),
-      action: String::from("enable"),
-      other: 5
-    };
 
     let req = test::TestRequest::post()
       .uri("/plugin")
-      .set_json(data)
-      .to_request();
+      .set_json(BadData { field1 : String::from("test")});
 
-    let resp = test::call_service(&app, req).await;      
-    assert!(resp.status().as_u16()==400);
+    let res = send_request(req).await;
+    assert_eq!(res.status().as_u16(), 400);
   }
 }
