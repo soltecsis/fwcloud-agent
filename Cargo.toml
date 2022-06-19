@@ -10,6 +10,13 @@ authors = ["Carles Munyoz <cmunyoz@soltecsis.com>"]
 keywords = ["fwcloud", "fwcloud-agent", "firewall", "firewall cloud", "iptables", "nftables", "openvpn"]
 edition = "2018"
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+path = "src/main.rs"
+name = "fwcloud-agent"
+
 [package.metadata.deb] 
 maintainer = "Carles Munyoz <cmunyoz@soltecsis.com>"
 copyright = "SOLTECSIS, SL"
@@ -48,6 +55,7 @@ actix-web = { version = "4.1.0", features = ["openssl"] }
 actix-service = "2.0.2"
 actix-multipart = "0.4.0"
 actix-web-requestid = "1.1.0"
+tokio = { version = "1.19.2", features = ["full"] }
 openssl = { version = "0.10.40", features = ["v110"] }
 thiserror = "1.0.31"
 dotenv = "0.15.0"
@@ -76,3 +84,4 @@ actix-rt = "2.7.0"
 mockall = "0.11.1"
 mockall_derive = "0.11.1"
 serial_test = "0.7.0"
+reqwest = "0.11.11"
