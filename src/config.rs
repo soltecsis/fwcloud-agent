@@ -60,7 +60,7 @@ pub struct Config {
   pub enable_tls: bool,
 
   #[validate(regex(path = "crate::utils::myregex::IPV4_LIST", message = "Bad IPv4 address list"))]
-  allowed_ips_list: String,
+  pub allowed_ips_list: String,
   pub allowed_ips: Vec<String>,
 
   pub enable_api_key: bool,

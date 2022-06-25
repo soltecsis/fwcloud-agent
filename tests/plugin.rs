@@ -28,7 +28,7 @@ use fwcloud_agent::routes::plugin::Plugin;
 
 #[tokio::test]
 async fn plugin_without_header_neither_data() {
-  let url = format!("{}/api/v1/plugin", common::spawn_app());
+  let url = format!("{}/api/v1/plugin", common::spawn_app(None));
 
   let res = reqwest::Client::new()
     .post(url)
@@ -44,7 +44,7 @@ async fn plugin_without_header_neither_data() {
 
 #[tokio::test]
 async fn plugin_without_data() {
-  let url = format!("{}/api/v1/plugin", common::spawn_app());
+  let url = format!("{}/api/v1/plugin", common::spawn_app(None));
 
   let res = reqwest::Client::new()
     .post(url)
@@ -61,7 +61,7 @@ async fn plugin_without_data() {
 
 #[tokio::test]
 async fn plugin_with_invalid_data() {
-  let url = format!("{}/api/v1/plugin", common::spawn_app());
+  let url = format!("{}/api/v1/plugin", common::spawn_app(None));
   let test_cases = vec![
     (Plugin { name : String::from("openvpn"), action: String::from("INVALID") }, "{\"message\":\"action: Invalid plugin action\"}"),
     (Plugin { name : String::from("INVALID"), action: String::from("enable") }, "{\"message\":\"name: Invalid plugin name\"}")
@@ -85,7 +85,7 @@ async fn plugin_with_invalid_data() {
 
 #[tokio::test]
 async fn test_plugin_enable_and_disable() {
-  let url = format!("{}/api/v1/plugin", common::spawn_app());
+  let url = format!("{}/api/v1/plugin", common::spawn_app(None));
   let test_cases = vec![
     (Plugin { name : String::from("test"), action: String::from("enable") }, "ENABLED\n"),
     (Plugin { name : String::from("test"), action: String::from("disable") }, "DISABLED\n"),
