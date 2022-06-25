@@ -24,7 +24,7 @@
 extern crate lazy_static;
 
 mod errors;
-mod config;
+pub mod config;
 mod auth;
 mod routes;
 mod utils;
@@ -39,12 +39,12 @@ use env_logger::Env;
 use config::Config;
 use crate::workers::{ WorkersChannels, openvpn_status_collector::OpenVPNStCollector};
 
-pub fn run() -> Result<Server, std::io::Error> {
+pub fn run(config: Config) -> Result<Server, std::io::Error> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
     info!("Starting fwcloud-agent application");
 
-    let cfg = Arc::new(Config::new().unwrap());
+    let cfg = Arc::new(config);
     let cfg_main_thread = cfg.clone();
 
     // Start workers threads.

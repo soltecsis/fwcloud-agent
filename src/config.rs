@@ -24,6 +24,7 @@ extern crate num_cpus;
 use std::env;
 use std::fs;
 use std::sync::Arc;
+use rand::{distributions::Alphanumeric, Rng};
 
 use crate::errors::Result;
 
@@ -58,6 +59,8 @@ pub struct Config {
   #[validate(regex(path = "crate::utils::myregex::IPV4_LIST", message = "Bad IPv4 address list"))]
   allowed_ips_list: String,
   pub allowed_ips: Vec<String>,
+
+  pub enable_api_key: bool,
 
   #[validate(regex = "crate::utils::myregex::ALPHA_NUM_2")]
   #[validate(length(min = 16, max = 128))]
@@ -104,7 +107,12 @@ impl Config {
       allowed_ips_list: env::var("ALLOWED_IPS").unwrap_or(String::from("")),
       allowed_ips: vec![],
       
-      api_key: env::var("API_KEY").unwrap_or(String::from("")),
+      enable_api_key: env::var("ENABLE_API_KEY").unwrap_or(String::from("true")).parse::<bool>().unwrap_or(true),
+      api_key: env::var("API_KEY").unwrap_or(rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(64)
+        .map(char::from)
+        .collect()),
 
       fwcloud_script_paths_list: env::var("FWCLOUD_SCRIPT_PATHS").unwrap_or(String::from("/etc/fwcloud/fwcloud.sh,/config/scripts/post-config.d/fwcloud.sh")),
       fwcloud_script_paths: vec![],

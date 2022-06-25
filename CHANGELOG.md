@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plugin for OpenVPN.
 - Plugin for GeoIP.
 - Improve CI pipeline.
+- New config option (ENABLE_API_KEY) for enable/disable API access by means of API Key. By default it will be enabled.
 
 ### Changed
 - Updated all crates, including the Actix-Web ones.

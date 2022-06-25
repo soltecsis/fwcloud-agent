@@ -21,9 +21,12 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+use fwcloud_agent::config::Config;
 use fwcloud_agent::run;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    run()?.await
+    let cfg = Config::new().unwrap();
+
+    run(cfg)?.await
 }

@@ -20,7 +20,8 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-//! tests/health_check.rs
+use fwcloud_agent::config::Config;
+
 // `tokio::test` is the testing equivalent of `tokio::main`.
 // It also spares you from having to specify the `#[test]` attribute.
 //
@@ -41,7 +42,13 @@ async fn ping_http_test() {
 
 // Launch our application in the background ~somehow~
 fn spawn_app() {
-  let server = fwcloud_agent::run().expect("Failed to bind address");
+  let mut cfg = Config::new().unwrap();
+
+  cfg.enable_tls = false;
+  cfg.enable_api_key = false;
+  cfg.workers = 1;
+
+  let server = fwcloud_agent::run(cfg).expect("Failed to bind address");
   // Launch the server as a background task
   // tokio::spawn returns a handle to the spawned future,
   // but we have no use for it here, hence the non-binding let

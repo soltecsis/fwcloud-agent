@@ -91,40 +91,42 @@ where
             None => return err!(FwcError::Internal("Error accessing configuration from authorization middleware"))
         };
 
-        // (1) Verify that the supplied API key is correct.
-        match req.headers().get("X-API-Key") {
-            Some(value) => api_key = String::from(value.to_str().unwrap()),
-            None => return err!(FwcError::ApiKeyNotFound)
-        }
+        // If the use of API Key is enabled.
+        if cfg.enable_api_key {
+            // (1) Verify that the supplied API key is correct.
+            match req.headers().get("X-API-Key") {
+                Some(value) => api_key = String::from(value.to_str().unwrap()),
+                None => return err!(FwcError::ApiKeyNotFound)
+            }
 
-        if cfg.api_key != api_key {
-            return err!(FwcError::ApiKeyNotValid);
-        }
+            if cfg.api_key != api_key {
+                return err!(FwcError::ApiKeyNotValid);
+            }
 
-        // (2) Now check that the peer IP is allowed.
-        // If allowed_ips vector is empty we are allowing connections form any IP.
-        if cfg.allowed_ips.len() > 0 { 
-            let mut found = false;
+            // (2) Now check that the peer IP is allowed.
+            // If allowed_ips vector is empty we are allowing connections form any IP.
+            if cfg.allowed_ips.len() > 0 { 
+                let mut found = false;
 
-            let remote_ip = match req.connection_info().peer_addr() {
-                Some(data) => {
-                        let ip_and_port: Vec<&str> = data.split(":").collect(); 
-                        String::from(ip_and_port[0])
-                    },
-                None => return err!(FwcError::Internal("Allowed IPs list not empty and was not possible to get the remote IP"))
-            };
+                let remote_ip = match req.connection_info().peer_addr() {
+                    Some(data) => {
+                            let ip_and_port: Vec<&str> = data.split(":").collect(); 
+                            String::from(ip_and_port[0])
+                        },
+                    None => return err!(FwcError::Internal("Allowed IPs list not empty and was not possible to get the remote IP"))
+                };
 
-            for ip in cfg.allowed_ips.iter() {
-                if *ip == remote_ip {
-                    found = true;
-                    break;
+                for ip in cfg.allowed_ips.iter() {
+                    if *ip == remote_ip {
+                        found = true;
+                        break;
+                    }
+                }
+                if ! found {
+                    return err!(FwcError::NotAllowedIP);
                 }
             }
-            if ! found {
-                return err!(FwcError::NotAllowedIP);
-            }
         }
-
 
         let fut = self.service.call(req);
 
