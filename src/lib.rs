@@ -26,7 +26,7 @@ extern crate lazy_static;
 mod errors;
 pub mod config;
 mod auth;
-mod routes;
+pub mod routes;
 mod utils;
 mod workers;
 
@@ -35,14 +35,18 @@ use std::sync::Arc;
 use actix_web::{App, HttpServer, middleware, web, dev::Server};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use env_logger::Env;
+use std::net::TcpListener;
 
 use config::Config;
 use crate::workers::{ WorkersChannels, openvpn_status_collector::OpenVPNStCollector};
 
-pub fn run(config: Config) -> Result<Server, std::io::Error> {
-    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Error> {
+    if config.enable_env_logger {
+        env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+    }
 
     info!("Starting fwcloud-agent application");
+    info!("Listening on: {}:{}", config.bind_ip, config.bind_port);
 
     let cfg = Arc::new(config);
     let cfg_main_thread = cfg.clone();
@@ -68,10 +72,10 @@ pub fn run(config: Config) -> Result<Server, std::io::Error> {
         builder.set_private_key_file(format!("{}/key.pem",cfg_main_thread.etc_dir), SslFiletype::PEM).unwrap();
         builder.set_certificate_chain_file(format!("{}/cert.pem",cfg_main_thread.etc_dir)).unwrap();
         
-        Ok(server.bind_openssl(cfg_main_thread.bind_to(), builder)?.run())
+        Ok(server.listen_openssl(listener, builder)?.run())
     }
     else { 
         warn!("Insecure communications (http) not recommended in production");
-        Ok(server.bind(cfg_main_thread.bind_to())?.run())
+        Ok(server.listen(listener)?.run())
     }
 }

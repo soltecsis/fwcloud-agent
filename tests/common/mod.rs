@@ -1,4 +1,3 @@
-
 /*
     Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
@@ -22,12 +21,28 @@
 */
 
 use fwcloud_agent::config::Config;
-use fwcloud_agent::run;
 
-#[tokio::main]
-async fn main() -> std::io::Result<()> {
-    let mut config = Config::new().unwrap();
-    let listener = config.bind_to();
+// Launch our application in the background ~somehow~
+pub fn spawn_app() -> String {
+  let mut config = Config::new().unwrap();
 
-    run(config, listener)?.await
+  config.enable_env_logger = false;
+  config.bind_ip = String::from("127.0.0.1");
+  config.bind_port = 0;
+  let listener = config.bind_to();
+  config.enable_tls = false;
+  config.enable_api_key = false;
+  config.workers = 1;
+
+  let protocol = "http";
+  let ip = config.bind_ip.clone();
+  let port = config.bind_port;
+
+  let server = fwcloud_agent::run(config,listener).expect("Failed to run FWCloud-Agent server");
+  // Launch the server as a background task
+  // tokio::spawn returns a handle to the spawned future,
+  // but we have no use for it here, hence the non-binding let
+  let _ = tokio::spawn(server);
+
+  format!("{}://{}:{}", protocol, ip, port)
 }

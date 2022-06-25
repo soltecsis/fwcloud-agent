@@ -20,7 +20,7 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use fwcloud_agent::config::Config;
+mod common;
 
 // `tokio::test` is the testing equivalent of `tokio::main`.
 // It also spares you from having to specify the `#[test]` attribute.
@@ -28,29 +28,16 @@ use fwcloud_agent::config::Config;
 // You can inspect what code gets generated using
 // `cargo expand --test health_check` (<- name of the test file)
 #[tokio::test]
-async fn ping_http_test() {
-  spawn_app();
+async fn ping() {
+  let url = format!("{}/api/v1/ping", common::spawn_app());
 
-  let response = reqwest::Client::new().put("http://localhost:33033/api/v1/ping")
+  let res = reqwest::Client::new()
+    .put(url)
     .send()
     .await
     .unwrap();
 
-  assert!(response.status().is_success());
-  assert_eq!(Some(0), response.content_length());
+  assert!(res.status().is_success());
+  assert_eq!(Some(0), res.content_length());
 }
 
-// Launch our application in the background ~somehow~
-fn spawn_app() {
-  let mut cfg = Config::new().unwrap();
-
-  cfg.enable_tls = false;
-  cfg.enable_api_key = false;
-  cfg.workers = 1;
-
-  let server = fwcloud_agent::run(cfg).expect("Failed to bind address");
-  // Launch the server as a background task
-  // tokio::spawn returns a handle to the spawned future,
-  // but we have no use for it here, hence the non-binding let
-  let _ = tokio::spawn(server);
-}

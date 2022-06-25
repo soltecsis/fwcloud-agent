@@ -25,7 +25,7 @@ mod fwcloud_script;
 mod openvpn;
 mod interfaces;
 mod iptables_save;
-mod plugin;
+pub mod plugin;
 
 use actix_web::web;
 

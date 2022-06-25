@@ -24,6 +24,7 @@ extern crate num_cpus;
 use std::env;
 use std::fs;
 use std::sync::Arc;
+use std::net::TcpListener;
 use rand::{distributions::Alphanumeric, Rng};
 
 use crate::errors::Result;
@@ -45,11 +46,13 @@ pub struct Config {
   pub data_dir: &'static str,
   pub plugins_dir: &'static str,
 
+  pub enable_env_logger: bool,
+
   #[validate(regex(path = "crate::utils::myregex::IPV4", message = "Bad IPv4 address"))]
-  bind_ip: String,
+  pub bind_ip: String,
 
   #[validate(range(min = 1, max = 65535))]
-  bind_port: u16,
+  pub bind_port: u16,
 
   #[validate(range(min = 1, max = 65535))]
   pub workers: usize,
@@ -98,6 +101,8 @@ impl Config {
       tmp_dir: "./tmp",
       data_dir: "./data",
       plugins_dir: "./plugins",
+
+      enable_env_logger: true,
 
       bind_ip: env::var("BIND_IP").unwrap_or(String::from("0.0.0.0")),
       bind_port: env::var("BIND_PORT").unwrap_or(String::from("33033")).parse::<u16>().unwrap_or(33033),
@@ -153,7 +158,15 @@ impl Config {
     Ok(cfg)
   }
 
-  pub fn bind_to(&self) -> String {
-    format!("{}:{}",self.bind_ip,self.bind_port)
+  pub fn bind_to(&mut self) -> TcpListener {
+    let addr = format!("{}:{}", self.bind_ip, self.bind_port);
+    let listener = TcpListener::bind(addr).expect(format!("Error binding to {}:{}", self.bind_ip, self.bind_port).as_str());
+    
+    // If we want listen to a random TCP port, update the bind_port with the random one supplied by the operative system.
+    if self.bind_port == 0 {
+      self.bind_port = listener.local_addr().unwrap().port(); 
+    }
+
+    listener
   }
 }
