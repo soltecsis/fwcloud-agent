@@ -1,3 +1,5 @@
+#!/bin/bash
+
 if [ "$1" = "enable" ]; then
   echo "ENABLED"
 else
