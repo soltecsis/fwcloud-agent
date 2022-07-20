@@ -35,7 +35,7 @@ use crate::workers::WorkersChannels;
 use thread_id;
 
 
-#[post("/files/upload")]
+#[post("/openvpn/files/upload")]
 async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
@@ -55,7 +55,7 @@ async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result
 }
 
 
-#[delete("/files/remove")]
+#[delete("/openvpn/files/remove")]
 async fn files_remove(files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
@@ -72,7 +72,7 @@ async fn files_remove(files_list: web::Json<FilesList>, cfg: web::Data<Arc<Confi
 }
 
 
-#[put("/files/sha256")]
+#[put("/openvpn/files/sha256")]
 async fn files_sha256(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
@@ -106,7 +106,7 @@ async fn files_sha256(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<C
 }
 
 
-#[put("/get/status")]
+#[put("/openvpn/get/status")]
 async fn get_status(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
@@ -139,14 +139,14 @@ async fn get_status(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<Con
 }
 
 
-#[put("/update/status")]
+#[put("/openvpn/update/status")]
 async fn update_status(workers_channels: web::Data<WorkersChannels>) -> Result<HttpResponse> {
   workers_channels.openvpn_st_collector.send(1)?;
   Ok(HttpResponse::Ok().finish())
 }
 
 
-#[put("/get/status/rt")]
+#[put("/openvpn/get/status/rt")]
 async fn get_status_rt(files_list: web::Json<FilesList>) -> Result<HttpResponse> {
   // Only one OpenVPN status file must be indicated in the request.
   if files_list.len() != 1 {

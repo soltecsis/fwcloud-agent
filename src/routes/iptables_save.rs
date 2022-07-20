@@ -24,7 +24,7 @@ use actix_web::{get, HttpResponse};
 use crate::utils::cmd::run_cmd;
 use crate::errors::Result;
 
-#[get("/data")]
+#[get("/iptables-save/data")]
 async fn data() -> Result<HttpResponse> {
   Ok(run_cmd("iptables-save", &[])?)
 }

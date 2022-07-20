@@ -32,27 +32,25 @@ use actix_web::web;
 pub fn routes_setup(config: &mut web::ServiceConfig) {
     config.service(web::scope("/api/v1")
         .service(ping::ping)
+
+        // FWCloud script.
+        .service(fwcloud_script::upload_and_run)
+
+        // OpenVPN.
+        .service(openvpn::files_upload)
+        .service(openvpn::files_remove)
+        .service(openvpn::files_sha256)
+        .service(openvpn::get_status)
+        .service(openvpn::update_status)
+        .service(openvpn::get_status_rt)
+
+        // Interfaces.
+        .service(interfaces::info)
+
+        // IPTables save.            
+        .service(iptables_save::data)
+
+        // Plugins.
         .service(plugin::plugin)
-
-        .service(web::scope("/fwcloud_script/")
-            .service(fwcloud_script::upload_and_run)
-        )
-
-        .service(web::scope("/openvpn/")
-            .service(openvpn::files_upload)
-            .service(openvpn::files_remove)
-            .service(openvpn::files_sha256)
-            .service(openvpn::get_status)
-            .service(openvpn::update_status)
-            .service(openvpn::get_status_rt)
-        )
-
-        .service(web::scope("/interfaces/")
-            .service(interfaces::info)
-        )
-
-        .service(web::scope("/iptables-save/")
-            .service(iptables_save::data)
-        )
     );
 }

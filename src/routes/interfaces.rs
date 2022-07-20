@@ -24,7 +24,7 @@ use actix_web::{get, HttpResponse};
 use crate::utils::cmd::run_cmd;
 use crate::errors::Result;
 
-#[get("/info")]
+#[get("/interfaces/info")]
 async fn info() -> Result<HttpResponse> {
   Ok(run_cmd("ip", &["a"])?)
 }
