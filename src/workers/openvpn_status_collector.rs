@@ -20,7 +20,10 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use chrono::NaiveDateTime;
+use futures::executor::block_on;
+use httpdate::parse_http_date;
+use std::time::UNIX_EPOCH;
+
 use log::{debug, error, info};
 use std::io::{BufRead, BufReader, Write};
 use std::sync::mpsc::{self, Sender};
@@ -34,7 +37,7 @@ struct OpenVPNStFile {
     st_file: String,
     tmp_file: String,
     cache_file: String,
-    last_update: i64,
+    last_update: u64,
 }
 
 struct OpenVPNStCollectorInner {
@@ -87,7 +90,7 @@ impl OpenVPNStCollectorInner {
             .create(true)
             .open(&item.cache_file)?;
 
-        let mut current_update: i64 = 0;
+        let mut current_update: u64 = 0;
         for (n, l) in reader.lines().enumerate().skip(1) {
             let line = l?;
 
@@ -99,9 +102,8 @@ impl OpenVPNStCollectorInner {
 
                 // Convert the Connected Since date string to timestamp.
                 let data: Vec<&str> = line.split(',').collect();
-                let connected_since = match NaiveDateTime::parse_from_str(data[4], "%a %b %e %T %Y")
-                {
-                    Ok(date_time) => date_time.timestamp(),
+                let connected_since = match parse_http_date(data[4]) {
+                    Ok(date_time) => date_time.duration_since(UNIX_EPOCH).unwrap().as_secs(),
                     Err(e) => {
                         error!(
                             "Bad OpenVPN status file ({}): invalid connected since date ({})",
@@ -137,8 +139,8 @@ impl OpenVPNStCollectorInner {
 
             // Get the update timestamp of the current status file and compare it with the
             // previous one in order to see if we have new data into it.
-            current_update = match NaiveDateTime::parse_from_str(&line[8..], "%a %b %e %T %Y") {
-                Ok(date_time) => date_time.timestamp(),
+            current_update = match parse_http_date(&line[8..]) {
+                Ok(date_time) => date_time.duration_since(UNIX_EPOCH).unwrap().as_secs(),
                 Err(e) => {
                     error!(
                         "Bad OpenVPN status file ({}): invalid updated date ({})",
@@ -214,7 +216,7 @@ impl OpenVPNStCollector {
 
         let (tx, rx) = mpsc::channel();
 
-        thread::spawn(|| async move {
+        thread::spawn( move || block_on(async {
             info!(
                 "Starting OpenVPN status data collector thread (id: {})",
                 thread_id::get()
@@ -224,23 +226,20 @@ impl OpenVPNStCollector {
             }
 
             loop {
-                debug!(
-                    "Locking OpenVPM mutex (thread id: {}) ...",
-                    thread_id::get()
-                );
+                debug!("Locking OpenVPM mutex (thread id: {})", thread_id::get());
                 let mutex = Arc::clone(&cfg.mutex.openvpn);
                 let mutex_data = mutex.lock().await;
-                debug!("OpenVPN mutex locked (thread id: {})!", thread_id::get());
+                debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
+
+                // Only for debug purposes. It is useful for verify that the mutex makes its work.
+                thread::sleep(time::Duration::from_millis(10_000));
 
                 let mut collector = local_self.lock().unwrap();
                 collector.collect_all_files_data();
 
-                debug!(
-                    "Unlocking OpenVPM mutex (thread id: {}) ...",
-                    thread_id::get()
-                );
+                debug!("Unlocking OpenVPM mutex (thread id: {})", thread_id::get());
                 drop(mutex_data);
-                debug!("OpenVPN mutex unlocked (thread id: {})!", thread_id::get());
+                debug!("OpenVPN mutex unlocked (thread id: {})", thread_id::get());
 
                 // Pause between samplings.
                 for _n in 0..collector.sampling_interval {
@@ -253,7 +252,7 @@ impl OpenVPNStCollector {
                     }
                 }
             }
-        });
+        }));
 
         tx
     }

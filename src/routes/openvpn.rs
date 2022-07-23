@@ -31,8 +31,9 @@ use crate::utils::http_files::HttpFiles;
 
 use crate::errors::{FwcError, Result};
 use crate::workers::WorkersChannels;
-//use std::{thread, time};
 use thread_id;
+
+//use std::{thread, time};
 
 #[post("/openvpn/files/upload")]
 async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
@@ -126,6 +127,13 @@ async fn files_sha256(
     Ok(resp)
 }
 
+
+/*
+  curl -k -i -X PUT -H 'X-API-Key: **************************' \
+    -H "Content-Type: application/json" \
+    -d '{"dir":"/etc/openvpn", "files":["openvpn-status.log"]}' \
+    https://localhost:33033/api/v1/openvpn/get/status
+*/
 #[put("/openvpn/get/status")]
 async fn get_status(
     mut files_list: web::Json<FilesList>,
