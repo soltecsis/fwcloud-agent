@@ -127,7 +127,6 @@ async fn files_sha256(
     Ok(resp)
 }
 
-
 /*
   curl -k -i -X PUT -H 'X-API-Key: **************************' \
     -H "Content-Type: application/json" \

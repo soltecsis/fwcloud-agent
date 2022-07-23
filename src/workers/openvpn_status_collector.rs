@@ -216,43 +216,45 @@ impl OpenVPNStCollector {
 
         let (tx, rx) = mpsc::channel();
 
-        thread::spawn( move || block_on(async {
-            info!(
-                "Starting OpenVPN status data collector thread (id: {})",
-                thread_id::get()
-            );
-            if local_self.lock().unwrap().len() == 0 {
-                info!("List of OpenVPN status files is empty")
-            }
+        thread::spawn(move || {
+            block_on(async {
+                info!(
+                    "Starting OpenVPN status data collector thread (id: {})",
+                    thread_id::get()
+                );
+                if local_self.lock().unwrap().len() == 0 {
+                    info!("List of OpenVPN status files is empty")
+                }
 
-            loop {
-                debug!("Locking OpenVPM mutex (thread id: {})", thread_id::get());
-                let mutex = Arc::clone(&cfg.mutex.openvpn);
-                let mutex_data = mutex.lock().await;
-                debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
+                loop {
+                    debug!("Locking OpenVPM mutex (thread id: {})", thread_id::get());
+                    let mutex = Arc::clone(&cfg.mutex.openvpn);
+                    let mutex_data = mutex.lock().await;
+                    debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
 
-                // Only for debug purposes. It is useful for verify that the mutex makes its work.
-                thread::sleep(time::Duration::from_millis(10_000));
+                    // Only for debug purposes. It is useful for verify that the mutex makes its work.
+                    //thread::sleep(time::Duration::from_millis(10_000));
 
-                let mut collector = local_self.lock().unwrap();
-                collector.collect_all_files_data();
+                    let mut collector = local_self.lock().unwrap();
+                    collector.collect_all_files_data();
 
-                debug!("Unlocking OpenVPM mutex (thread id: {})", thread_id::get());
-                drop(mutex_data);
-                debug!("OpenVPN mutex unlocked (thread id: {})", thread_id::get());
+                    debug!("Unlocking OpenVPM mutex (thread id: {})", thread_id::get());
+                    drop(mutex_data);
+                    debug!("OpenVPN mutex unlocked (thread id: {})", thread_id::get());
 
-                // Pause between samplings.
-                for _n in 0..collector.sampling_interval {
-                    thread::sleep(time::Duration::from_secs(1));
+                    // Pause between samplings.
+                    for _n in 0..collector.sampling_interval {
+                        thread::sleep(time::Duration::from_secs(1));
 
-                    let cmd = rx.try_recv().unwrap_or(0);
-                    if cmd == 1 {
-                        debug!("OpenVPN status data update requested");
-                        break;
+                        let cmd = rx.try_recv().unwrap_or(0);
+                        if cmd == 1 {
+                            debug!("OpenVPN status data update requested");
+                            break;
+                        }
                     }
                 }
-            }
-        }));
+            })
+        });
 
         tx
     }
