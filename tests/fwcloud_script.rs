@@ -24,16 +24,14 @@ mod common;
 
 #[tokio::test]
 async fn fwcloud_script_without_data() {
-  let url = format!("{}/api/v1/fwcloud_script/upload", common::spawn_app(None));
+    let url = format!("{}/api/v1/fwcloud_script/upload", common::spawn_app(None));
 
-  let res = reqwest::Client::new()
-    .post(url)
-    .send()
-    .await
-    .unwrap();
+    let res = reqwest::Client::new().post(url).send().await.unwrap();
 
-  assert_eq!(res.status().as_u16(), 500);
-  let body = res.text().await.unwrap();
-  assert_eq!(body, "{\"message\":\"Destination directory parameter not found in multipart/form-data stream\"}");
+    assert_eq!(res.status().as_u16(), 500);
+    let body = res.text().await.unwrap();
+    assert_eq!(
+        body,
+        "{\"message\":\"Destination directory parameter not found in multipart/form-data stream\"}"
+    );
 }
-

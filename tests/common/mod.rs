@@ -25,49 +25,48 @@ use rand::{distributions::Alphanumeric, Rng};
 use fwcloud_agent::config::Config;
 
 pub struct TestCfgOpt {
-  pub enable_api_key: bool,
-  pub api_key: String,
-  pub allowed_ips: Vec<String>
+    pub enable_api_key: bool,
+    pub api_key: String,
+    pub allowed_ips: Vec<String>,
 }
 
 // Launch our application in the background.
 pub fn spawn_app(custom: Option<TestCfgOpt>) -> String {
-  let cfg_opt = custom.unwrap_or(TestCfgOpt{
-    enable_api_key: false,
-    api_key: random_api_key(64),
-    allowed_ips: vec![]
-  });
+    let cfg_opt = custom.unwrap_or(TestCfgOpt {
+        enable_api_key: false,
+        api_key: random_api_key(64),
+        allowed_ips: vec![],
+    });
 
-  let mut config = Config::new().unwrap();
+    let mut config = Config::new().unwrap();
 
-  config.enable_env_logger = false;
-  config.bind_ip = "127.0.0.1".to_string();
-  config.bind_port = 0;
-  let listener = config.bind_to();
-  config.enable_tls = false;
-  config.enable_api_key = cfg_opt.enable_api_key;
-  config.api_key = cfg_opt.api_key;
-  config.allowed_ips = cfg_opt.allowed_ips;
-  config.workers = 1;
-  
-  let protocol = "http";
-  let ip = config.bind_ip.clone();
-  let port = config.bind_port;
+    config.enable_env_logger = false;
+    config.bind_ip = "127.0.0.1".to_string();
+    config.bind_port = 0;
+    let listener = config.bind_to();
+    config.enable_tls = false;
+    config.enable_api_key = cfg_opt.enable_api_key;
+    config.api_key = cfg_opt.api_key;
+    config.allowed_ips = cfg_opt.allowed_ips;
+    config.workers = 1;
 
-  let server = fwcloud_agent::run(config,listener).expect("Failed to run FWCloud-Agent server");
-  // Launch the server as a background task
-  // tokio::spawn returns a handle to the spawned future,
-  // but we have no use for it here, hence the non-binding let
-  let _ = tokio::spawn(server);
+    let protocol = "http";
+    let ip = config.bind_ip.clone();
+    let port = config.bind_port;
 
-  format!("{}://{}:{}", protocol, ip, port)
+    let server = fwcloud_agent::run(config, listener).expect("Failed to run FWCloud-Agent server");
+    // Launch the server as a background task
+    // tokio::spawn returns a handle to the spawned future,
+    // but we have no use for it here, hence the non-binding let
+    let _ = tokio::spawn(server);
+
+    format!("{}://{}:{}", protocol, ip, port)
 }
 
-
 pub fn random_api_key(size: usize) -> String {
-  rand::thread_rng()
-      .sample_iter(&Alphanumeric)
-      .take(size)
-      .map(char::from)
-      .collect()
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(size)
+        .map(char::from)
+        .collect()
 }

@@ -20,11 +20,11 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use actix_web::{get, HttpResponse};
-use crate::utils::cmd::run_cmd;
 use crate::errors::Result;
+use crate::utils::cmd::run_cmd;
+use actix_web::{get, HttpResponse};
 
 #[get("/iptables-save/data")]
 async fn data() -> Result<HttpResponse> {
-  run_cmd("iptables-save", &[])
+    run_cmd("iptables-save", &[])
 }

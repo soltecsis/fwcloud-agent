@@ -23,22 +23,22 @@
 #[macro_use]
 extern crate lazy_static;
 
-mod errors;
-pub mod config;
 mod auth;
+pub mod config;
+mod errors;
 pub mod routes;
 mod utils;
 mod workers;
 
-use log::{info, warn};
-use std::sync::Arc;
-use actix_web::{App, HttpServer, middleware, web, dev::Server};
-use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
+use actix_web::{dev::Server, middleware, web, App, HttpServer};
 use env_logger::Env;
+use log::{info, warn};
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use std::net::TcpListener;
+use std::sync::Arc;
 
+use crate::workers::{openvpn_status_collector::OpenVPNStCollector, WorkersChannels};
 use config::Config;
-use crate::workers::{ WorkersChannels, openvpn_status_collector::OpenVPNStCollector};
 
 pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Error> {
     if config.enable_env_logger {
@@ -53,10 +53,10 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
 
     // Start workers threads.
     let workers_channels = WorkersChannels {
-        openvpn_st_collector: OpenVPNStCollector::new(&cfg).start(cfg.clone())
+        openvpn_st_collector: OpenVPNStCollector::new(&cfg).start(cfg.clone()),
     };
 
-    let server = HttpServer::new( move || {
+    let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(cfg.clone()))
             .app_data(web::Data::new(workers_channels.clone()))
@@ -65,16 +65,22 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
             .configure(routes::routes_setup)
     })
     .workers(cfg_main_thread.workers);
-    
-    if cfg_main_thread.enable_tls { 
+
+    if cfg_main_thread.enable_tls {
         info!("Using secure communications (https)");
         let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-        builder.set_private_key_file(format!("{}/key.pem",cfg_main_thread.etc_dir), SslFiletype::PEM).unwrap();
-        builder.set_certificate_chain_file(format!("{}/cert.pem",cfg_main_thread.etc_dir)).unwrap();
-        
+        builder
+            .set_private_key_file(
+                format!("{}/key.pem", cfg_main_thread.etc_dir),
+                SslFiletype::PEM,
+            )
+            .unwrap();
+        builder
+            .set_certificate_chain_file(format!("{}/cert.pem", cfg_main_thread.etc_dir))
+            .unwrap();
+
         Ok(server.listen_openssl(listener, builder)?.run())
-    }
-    else { 
+    } else {
         warn!("Insecure communications (http) not recommended in production");
         Ok(server.listen(listener)?.run())
     }

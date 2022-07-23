@@ -28,83 +28,100 @@ use fwcloud_agent::routes::plugin::Plugin;
 
 #[tokio::test]
 async fn plugin_without_header_neither_data() {
-  let url = format!("{}/api/v1/plugin", common::spawn_app(None));
+    let url = format!("{}/api/v1/plugin", common::spawn_app(None));
 
-  let res = reqwest::Client::new()
-    .post(url)
-    .send()
-    .await
-    .unwrap();
-
-  assert_eq!(res.status().as_u16(), 400);
-  let body = res.text().await.unwrap();
-  assert_eq!(body, "Content type error");
-}
-
-
-#[tokio::test]
-async fn plugin_without_data() {
-  let url = format!("{}/api/v1/plugin", common::spawn_app(None));
-
-  let res = reqwest::Client::new()
-    .post(url)
-    .header(CONTENT_TYPE, "application/json")
-    .send()
-    .await
-    .unwrap();
-
-  assert_eq!(res.status().as_u16(), 400);
-  let body = res.text().await.unwrap();
-  assert_eq!(body, "Json deserialize error: EOF while parsing a value at line 1 column 0");
-}
-
-
-#[tokio::test]
-async fn plugin_with_invalid_data() {
-  let url = format!("{}/api/v1/plugin", common::spawn_app(None));
-  let test_cases = vec![
-    (Plugin { name : String::from("openvpn"), action: String::from("INVALID") }, "{\"message\":\"action: Invalid plugin action\"}"),
-    (Plugin { name : String::from("INVALID"), action: String::from("enable") }, "{\"message\":\"name: Invalid plugin name\"}")
-  ];
-
-  for (invalid_data, error_message) in test_cases { 
-    let res = reqwest::Client::new()
-      .post(&url)
-      .header(CONTENT_TYPE, "application/json")
-      .body(serde_json::to_string(&invalid_data).unwrap())
-      .send()
-      .await
-      .unwrap();
+    let res = reqwest::Client::new().post(url).send().await.unwrap();
 
     assert_eq!(res.status().as_u16(), 400);
     let body = res.text().await.unwrap();
-    assert_eq!(body, error_message);
-  }
+    assert_eq!(body, "Content type error");
 }
 
+#[tokio::test]
+async fn plugin_without_data() {
+    let url = format!("{}/api/v1/plugin", common::spawn_app(None));
+
+    let res = reqwest::Client::new()
+        .post(url)
+        .header(CONTENT_TYPE, "application/json")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status().as_u16(), 400);
+    let body = res.text().await.unwrap();
+    assert_eq!(
+        body,
+        "Json deserialize error: EOF while parsing a value at line 1 column 0"
+    );
+}
+
+#[tokio::test]
+async fn plugin_with_invalid_data() {
+    let url = format!("{}/api/v1/plugin", common::spawn_app(None));
+    let test_cases = vec![
+        (
+            Plugin {
+                name: String::from("openvpn"),
+                action: String::from("INVALID"),
+            },
+            "{\"message\":\"action: Invalid plugin action\"}",
+        ),
+        (
+            Plugin {
+                name: String::from("INVALID"),
+                action: String::from("enable"),
+            },
+            "{\"message\":\"name: Invalid plugin name\"}",
+        ),
+    ];
+
+    for (invalid_data, error_message) in test_cases {
+        let res = reqwest::Client::new()
+            .post(&url)
+            .header(CONTENT_TYPE, "application/json")
+            .body(serde_json::to_string(&invalid_data).unwrap())
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(res.status().as_u16(), 400);
+        let body = res.text().await.unwrap();
+        assert_eq!(body, error_message);
+    }
+}
 
 #[tokio::test]
 async fn test_plugin_enable_and_disable() {
-  let url = format!("{}/api/v1/plugin", common::spawn_app(None));
-  let test_cases = vec![
-    (Plugin { name : String::from("test"), action: String::from("enable") }, "ENABLED\n"),
-    (Plugin { name : String::from("test"), action: String::from("disable") }, "DISABLED\n"),
-  ];
+    let url = format!("{}/api/v1/plugin", common::spawn_app(None));
+    let test_cases = vec![
+        (
+            Plugin {
+                name: String::from("test"),
+                action: String::from("enable"),
+            },
+            "ENABLED\n",
+        ),
+        (
+            Plugin {
+                name: String::from("test"),
+                action: String::from("disable"),
+            },
+            "DISABLED\n",
+        ),
+    ];
 
-  for (data, answer) in test_cases { 
-    let res = reqwest::Client::new()
-      .post(&url)
-      .header(CONTENT_TYPE, "application/json")
-      .body(serde_json::to_string(&data).unwrap())
-      .send()
-      .await
-      .unwrap();
+    for (data, answer) in test_cases {
+        let res = reqwest::Client::new()
+            .post(&url)
+            .header(CONTENT_TYPE, "application/json")
+            .body(serde_json::to_string(&data).unwrap())
+            .send()
+            .await
+            .unwrap();
 
-    assert_eq!(res.status().as_u16(), 200);
-    let body = res.text().await.unwrap();
-    assert_eq!(body, answer);
-  }
+        assert_eq!(res.status().as_u16(), 200);
+        let body = res.text().await.unwrap();
+        assert_eq!(body, answer);
+    }
 }
-
-
-

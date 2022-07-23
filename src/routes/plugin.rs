@@ -22,10 +22,10 @@
 
 use std::sync::Arc;
 
-use actix_web::{post, HttpResponse, web};
+use actix_web::{post, web, HttpResponse};
 use log::debug;
-use validator::Validate;
 use serde::{Deserialize, Serialize};
+use validator::Validate;
 
 use crate::config::Config;
 use crate::utils::cmd::run_cmd;
@@ -34,16 +34,21 @@ use crate::errors::Result;
 
 //use std::{thread, time};
 
-#[derive(Deserialize,Serialize)]
-#[derive(Validate)]
+#[derive(Deserialize, Serialize, Validate)]
 pub struct Plugin {
-    #[validate(regex(path = "crate::utils::myregex::PLUGINS_NAMES", message = "Invalid plugin name"))]
+    #[validate(regex(
+        path = "crate::utils::myregex::PLUGINS_NAMES",
+        message = "Invalid plugin name"
+    ))]
     pub name: String,
-    #[validate(regex(path = "crate::utils::myregex::PLUGINS_ACTIONS", message = "Invalid plugin action"))]
-    pub action: String
+    #[validate(regex(
+        path = "crate::utils::myregex::PLUGINS_ACTIONS",
+        message = "Invalid plugin action"
+    ))]
+    pub action: String,
 }
 
-/* 
+/*
   curl -k -i -X POST -H 'X-API-Key: **************************' \
     -H "Content-Type: application/json" \
     -d '{"name":"openvpn", "action":"enable"}' \
@@ -51,22 +56,40 @@ pub struct Plugin {
 */
 #[post("/plugin")]
 async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
-  // Validate input.
-  plugin.validate()?;
+    // Validate input.
+    plugin.validate()?;
 
-  debug!("Locking FWCloud plugins mutex (thread id: {}) ...", thread_id::get());
-  let mutex = Arc::clone(&cfg.mutex.plugins);
-  let mutex_data = mutex.lock().await;
-  debug!("FWCloud plugins mutex locked (thread id: {})!", thread_id::get());
+    debug!(
+        "Locking FWCloud plugins mutex (thread id: {}) ...",
+        thread_id::get()
+    );
+    let mutex = Arc::clone(&cfg.mutex.plugins);
+    let mutex_data = mutex.lock().await;
+    debug!(
+        "FWCloud plugins mutex locked (thread id: {})!",
+        thread_id::get()
+    );
 
-  // Only for debug purposes. It is useful for verify that the mutex makes its work.
-  //thread::sleep(time::Duration::from_millis(10_000));
+    // Only for debug purposes. It is useful for verify that the mutex makes its work.
+    //thread::sleep(time::Duration::from_millis(10_000));
 
-  let res = run_cmd("sh", &[format!("{}/{}/{}.sh",cfg.plugins_dir,plugin.name,plugin.name).as_str(), plugin.action.as_str()])?;
+    let res = run_cmd(
+        "sh",
+        &[
+            format!("{}/{}/{}.sh", cfg.plugins_dir, plugin.name, plugin.name).as_str(),
+            plugin.action.as_str(),
+        ],
+    )?;
 
-  debug!("Unlocking FWCloud plugins mutex (thread id: {}) ...", thread_id::get());
-  drop(mutex_data);
-  debug!("FWCloud plugins mutex unlocked (thread id: {})!", thread_id::get());
+    debug!(
+        "Unlocking FWCloud plugins mutex (thread id: {}) ...",
+        thread_id::get()
+    );
+    drop(mutex_data);
+    debug!(
+        "FWCloud plugins mutex unlocked (thread id: {})!",
+        thread_id::get()
+    );
 
-  Ok(res)
+    Ok(res)
 }

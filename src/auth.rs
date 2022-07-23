@@ -25,13 +25,12 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use actix_service::{Service, Transform};
-use actix_web::{dev::ServiceRequest, dev::ServiceResponse, Error, web};
+use actix_web::{dev::ServiceRequest, dev::ServiceResponse, web, Error};
 use futures::future::{ok, Ready};
 use futures::Future;
 
-use crate::errors::FwcError;
 use crate::config::Config;
-
+use crate::errors::FwcError;
 
 // There are two steps in middleware processing.
 // 1. Middleware initialization, middleware factory gets called with
@@ -65,7 +64,9 @@ pub struct AuthorizeMiddleware<S> {
 }
 
 macro_rules! err {
-    ($x: expr) => { Box::pin(async { Err(Error::from($x)) }) };
+    ($x: expr) => {
+        Box::pin(async { Err(Error::from($x)) })
+    };
 }
 
 impl<S, B> Service<ServiceRequest> for AuthorizeMiddleware<S>
@@ -84,11 +85,15 @@ where
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        let api_key: String; 
+        let api_key: String;
 
         let cfg: &web::Data<Arc<Config>> = match req.app_data() {
             Some(val) => val,
-            None => return err!(FwcError::Internal("Error accessing configuration from authorization middleware"))
+            None => {
+                return err!(FwcError::Internal(
+                    "Error accessing configuration from authorization middleware"
+                ))
+            }
         };
 
         // If the use of API Key is enabled.
@@ -96,7 +101,7 @@ where
             // (1) Verify that the supplied API key is correct.
             match req.headers().get("X-API-Key") {
                 Some(value) => api_key = String::from(value.to_str().unwrap()),
-                None => return err!(FwcError::ApiKeyNotFound)
+                None => return err!(FwcError::ApiKeyNotFound),
             }
 
             if cfg.api_key != api_key {
@@ -105,15 +110,19 @@ where
 
             // (2) Now check that the peer IP is allowed.
             // If allowed_ips vector is empty we are allowing connections form any IP.
-            if !cfg.allowed_ips.is_empty() { 
+            if !cfg.allowed_ips.is_empty() {
                 let mut found = false;
 
                 let remote_ip = match req.connection_info().peer_addr() {
                     Some(data) => {
-                            let ip_and_port: Vec<&str> = data.split(':').collect(); 
-                            String::from(ip_and_port[0])
-                        },
-                    None => return err!(FwcError::Internal("Allowed IPs list not empty and was not possible to get the remote IP"))
+                        let ip_and_port: Vec<&str> = data.split(':').collect();
+                        String::from(ip_and_port[0])
+                    }
+                    None => {
+                        return err!(FwcError::Internal(
+                            "Allowed IPs list not empty and was not possible to get the remote IP"
+                        ))
+                    }
                 };
 
                 for ip in cfg.allowed_ips.iter() {
@@ -122,7 +131,7 @@ where
                         break;
                     }
                 }
-                if ! found {
+                if !found {
                     return err!(FwcError::NotAllowedIP);
                 }
             }

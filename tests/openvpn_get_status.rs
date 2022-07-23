@@ -26,32 +26,30 @@ use reqwest::header::CONTENT_TYPE;
 
 #[tokio::test]
 async fn openvpn_get_status_without_header_neither_data() {
-  let url = format!("{}/api/v1/openvpn/get/status", common::spawn_app(None));
+    let url = format!("{}/api/v1/openvpn/get/status", common::spawn_app(None));
 
-  let res = reqwest::Client::new()
-    .put(url)
-    .send()
-    .await
-    .unwrap();
+    let res = reqwest::Client::new().put(url).send().await.unwrap();
 
-  assert_eq!(res.status().as_u16(), 400);  
-  let body = res.text().await.unwrap();
-  assert_eq!(body, "Content type error");
+    assert_eq!(res.status().as_u16(), 400);
+    let body = res.text().await.unwrap();
+    assert_eq!(body, "Content type error");
 }
-
 
 #[tokio::test]
 async fn openvpn_get_status_without_data() {
-  let url = format!("{}/api/v1/openvpn/get/status", common::spawn_app(None));
+    let url = format!("{}/api/v1/openvpn/get/status", common::spawn_app(None));
 
-  let res = reqwest::Client::new()
-    .put(url)
-    .header(CONTENT_TYPE, "application/json")
-    .send()
-    .await
-    .unwrap();
+    let res = reqwest::Client::new()
+        .put(url)
+        .header(CONTENT_TYPE, "application/json")
+        .send()
+        .await
+        .unwrap();
 
-  assert_eq!(res.status().as_u16(), 400);  
-  let body = res.text().await.unwrap();
-  assert_eq!(body, "Json deserialize error: EOF while parsing a value at line 1 column 0");
+    assert_eq!(res.status().as_u16(), 400);
+    let body = res.text().await.unwrap();
+    assert_eq!(
+        body,
+        "Json deserialize error: EOF while parsing a value at line 1 column 0"
+    );
 }

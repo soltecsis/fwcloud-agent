@@ -24,118 +24,112 @@ mod common;
 
 #[tokio::test]
 async fn auth_error_no_api_key() {
-  let cfg_opt = common::TestCfgOpt {
-    enable_api_key: true,
-    api_key: common::random_api_key(64),
-    allowed_ips: vec![]
-  };
+    let cfg_opt = common::TestCfgOpt {
+        enable_api_key: true,
+        api_key: common::random_api_key(64),
+        allowed_ips: vec![],
+    };
 
-  let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
+    let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
 
-  let res = reqwest::Client::new()
-    .put(url)
-    .send()
-    .await
-    .unwrap();
+    let res = reqwest::Client::new().put(url).send().await.unwrap();
 
-  assert_eq!(res.status().as_u16(), 403);
-  let body = res.text().await.unwrap();
-  assert_eq!(body, "{\"message\":\"API key not found\"}");
+    assert_eq!(res.status().as_u16(), 403);
+    let body = res.text().await.unwrap();
+    assert_eq!(body, "{\"message\":\"API key not found\"}");
 }
-
 
 #[tokio::test]
 async fn auth_invalid_api_key() {
-  let cfg_opt = common::TestCfgOpt {
-    enable_api_key: true,
-    api_key: common::random_api_key(64),
-    allowed_ips: vec![]
-  };
+    let cfg_opt = common::TestCfgOpt {
+        enable_api_key: true,
+        api_key: common::random_api_key(64),
+        allowed_ips: vec![],
+    };
 
-  let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
+    let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
 
-  let res = reqwest::Client::new()
-    .put(url)
-    .header("X-API-Key", "1234567812345678")
-    .send()
-    .await
-    .unwrap();
+    let res = reqwest::Client::new()
+        .put(url)
+        .header("X-API-Key", "1234567812345678")
+        .send()
+        .await
+        .unwrap();
 
-  assert_eq!(res.status().as_u16(), 403);
-  let body = res.text().await.unwrap();
-  assert_eq!(body, "{\"message\":\"Invalid API key\"}");
+    assert_eq!(res.status().as_u16(), 403);
+    let body = res.text().await.unwrap();
+    assert_eq!(body, "{\"message\":\"Invalid API key\"}");
 }
-
 
 #[tokio::test]
 async fn auth_valid_api_key() {
-  let api_key: String = common::random_api_key(64);
+    let api_key: String = common::random_api_key(64);
 
-  let cfg_opt = common::TestCfgOpt {
-    enable_api_key: true,
-    api_key: api_key.clone(),
-    allowed_ips: vec![]
-  };
+    let cfg_opt = common::TestCfgOpt {
+        enable_api_key: true,
+        api_key: api_key.clone(),
+        allowed_ips: vec![],
+    };
 
-  let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
+    let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
 
-  let res = reqwest::Client::new()
-    .put(url)
-    .header("X-API-Key", api_key)
-    .send()
-    .await
-    .unwrap();
+    let res = reqwest::Client::new()
+        .put(url)
+        .header("X-API-Key", api_key)
+        .send()
+        .await
+        .unwrap();
 
-  assert_eq!(res.status().as_u16(), 200);
-  assert_eq!(res.content_length(), Some(0));
+    assert_eq!(res.status().as_u16(), 200);
+    assert_eq!(res.content_length(), Some(0));
 }
-
 
 #[tokio::test]
 async fn auth_myip_in_allowed_ips() {
-  let api_key: String = common::random_api_key(64);
-  
-  let cfg_opt = common::TestCfgOpt {
-    enable_api_key: true,
-    api_key: api_key.clone(),
-    allowed_ips: vec!["127.0.0.1".to_string()]
-  };
+    let api_key: String = common::random_api_key(64);
 
-  let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
+    let cfg_opt = common::TestCfgOpt {
+        enable_api_key: true,
+        api_key: api_key.clone(),
+        allowed_ips: vec!["127.0.0.1".to_string()],
+    };
 
-  let res = reqwest::Client::new()
-    .put(url)
-    .header("X-API-Key", api_key)
-    .send()
-    .await
-    .unwrap();
+    let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
 
-  assert_eq!(res.status().as_u16(), 200);
-  assert_eq!(res.content_length(), Some(0));
+    let res = reqwest::Client::new()
+        .put(url)
+        .header("X-API-Key", api_key)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status().as_u16(), 200);
+    assert_eq!(res.content_length(), Some(0));
 }
-
 
 #[tokio::test]
 async fn auth_myip_not_in_allowed_ips() {
-  let api_key: String = common::random_api_key(64);
-  
-  let cfg_opt = common::TestCfgOpt {
-    enable_api_key: true,
-    api_key: api_key.clone(),
-    allowed_ips: vec!["10.20.30.40".to_string()]
-  };
+    let api_key: String = common::random_api_key(64);
 
-  let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
+    let cfg_opt = common::TestCfgOpt {
+        enable_api_key: true,
+        api_key: api_key.clone(),
+        allowed_ips: vec!["10.20.30.40".to_string()],
+    };
 
-  let res = reqwest::Client::new()
-    .put(url)
-    .header("X-API-Key", api_key)
-    .send()
-    .await
-    .unwrap();
+    let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
 
-  assert_eq!(res.status().as_u16(), 403);
-  let body = res.text().await.unwrap();
-  assert_eq!(body, "{\"message\":\"Authorization error, access from your IP is not allowed\"}");
+    let res = reqwest::Client::new()
+        .put(url)
+        .header("X-API-Key", api_key)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status().as_u16(), 403);
+    let body = res.text().await.unwrap();
+    assert_eq!(
+        body,
+        "{\"message\":\"Authorization error, access from your IP is not allowed\"}"
+    );
 }
-

@@ -21,7 +21,7 @@
 */
 use actix_web::{put, HttpResponse, Responder};
 
-/* 
+/*
   curl -k -i -X PUT -H 'X-API-Key: **************************' https://localhost:33033/api/v1/ping
 */
 #[put("/ping")]

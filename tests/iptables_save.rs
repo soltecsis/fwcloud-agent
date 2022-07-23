@@ -24,14 +24,10 @@ mod common;
 
 #[tokio::test]
 async fn iptables_save_data_api_call_exists() {
-  let url = format!("{}/api/v1/iptables-save/data", common::spawn_app(None));
+    let url = format!("{}/api/v1/iptables-save/data", common::spawn_app(None));
 
-  let res = reqwest::Client::new()
-    .get(url)
-    .send()
-    .await
-    .unwrap();
+    let res = reqwest::Client::new().get(url).send().await.unwrap();
 
-  assert_ne!(res.status().as_u16(), 400);
-  assert_ne!(res.status().as_u16(), 404);
+    assert_ne!(res.status().as_u16(), 400);
+    assert_ne!(res.status().as_u16(), 404);
 }

@@ -20,12 +20,11 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use actix_web::{get, HttpResponse};
-use crate::utils::cmd::run_cmd;
 use crate::errors::Result;
+use crate::utils::cmd::run_cmd;
+use actix_web::{get, HttpResponse};
 
 #[get("/interfaces/info")]
 async fn info() -> Result<HttpResponse> {
-  run_cmd("ip", &["a"])
+    run_cmd("ip", &["a"])
 }
-

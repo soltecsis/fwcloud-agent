@@ -1,4 +1,3 @@
-
 /*
     Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com

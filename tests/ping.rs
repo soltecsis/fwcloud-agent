@@ -29,15 +29,10 @@ mod common;
 // `cargo expand --test health_check` (<- name of the test file)
 #[tokio::test]
 async fn ping() {
-  let url = format!("{}/api/v1/ping", common::spawn_app(None));
+    let url = format!("{}/api/v1/ping", common::spawn_app(None));
 
-  let res = reqwest::Client::new()
-    .put(url)
-    .send()
-    .await
-    .unwrap();
+    let res = reqwest::Client::new().put(url).send().await.unwrap();
 
-  assert_eq!(res.status().as_u16(), 200);
-  assert_eq!(res.content_length(), Some(0));
+    assert_eq!(res.status().as_u16(), 200);
+    assert_eq!(res.content_length(), Some(0));
 }
-

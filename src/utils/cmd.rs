@@ -20,25 +20,23 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+use crate::errors::Result;
 use actix_web::{http::header, HttpResponse};
 use subprocess::{Exec, Redirection};
-use crate::errors::Result;
-
 
 pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
-  let output = Exec::cmd(cmd)
-    .args(args)
-    .stdout(Redirection::Pipe)
-    .stderr(Redirection::Merge)
-    .capture()?
-    .stdout_str();
+    let output = Exec::cmd(cmd)
+        .args(args)
+        .stdout(Redirection::Pipe)
+        .stderr(Redirection::Merge)
+        .capture()?
+        .stdout_str();
 
-  let mut res = HttpResponse::Ok().body(output);
-  res.headers_mut().insert(
-    header ::CONTENT_TYPE,
-    header::HeaderValue::from_static("text/plain"),
-  );
+    let mut res = HttpResponse::Ok().body(output);
+    res.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("text/plain"),
+    );
 
-  Ok(res)
+    Ok(res)
 }
-
