@@ -80,7 +80,7 @@ impl FilesList {
 
           for line in reader.lines() {
             let line = line?;
-            if line.len() > 0 && line.chars().nth(0).unwrap() == '#' {
+            if !line.is_empty() && line.starts_with('#') {
               continue;
             }
             sha256.update(line+"\n");
@@ -168,7 +168,7 @@ impl FilesList {
   }
 
   pub fn dir_exists(&self) -> bool {
-    if Path::new(&self.dir).is_dir() { true } else { false }
+    Path::new(&self.dir).is_dir()
   }
 
   pub fn name(&self, inx: usize) -> String {
@@ -191,7 +191,7 @@ mod tests {
 
   fn files_list_factory(n: usize) -> FilesList {
     // Directory with a random name.
-    let dir = format!("./tests/playground/tmp/{}",Uuid::new_v4().to_string());
+    let dir = format!("./tests/playground/tmp/{}",Uuid::new_v4());
     let mut fl = FilesList {
       dir,
       files: vec![]
@@ -210,7 +210,7 @@ mod tests {
     for inx in 0..fl.len() {
       let fw = File::create(fl.path(inx))?;
       let mut writer = BufWriter::new(&fw);
-      writeln!(writer, "{}\n{}\n{}", Uuid::new_v4().to_string(),Uuid::new_v4().to_string(),Uuid::new_v4().to_string())?;
+      writeln!(writer, "{}\n{}\n{}", Uuid::new_v4(),Uuid::new_v4(),Uuid::new_v4())?;
     }
 
     // Verify that the files have been created.
@@ -525,7 +525,7 @@ mod tests {
 
     // Modify one of the files.
     let mut fw = File::create(&fl.path(inx))?;
-    let compare = format!("{}\n{}", Uuid::new_v4().to_string(),Uuid::new_v4().to_string());
+    let compare = format!("{}\n{}", Uuid::new_v4(),Uuid::new_v4());
     fw.write_all(compare.as_bytes())?;
     drop(&fw);
 

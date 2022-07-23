@@ -26,5 +26,5 @@ use crate::errors::Result;
 
 #[get("/iptables-save/data")]
 async fn data() -> Result<HttpResponse> {
-  Ok(run_cmd("iptables-save", &[])?)
+  run_cmd("iptables-save", &[])
 }

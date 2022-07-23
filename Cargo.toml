@@ -78,6 +78,7 @@ subprocess = "0.2.9"
 sha2 = "0.10.2"
 hex = "0.4.3"
 chrono = "0.4.19"
+async-mutex = "1.4.0"
 
 [dev-dependencies]
 actix-rt = "2.7.0"

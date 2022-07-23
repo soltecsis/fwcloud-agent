@@ -32,6 +32,8 @@ use crate::utils::cmd::run_cmd;
 
 use crate::errors::Result;
 
+//use std::{thread, time};
+
 #[derive(Deserialize,Serialize)]
 #[derive(Validate)]
 pub struct Plugin {
@@ -54,8 +56,11 @@ async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Resul
 
   debug!("Locking FWCloud plugins mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.plugins);
-  let mutex_data = mutex.lock().unwrap();
+  let mutex_data = mutex.lock().await;
   debug!("FWCloud plugins mutex locked (thread id: {})!", thread_id::get());
+
+  // Only for debug purposes. It is useful for verify that the mutex makes its work.
+  //thread::sleep(time::Duration::from_millis(10_000));
 
   let res = run_cmd("sh", &[format!("{}/{}/{}.sh",cfg.plugins_dir,plugin.name,plugin.name).as_str(), plugin.action.as_str()])?;
 

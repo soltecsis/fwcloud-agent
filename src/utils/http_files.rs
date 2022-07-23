@@ -80,7 +80,7 @@ impl HttpFiles {
     Ok(())
   }
 
-  pub async fn fwcloud_script(&mut self, payload: Multipart, fwcloud_script_paths: &Vec<String>) -> Result<HttpResponse> {
+  pub async fn fwcloud_script(&mut self, payload: Multipart, fwcloud_script_paths: &[String]) -> Result<HttpResponse> {
     self.expected_files = 1;
     self.extract_multipart_data(payload).await?;
     self.check_data()?;
@@ -110,8 +110,8 @@ impl HttpFiles {
     while let Ok(Some(mut field)) = payload.try_next().await {
       let content_type = field.content_disposition();
       
-      let filename = sanitize_filename::sanitize(content_type.get_filename().unwrap_or("").to_string());
-      if filename.len() == 0 {
+      let filename = sanitize_filename::sanitize(content_type.get_filename().unwrap_or(""));
+      if filename.is_empty() {
         let name = content_type.get_name().unwrap_or("").to_string();
         self.extract_field_data(field, name).await?;
         continue;
@@ -119,7 +119,7 @@ impl HttpFiles {
 
       // Parameter for destination dir (dst_dir) must go before any file contents in the
       // multipart stream.
-      if self.dst_dir.len() == 0 {
+      if self.dst_dir.is_empty() {
         return Err(FwcError::DstDirFirst);
       }
 
@@ -193,14 +193,12 @@ impl HttpFiles {
     // The parameter dst_dir must go before any file into the multipart stream. 
     // If the destination directory doesn't exists we will response with error before processing the files
     // data.
-    if name == "dst_dir" {
-      if !Path::new(&self.dst_dir).is_dir() { // If destination directory doesn't exists.
-        if self.create_dst_dir {
-          // Create the destination directory if it doesn't exists.
-          fs::create_dir_all(&self.dst_dir)?;
-        } else {
-          return Err(FwcError::DirNotFound);
-        }
+    if name == "dst_dir" && !Path::new(&self.dst_dir).is_dir() { // If destination directory doesn't exists.
+      if self.create_dst_dir {
+        // Create the destination directory if it doesn't exists.
+        fs::create_dir_all(&self.dst_dir)?;
+      } else {
+        return Err(FwcError::DirNotFound);
       }
     }
 
@@ -225,11 +223,11 @@ impl HttpFiles {
     self.validate()?;
     
     // Destination directory parameter is mandatory.
-    if self.dst_dir.len() < 1 {
+    if self.dst_dir.is_empty() {
       return Err(FwcError::Internal("Destination directory parameter not found in multipart/form-data stream"));
     }
 
-    if self.files.len() < 1 {
+    if self.files.is_empty() {
       return Err(FwcError::AtLeastOneFile);
     }
 

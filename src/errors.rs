@@ -109,6 +109,6 @@ impl ResponseError for FwcError {
       );
       
       error!("{}",self);
-      resp.set_body(BoxBody::new(format!("{{\"message\":\"{}\"}}",self).to_string()))
+      resp.set_body(BoxBody::new(format!("{{\"message\":\"{}\"}}",self)))
     }
 }

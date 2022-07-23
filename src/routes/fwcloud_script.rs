@@ -34,7 +34,7 @@ use crate::errors::Result;
 async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking FWCloud Script mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.fwcloud_script);
-  let mutex_data = mutex.lock().unwrap();
+  let mutex_data = mutex.lock().await;
   debug!("FWCloud Script mutex locked (thread id: {})!", thread_id::get());
 
   let res = HttpFiles::new(cfg.tmp_dir,false).fwcloud_script(payload, &cfg.fwcloud_script_paths).await?;

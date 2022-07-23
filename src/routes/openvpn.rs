@@ -39,7 +39,7 @@ use thread_id;
 async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
-  let mutex_data = mutex.lock().unwrap();
+  let mutex_data = mutex.lock().await;
   debug!("OpenVPN mutex locked (thread id: {})!", thread_id::get());
 
   // Only for debug purposes. It is useful for verify that the mutex makes its work.
@@ -59,7 +59,7 @@ async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result
 async fn files_remove(files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
-  let mutex_data = mutex.lock().unwrap();
+  let mutex_data = mutex.lock().await;
   debug!("OpenVPN mutex locked (thread id: {})!", thread_id::get());
 
   files_list.remove()?;
@@ -76,21 +76,19 @@ async fn files_remove(files_list: web::Json<FilesList>, cfg: web::Data<Arc<Confi
 async fn files_sha256(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
-  let mutex_data = mutex.lock().unwrap();
+  let mutex_data = mutex.lock().await;
   debug!("OpenVPN mutex locked (thread id: {})!", thread_id::get());
 
-  let result: String;
-
-  if files_list.dir_exists() {
+  let result: String = if files_list.dir_exists() {
     // If no files supplied then compute the sha256 has of all files into the directory.
     if files_list.len() == 0 {
       files_list.get_files_in_dir()?;
     }
-    result = files_list.sha256(true)?;
+    files_list.sha256(true)?
   }
   else { // If the dir doesn't exists return an empty result.
-    result = String::from("file,sha256\n");
-  }
+    String::from("file,sha256\n")
+  };
 
   debug!("Unlocking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   drop(mutex_data);
@@ -110,7 +108,7 @@ async fn files_sha256(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<C
 async fn get_status(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
   debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
   let mutex = Arc::clone(&cfg.mutex.openvpn);
-  let mutex_data = mutex.lock().unwrap();
+  let mutex_data = mutex.lock().await;
   debug!("OpenVPN mutex locked (thread id: {})!", thread_id::get());
 
   // Only one OpenVPN status file must be indicated in the request.
@@ -118,8 +116,8 @@ async fn get_status(mut files_list: web::Json<FilesList>, cfg: web::Data<Arc<Con
     return Err(FwcError::OnlyOneFileExpected);
   }  
   
-  let file_name = format!("{}/{}.data",files_list.dir(),files_list.name(0)).replace("/", "_");
-  files_list.chdir(&cfg.data_dir);
+  let file_name = format!("{}/{}.data",files_list.dir(),files_list.name(0)).replace('/', "_");
+  files_list.chdir(cfg.data_dir);
   files_list.rename(0, &file_name);
   
   let mut result = files_list.head_remove(0,cfg.openvpn_status_request_max_lines)?;

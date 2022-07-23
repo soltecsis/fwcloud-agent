@@ -105,12 +105,12 @@ where
 
             // (2) Now check that the peer IP is allowed.
             // If allowed_ips vector is empty we are allowing connections form any IP.
-            if cfg.allowed_ips.len() > 0 { 
+            if !cfg.allowed_ips.is_empty() { 
                 let mut found = false;
 
                 let remote_ip = match req.connection_info().peer_addr() {
                     Some(data) => {
-                            let ip_and_port: Vec<&str> = data.split(":").collect(); 
+                            let ip_and_port: Vec<&str> = data.split(':').collect(); 
                             String::from(ip_and_port[0])
                         },
                     None => return err!(FwcError::Internal("Allowed IPs list not empty and was not possible to get the remote IP"))

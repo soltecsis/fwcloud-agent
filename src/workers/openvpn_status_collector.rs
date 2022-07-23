@@ -59,8 +59,8 @@ impl OpenVPNStCollectorInner {
         for file in cfg.openvpn_status_files.iter() {
             data.openvpn_status_files.push( OpenVPNStFile {
                 st_file: String::from(file),
-                tmp_file: format!("{}/{}.tmp",cfg.tmp_dir,file.replace("/", "_")),
-                cache_file: format!("{}/{}.data",cfg.data_dir,file.replace("/", "_")),
+                tmp_file: format!("{}/{}.tmp",cfg.tmp_dir,file.replace('/', "_")),
+                cache_file: format!("{}/{}.data",cfg.data_dir,file.replace('/', "_")),
                 last_update: 0
             });
         }
@@ -95,8 +95,8 @@ impl OpenVPNStCollectorInner {
                 if &line[..] == "ROUTING TABLE" { break }
 
                 // Convert the Connected Since date string to timestamp.
-                let data: Vec<&str> = line.split(",").collect();
-                let connected_since = match NaiveDateTime::parse_from_str(&data[4][..], "%a %b %e %T %Y") {
+                let data: Vec<&str> = line.split(',').collect();
+                let connected_since = match NaiveDateTime::parse_from_str(data[4], "%a %b %e %T %Y") {
                     Ok(date_time) => date_time.timestamp(),
                     Err(e) => { 
                         error!("Bad OpenVPN status file ({}): invalid connected since date ({})",item.st_file,e);
@@ -186,7 +186,7 @@ impl OpenVPNStCollector {
 
         let (tx, rx) = mpsc::channel();
 
-        thread::spawn(move || {
+        thread::spawn(|| async move {
             info!("Starting OpenVPN status data collector thread (id: {})", thread_id::get());
             if local_self.lock().unwrap().len() == 0 {
                 info!("List of OpenVPN status files is empty")
@@ -195,7 +195,7 @@ impl OpenVPNStCollector {
             loop {
                 debug!("Locking OpenVPM mutex (thread id: {}) ...", thread_id::get());
                 let mutex = Arc::clone(&cfg.mutex.openvpn);
-                let mutex_data = mutex.lock().unwrap();
+                let mutex_data = mutex.lock().await;
                 debug!("OpenVPN mutex locked (thread id: {})!", thread_id::get());
               
                 let mut collector = local_self.lock().unwrap();
@@ -261,7 +261,7 @@ mod tests {
         let mut list:Vec<String> = vec![];
     
         for _ in 0..n {
-            list.push(format!("{}/tests/playground/tmp/{}.log",env::current_dir().unwrap().display(),Uuid::new_v4().to_string()));
+            list.push(format!("{}/tests/playground/tmp/{}.log",env::current_dir().unwrap().display(),Uuid::new_v4()));
         }
     
         list
@@ -315,8 +315,8 @@ mod tests {
 
         for inx in 0..n {
             assert_eq!(collector.openvpn_status_files[inx].st_file, list[inx]);
-            assert_eq!(collector.openvpn_status_files[inx].tmp_file, format!("./tmp/{}.tmp",list[inx].replace("/", "_")));
-            assert_eq!(collector.openvpn_status_files[inx].cache_file, format!("./data/{}.data",list[inx].replace("/", "_")));
+            assert_eq!(collector.openvpn_status_files[inx].tmp_file, format!("./tmp/{}.tmp",list[inx].replace('/', "_")));
+            assert_eq!(collector.openvpn_status_files[inx].cache_file, format!("./data/{}.data",list[inx].replace('/', "_")));
             assert_eq!(collector.openvpn_status_files[inx].last_update, 0);    
         }
    }      
