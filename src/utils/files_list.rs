@@ -90,9 +90,8 @@ impl FilesList {
                     io::copy(&mut file_stream, &mut sha256)?;
                 }
 
-                let hash = hex::encode(sha256.finalize().as_slice());
-
-                csv.push_str(&format!("{},{}\n", self.name(inx), hash));
+                let append = format!("{},{}\n", self.name(inx), hex::encode(sha256.finalize().as_slice()));
+                csv.push_str(&append);
             }
         }
 
