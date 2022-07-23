@@ -19,6 +19,8 @@ jobs:
       run: 'echo "::set-output name=rustversion::$(cargo pkgid | cut -d# -f2)"'
 
   security_audit:
+    needs: checks
+    name: Security audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
@@ -27,6 +29,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   test:
+    needs: checks
     name: Test
     runs-on: ubuntu-latest
     steps:
@@ -41,6 +44,7 @@ jobs:
           command: test
 
   fmt:
+    needs: checks
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
@@ -56,6 +60,7 @@ jobs:
           args: --all -- --check
 
   clippy:
+    needs: checks
     name: Clippy
     runs-on: ubuntu-latest
     steps:
@@ -71,6 +76,7 @@ jobs:
           args: -- -D warnings
 
   coverage:
+    needs: checks
     name: Code coverage
     runs-on: ubuntu-latest
     steps:
@@ -89,7 +95,7 @@ jobs:
           args: '--ignore-tests'
 
   build:
-    needs: checks
+    needs: [security_audit, test, fmt, clippy, coverage]
     name: Build
     runs-on: ubuntu-latest
     steps:
