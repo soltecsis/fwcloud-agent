@@ -1,6 +1,6 @@
 [package]
 name = "fwcloud-agent"
-version = "1.0.0"
+version = "1.1.0"
 license = "GNU AFFERO GENERAL PUBLIC LICENSE"
 description = "FWCloud Agent for firewalls management"
 readme = "README.md"
@@ -29,6 +29,9 @@ priority = "optional"
 assets = [
     ["target/release/fwcloud-agent", "opt/fwcloud/agent/", "700"],
     [".env.example", "opt/fwcloud/agent/.env", "600"],
+    ["plugins/lib.sh", "opt/fwcloud/agent/plugins/lib.sh", "700"],
+    ["plugins/geoip/geoip.sh", "opt/fwcloud/agent/plugins/geoip/geoip.sh", "700"],
+    ["plugins/openvpn/openvpn.sh", "opt/fwcloud/agent/plugins/openvpn/openvpn.sh", "700"],
     [".deb/fwcloud-agent.service", "lib/systemd/system/", "644"],
     [".deb/fwcloud-agent", "etc/logrotate.d/", "644"],
     [".deb/fwcloud-agent.1", "usr/share/man/man1/", "644"],
@@ -46,6 +49,9 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 
 [package.metadata.rpm.files]
 "../.env.example" = { path = "/opt/fwcloud/agent/.env", mode = "700", username = "root" }
+"../plugins/lib.sh" = { path = "/opt/fwcloud/agent/plugins/lib.sh", mode = "700", username = "root" }
+"../plugins/geoip/geoip.sh" = { path = "/opt/fwcloud/agent/plugins/geoip/geoip.sh", mode = "700", username = "root" }
+"../plugins/openvpn/openvpn.sh" = { path = "/opt/fwcloud/agent/plugins/openvpn/openvpn.sh", mode = "700", username = "root" }
 "../.deb/fwcloud-agent.1" = { path = "/usr/share/man/man1/fwcloud-agent.1", mode = "644", username = "root" }
 "../.deb/fwcloud-agent.service" = { path = "/lib/systemd/system/fwcloud-agent.service", mode = "644", username = "root" }
 "../.deb/fwcloud-agent" = { path = "/etc/logrotate.d/fwcloud-agent", mode = "644", username = "root" }
