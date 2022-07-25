@@ -203,6 +203,7 @@ jobs:
   deb-upload-to-packagecloud:
     needs: [deb-package]
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     name: DEB to Packagecloud
     strategy:
       matrix:
@@ -210,7 +211,7 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
-      - name: Upload to ${{ matrix.dist }}
+      - name: ${{ matrix.dist }}
         uses: danielmundi/upload-packagecloud@v1
         with:
           PACKAGE-NAME: ./deb-package/*.deb
@@ -222,6 +223,7 @@ jobs:
   rpm-upload-to-packagecloud:
     needs: [deb-package, rpm-package]
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     name: RPM to Packagecloud
     strategy:
       matrix:
@@ -229,7 +231,7 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
-      - name: Upload to ${{ matrix.dist }}
+      - name: ${{ matrix.dist }}
         uses: danielmundi/upload-packagecloud@v1
         with:
           PACKAGE-NAME: ./rpm-package/*.rpm
