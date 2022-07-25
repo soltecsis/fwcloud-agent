@@ -176,7 +176,7 @@ jobs:
     needs: [deb-package, rpm-package]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    name: Upload to FWCloud
+    name: FWCloud upload
     steps:
       - uses: actions/checkout@v2
       - name: Download packages
@@ -200,13 +200,13 @@ jobs:
           local-dir: ./rpm-package/
           server-dir: ./fwcloud-agent/rpm/
 
-  upload-to-packagecloud:
-    needs: [deb-package, rpm-package]
+  deb-upload-to-packagecloud:
+    needs: [deb-package]
     runs-on: ubuntu-latest
-    name: Upload to Packagecloud.io
+    name: DEB to Packagecloud
     strategy:
       matrix:
-        dist: [ubuntu/bionic,ubuntu/jammy,ubuntu/focal,debian/jessie,debian/bullseye,debian/buster]
+        dist: [ubuntu/bionic, ubuntu/jammy, ubuntu/focal, debian/jessie, debian/bullseye, debian/buster]
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
@@ -218,9 +218,14 @@ jobs:
           PACKAGECLOUD-REPO: FWCloud
           PACKAGECLOUD-DISTRIB: ${{ matrix.dist }}
           PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_PASSWORD }}
+
+  rpm-upload-to-packagecloud:
+    needs: [deb-package, rpm-package]
+    runs-on: ubuntu-latest
+    name: RPM to Packagecloud
     strategy:
       matrix:
-        dist: [ol/7,ol/8,el/7,el/7,fedora/35,fedora/36]
+        dist: [ol/7, ol/8, el/7, el/7, fedora/35, fedora/36]
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
