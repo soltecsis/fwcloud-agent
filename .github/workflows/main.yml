@@ -124,7 +124,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Install required packages
-      run: sudo apt install -y curl libssl-dev pkg-config
+      run: sudo apt install -y curl libssl-dev pkg-config gcc
     - name: Install rustup
       run: curl https://sh.rustup.rs -sSf | sh -s -- -y
       run: source "$HOME/.cargo/env"
@@ -145,7 +145,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Install required packages
-      run: sudo apt install -y curl rpm libssl-dev pkg-config
+      run: sudo apt install -y curl rpm libssl-dev pkg-config gcc
     - name: Install rustup
       run: curl https://sh.rustup.rs -sSf | sh -s -- -y
       run: source "$HOME/.cargo/env"
