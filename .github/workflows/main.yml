@@ -221,7 +221,7 @@ jobs:
           PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_PASSWORD }}
 
   rpm-upload-to-packagecloud:
-    needs: [deb-package, rpm-package]
+    needs: [rpm-package]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     name: RPM to Packagecloud
