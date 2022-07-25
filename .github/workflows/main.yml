@@ -103,20 +103,6 @@ jobs:
       - name: Build
         run: cargo build
 
-  #deb-package:
-  #  needs: [build]
-  #  runs-on: ubuntu-latest
-  #  name: DEB package
-  #  steps:
-  #  - uses: actions/checkout@v2
-  #  - name: Build DEB package
-  #    uses: sassman/rust-deb-builder@v1
-  #  - name: Upload package
-  #    uses: actions/upload-artifact@v2
-  #    with:
-  #      name: ubuntu-amd64
-  #      path: ./target/x86_64-unknown-linux-musl/debian/*
-
   deb-package:
     needs: [build]
     runs-on: ubuntu-latest
@@ -215,7 +201,7 @@ jobs:
   deb-to-packagecloud:
     needs: [deb-package]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    #if: github.ref == 'refs/heads/main'
     name: DEB to Packagecloud
     strategy:
       matrix:
@@ -235,7 +221,7 @@ jobs:
   rpm-to-packagecloud:
     needs: [rpm-package]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    #if: github.ref == 'refs/heads/main'
     name: RPM to Packagecloud
     strategy:
       matrix:
