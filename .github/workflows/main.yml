@@ -152,7 +152,7 @@ jobs:
   #       path: ./target/armv7-unknown-linux-musleabihf/debian/*
 
   upload:
-    needs: [ubuntu-amd64, fedora-amd64]
+    needs: [deb-package, rpm-package]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     name: Deploy
