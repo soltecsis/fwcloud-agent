@@ -186,16 +186,16 @@ jobs:
       - name: Upload DEB package
         uses: SamKirkland/FTP-Deploy-Action@4.0.0
         with:
-          server: pkg.fwcloud.net
-          username: fwcloud-pkg
+          server: ${{ secrets.FWCLOUD_PKG_FTP_HOST }}
+          username: ${{ secrets.FWCLOUD_PKG_FTP_USERNAME }}
           password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
           local-dir: ./deb-package/
           server-dir: ./fwcloud-agent/deb/
       - name: Upload RPM package
         uses: SamKirkland/FTP-Deploy-Action@4.0.0
         with:
-          server: pkg.fwcloud.net
-          username: fwcloud-pkg
+          server: ${{ secrets.FWCLOUD_PKG_FTP_HOST }}
+          username: ${{ secrets.FWCLOUD_PKG_FTP_USERNAME }}
           password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
           local-dir: ./rpm-package/
           server-dir: ./fwcloud-agent/rpm/
@@ -210,11 +210,25 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
-      - name: Upload package PackageCloud.io
+      - name: Upload to ${{ matrix.dist }}
         uses: danielmundi/upload-packagecloud@v1
         with:
           PACKAGE-NAME: ./deb-package/*.deb
-          PACKAGECLOUD-USERNAME: soltecsis
+          PACKAGECLOUD-USERNAME: ${{ secrets.PACKAGECLOUD_USERNAME }}
           PACKAGECLOUD-REPO: FWCloud
           PACKAGECLOUD-DISTRIB: ${{ matrix.dist }}
-          PACKAGECLOUD-TOKEN: ${{ secrets.af0098c64150768736d534ffeea6ccebc5008a06ae957e55 }}
+          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_PASSWORD }}
+    strategy:
+      matrix:
+        dist: [ol/7,ol/8,el/7,el/7,fedora/35,fedora/36]
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v2
+      - name: Upload to ${{ matrix.dist }}
+        uses: danielmundi/upload-packagecloud@v1
+        with:
+          PACKAGE-NAME: ./rpm-package/*.rpm
+          PACKAGECLOUD-USERNAME: ${{ secrets.PACKAGECLOUD_USERNAME }}
+          PACKAGECLOUD-REPO: FWCloud
+          PACKAGECLOUD-DISTRIB: ${{ matrix.dist }}
+          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_PASSWORD }}
