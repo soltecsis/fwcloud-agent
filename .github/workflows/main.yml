@@ -2,7 +2,7 @@ name: FWCloud-Agent CI
 
 on:
   push:
-    branches: [main, devel]
+    branches: [main, devel, 24_plugins]
 
 jobs:
   checks:
@@ -161,7 +161,7 @@ jobs:
   deb-to-fwcloud:
     needs: [deb-package]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    #if: github.ref == 'refs/heads/main'
     name: DEB to FWCloud
     steps:
       - uses: actions/checkout@v2
@@ -181,7 +181,7 @@ jobs:
   rpm-to-fwcloud:
     needs: [rpm-package]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    #if: github.ref == 'refs/heads/main'
     name: RPM to FWCloud
     steps:
       - uses: actions/checkout@v2
@@ -216,7 +216,7 @@ jobs:
           PACKAGECLOUD-USERNAME: ${{ secrets.PACKAGECLOUD_USERNAME }}
           PACKAGECLOUD-REPO: FWCloud
           PACKAGECLOUD-DISTRIB: ${{ matrix.dist }}
-          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_PASSWORD }}
+          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
 
   rpm-to-packagecloud:
     needs: [rpm-package]
@@ -236,4 +236,4 @@ jobs:
           PACKAGECLOUD-USERNAME: ${{ secrets.PACKAGECLOUD_USERNAME }}
           PACKAGECLOUD-REPO: FWCloud
           PACKAGECLOUD-DISTRIB: ${{ matrix.dist }}
-          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_PASSWORD }}
+          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
