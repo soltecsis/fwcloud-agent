@@ -168,7 +168,7 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v2
       - name: List packages
-        run: ls -lha 
+        run: ls -lha ./deb-package/
       - name: Upload DEB package
         uses: SamKirkland/FTP-Deploy-Action@4.0.0
         with:
@@ -188,7 +188,7 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v2
       - name: List packages
-        run: ls -lha 
+        run: ls -lha ./rpm-package/
       - name: Upload RPM package
         uses: SamKirkland/FTP-Deploy-Action@4.0.0
         with:
@@ -209,6 +209,10 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
+      - name: Download packages
+        uses: actions/download-artifact@v2
+      - name: List packages
+        run: ls -lha ./deb-package/
       - name: ${{ matrix.dist }}
         uses: danielmundi/upload-packagecloud@v1
         with:
@@ -229,6 +233,10 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
+      - name: Download packages
+        uses: actions/download-artifact@v2
+      - name: List packages
+        run: ls -lha ./rpm-package/
       - name: ${{ matrix.dist }}
         uses: danielmundi/upload-packagecloud@v1
         with:
