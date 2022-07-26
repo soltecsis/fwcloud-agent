@@ -170,11 +170,12 @@ jobs:
       - name: List packages
         run: ls -lha ./deb-package/
       - name: Upload DEB package
-        uses: SamKirkland/FTP-Deploy-Action@4.0.0
+        uses: SamKirkland/FTP-Deploy-Action@4.3.0
         with:
           server: ${{ secrets.FWCLOUD_PKG_FTP_HOST }}
           username: ${{ secrets.FWCLOUD_PKG_FTP_USERNAME }}
           password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
+          protocol: ftps
           local-dir: ./deb-package/
           server-dir: ./fwcloud-agent/deb/
 
@@ -190,11 +191,12 @@ jobs:
       - name: List packages
         run: ls -lha ./rpm-package/
       - name: Upload RPM package
-        uses: SamKirkland/FTP-Deploy-Action@4.0.0
+        uses: SamKirkland/FTP-Deploy-Action@4.3.0
         with:
           server: ${{ secrets.FWCLOUD_PKG_FTP_HOST }}
           username: ${{ secrets.FWCLOUD_PKG_FTP_USERNAME }}
           password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
+          protocol: ftps
           local-dir: ./rpm-package/
           server-dir: ./fwcloud-agent/rpm/
 
@@ -229,7 +231,7 @@ jobs:
     name: RPM to Packagecloud
     strategy:
       matrix:
-        dist: [ol/7, ol/8, el/7, el/7, fedora/35, fedora/36]
+        dist: [ol/7, ol/8, el/7, el/8, fedora/35, fedora/36]
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
