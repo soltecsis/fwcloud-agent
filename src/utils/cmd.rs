@@ -23,6 +23,7 @@
 use crate::errors::Result;
 use actix_web::{http::header, HttpResponse};
 use subprocess::{Exec, Redirection};
+use std::{thread, time};
 
 pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
     let output = Exec::cmd(cmd)
@@ -31,6 +32,50 @@ pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
         .stderr(Redirection::Merge)
         .capture()?
         .stdout_str();
+
+    let mut res = HttpResponse::Ok().body(output);
+    res.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("text/plain"),
+    );
+
+    Ok(res)
+}
+
+pub fn run_cmd_rt_output(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
+    let output = String::from("TESTING");
+
+    let mut popen = Exec::cmd(cmd)
+        .args(args)
+        .popen()?;
+
+    loop {
+        // Check if process is still running.
+        // Important, do it at the beginning of the loop, these way we will be able
+        // to capture the process output after it has finished its execution.
+        let finished = match popen.poll() {
+            Some(_exit_code) => true,
+            None => false
+        };
+
+        // Even if the process has already finished its execution, print its last output.
+        let (stdout, stderr) = popen.communicate(Option::None)?;
+        
+        match stdout {
+            Some(data) => { if data.len() > 0 { println!("stdout: {}",data) } }
+            None => ()
+        };      
+        match stderr {
+            Some(data) => { if data.len() > 0 { println!("stderr: {}",data) } }
+            None => ()
+        };      
+        
+        // Pause for avoid CPU intensive polling.
+        thread::sleep(time::Duration::from_millis(100));
+
+        if finished { break }
+    }
+
 
     let mut res = HttpResponse::Ok().body(output);
     res.headers_mut().insert(
