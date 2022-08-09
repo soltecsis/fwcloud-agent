@@ -23,7 +23,7 @@ copyright = "SOLTECSIS, SL"
 extended-description = """\
 FWCloud Agent daemon for simplify and improve \
 firewalls management from a FWCloud console."""
-depends = "openssl"
+depends = "openssl sudo"
 section = "utility"
 priority = "optional"
 assets = [

@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 use crate::config::Config;
-use crate::utils::cmd::run_cmd;
+use crate::utils::cmd::run_cmd_rt_output;
 
 use crate::errors::Result;
 
@@ -73,7 +73,7 @@ async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Resul
     // Only for debug purposes. It is useful for verify that the mutex makes its work.
     //thread::sleep(time::Duration::from_millis(10_000));
 
-    let res = run_cmd(
+    let res = run_cmd_rt_output(
         "sh",
         &[
             format!("{}/{}/{}.sh", cfg.plugins_dir, plugin.name, plugin.name).as_str(),

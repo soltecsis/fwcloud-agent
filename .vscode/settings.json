@@ -16,5 +16,8 @@
     "thiserror",
     "vect",
     "web"
+  ],
+  "cSpell.words": [
+    "popen"
   ]
 }

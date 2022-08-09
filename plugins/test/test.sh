@@ -20,6 +20,19 @@
 #   You should have received a copy of the GNU General Public License
 #   along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 
+echo "Line 1"
+sleep 1
+echo "Line 2"
+sleep 1
+echo "Line 3"
+sleep 1
+echo "Line 4"
+sleep 1
+echo "Line 5"
+sleep 1
+echo "Line 6"
+sleep 1
+
 if [ "$1" = "enable" ]; then
   echo "ENABLED"
 else

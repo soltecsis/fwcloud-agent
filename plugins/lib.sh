@@ -24,6 +24,12 @@
 ################################################################
 init() {
   discoverLinuxDist
+  if [ -z "$DIST "]; then
+    echo "ERROR: Linux distribution not supported."
+    echo "NOT_SUPORTED"
+    exit 1
+  fi
+
   setGlobalVars
 }
 ################################################################
@@ -116,6 +122,8 @@ pkgInstall() {
   pkgInstalled "$2"
   if [ "$?" = "0" ]; then
     $PKGM_CMD install -y $2
+  else
+    echo "Package '$2' already installed."
   fi
 }
 ################################################################
@@ -126,8 +134,10 @@ pkgRemove() {
   # $2=pkg name.
 
   pkgInstalled "$2"
-  if [ "$?" = "0" ]; then
+  if [ "$?" = "1" ]; then
     $PKGM_CMD remove -y $2
+  else
+    echo "Package '$2' not installed."
   fi
 }
 ################################################################
