@@ -21,9 +21,9 @@
 */
 
 use crate::errors::Result;
-use actix_web::{http::header, HttpResponse, web::Bytes};
+use actix_web::{http::header, HttpResponse, web::Bytes, Error};
 use subprocess::{Exec, Redirection};
-use std::{thread, time};
+use log::{error};
 
 pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
     let output = Exec::cmd(cmd)
@@ -45,42 +45,44 @@ pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
 pub fn run_cmd_rt_output(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
     let mut popen = Exec::cmd(cmd)
         .args(args)
+        .stdout(Redirection::Pipe)
+        .stderr(Redirection::Merge) // Redirect stderr too stdout.
         .popen()?;
 
-    let stream = async_stream::try_stream! {
-        loop {
-            // Check if process is still running.
-            // Important, do it at the beginning of the loop, these way we will be able
-            // to capture the process output even after it has finished its execution.
-            let finished = match popen.poll() {
-                Some(_exit_code) => true,
-                None => false
-            };
+    let mut communicator = popen.communicate_start(Option::None)
+        .limit_size(1); // Read the output byte by byte.
 
-            // Even if the process has already finished its execution, print its last output.
-            let (stdout, stderr) = popen.communicate(Option::None)?;
+    //let stream = async_stream::stream! {
+        loop {
+            let (stdout, _stderr) = match communicator.read_string() {
+                Ok(data) => data,
+                Err(e) => {
+                    error!("Subprocess communication error: {}", e.to_string()); 
+                    break;
+                }
+            };
             
-            match stdout {
-                //Some(data) => { if data.len() > 0 { println!("stdout: {}",data) } }
-                Some(data) => yield Ok(Bytes::from(data)),
-                None => ()
+            // Remember that with .stderr(Redirection::Merge) we have redirected 
+            // the stderr output to stdout. Then we will have all the output in stdout.
+            let output = match stdout {
+                Some(data) => data,
+                None => String::from("")
             };      
-            match stderr {
-                //Some(data) => { if data.len() > 0 { println!("stderr: {}",data) } }
-                Some(data) => yield Ok(Bytes::from(data)),
-                None => ()
-            };      
             
-            if finished { break }
-            
-            // Pause for avoid CPU intensive polling.
-            thread::sleep(time::Duration::from_millis(100));
+            // Finish when no more input data.
+            if output.len() == 0 { 
+                break; 
+            }
+
+            print!("{}",output);
+            //yield Ok::<Bytes, Error>(Bytes::from(output))
         }
-    };
+    //};
 
     let res = HttpResponse::Ok()
         .content_type("text/plain")
-        .streaming(stream);
+        //.streaming(Box::pin(stream));
+        .body("TEST");
 
     Ok(res)
 }

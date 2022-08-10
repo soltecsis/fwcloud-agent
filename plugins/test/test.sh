@@ -20,18 +20,14 @@
 #   You should have received a copy of the GNU General Public License
 #   along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 
-echo "Line 1"
-sleep 1
-echo "Line 2"
-sleep 1
-echo "Line 3"
-sleep 1
-echo "Line 4"
-sleep 1
-echo "Line 5"
-sleep 1
-echo "Line 6"
-sleep 1
+N=0
+while [ $N -lt 10 ]; do
+  echo "Line $N"
+  sleep 1
+  N=`expr $N + 1`
+done
+
+>&2 echo "Error test"
 
 if [ "$1" = "enable" ]; then
   echo "ENABLED"
