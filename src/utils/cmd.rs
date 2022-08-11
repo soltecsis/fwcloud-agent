@@ -20,12 +20,14 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use crate::errors::Result;
-use actix_web::{http::header, HttpResponse, web::Bytes, Error};
+
+use actix_web::{http::header, HttpResponse, web::Bytes};
 use subprocess::{Exec, Redirection};
+use async_stream::stream;
+use crate::errors::FwcError;
 use log::{error};
 
-pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
+pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse, FwcError> {
     let output = Exec::cmd(cmd)
         .args(args)
         .stdout(Redirection::Pipe)
@@ -42,23 +44,29 @@ pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
     Ok(res)
 }
 
-pub fn run_cmd_rt_output(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
-    let mut popen = Exec::cmd(cmd)
-        .args(args)
-        .stdout(Redirection::Pipe)
-        .stderr(Redirection::Merge) // Redirect stderr too stdout.
-        .popen()?;
+pub fn run_cmd_rt_output(cmd: &str, args: &[&str]) -> Result<HttpResponse, FwcError> {
+    let s = stream! {
+        //for i in 0..20 {
+        //    println!("{}",i);
+        //    yield Ok::<Bytes, FwcError>(Bytes::from(format!("{}\n",i)));
+        //    thread::sleep(time::Duration::from_millis(1000));
+        //}
+        let mut popen = Exec::cmd("sh")
+            .args(&["plugins/test/test.sh","enable"])
+            .stdout(Redirection::Pipe)
+            .stderr(Redirection::Merge) // Redirect stderr too stdout.
+            .popen()?;
 
-    let mut communicator = popen.communicate_start(Option::None)
-        .limit_size(1); // Read the output byte by byte.
+        let mut communicator = popen.communicate_start(Option::None)
+            .limit_size(1); // Read the output byte by byte.
 
-    //let stream = async_stream::stream! {
         loop {
             let (stdout, _stderr) = match communicator.read_string() {
                 Ok(data) => data,
                 Err(e) => {
                     error!("Subprocess communication error: {}", e.to_string()); 
-                    break;
+                    return;
+                    //break;
                 }
             };
             
@@ -71,18 +79,20 @@ pub fn run_cmd_rt_output(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
             
             // Finish when no more input data.
             if output.len() == 0 { 
-                break; 
+                //break;
+                return; 
             }
 
             print!("{}",output);
-            //yield Ok::<Bytes, Error>(Bytes::from(output))
+            yield Ok::<Bytes, FwcError>(Bytes::from(output))
         }
-    //};
+    };
 
     let res = HttpResponse::Ok()
         .content_type("text/plain")
         //.streaming(Box::pin(stream));
-        .body("TEST");
+        .streaming(Box::pin(s));
+        //.body("TEST");
 
     Ok(res)
 }
