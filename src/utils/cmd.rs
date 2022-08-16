@@ -67,12 +67,14 @@ impl CmdWebSocket {
 
     fn heart_beat(&self, ctx: &mut ws::WebsocketContext<Self>) {
         ctx.run_interval(HEARTBEAT_INTERVAL, move |act, ctx| {
-            ctx.ping(b"PING\n");
-
-            let output = act.output.lock().unwrap();
-            if output.finished { 
-                ctx.cancel_future(ctx.handle());
+            {
+                let output = act.output.lock().unwrap();
+                if output.finished { 
+                    ctx.cancel_future(ctx.handle());
+                }
             }
+
+            ctx.ping(b"PING\n");
         });
     }
 }

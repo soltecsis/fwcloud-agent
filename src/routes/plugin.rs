@@ -22,7 +22,7 @@
 
 use actix_web::{get, web, HttpResponse, HttpRequest};
 use actix_web_actors::ws;
-//use log::debug;
+use log::{debug, error};
 use std::sync::{Arc, Mutex};
 use validator::Validate;
 
@@ -45,7 +45,7 @@ pub struct Plugin {
 }
 
 /*
-    curl -v -k -i -X GET -H 'X-API-Key: **************************' \
+    curl -v -k -i -X --http1.1 GET -H 'X-API-Key: **************************' \
         --header "Connection: Upgrade" \
         --header "Upgrade: websocket" \
         --header "Host: localhost:33033" \
@@ -75,7 +75,7 @@ async fn plugin(req: HttpRequest, stream: web::Payload, info: web::Path<(String,
     let res = match ws::start(CmdWebSocket { output }, &req, stream) {
         Ok(data) => data,
         Err(e) => { 
-            println!("ERROR: {}",e); 
+            error!("{}",e); 
             return Err(FwcError::Internal(
                 "Upgrading to WebSocket connection",
             ));
