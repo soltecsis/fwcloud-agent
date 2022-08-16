@@ -20,21 +20,17 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::sync::Arc;
-
-use actix_web::{post, web, HttpResponse};
-use log::debug;
-use serde::{Deserialize, Serialize};
+use actix_web::{get, web, HttpResponse, HttpRequest};
+use actix_web_actors::ws;
+//use log::debug;
+use std::sync::{Arc, Mutex};
 use validator::Validate;
 
 use crate::config::Config;
-use crate::utils::cmd::run_cmd_rt_output;
+use crate::errors::{FwcError, Result};
+use crate::utils::cmd::{CmdOutputData, CmdWebSocket, run_cmd_rt_output};
 
-use crate::errors::Result;
-
-//use std::{thread, time};
-
-#[derive(Deserialize, Serialize, Validate)]
+#[derive(Validate)]
 pub struct Plugin {
     #[validate(regex(
         path = "crate::utils::myregex::PLUGINS_NAMES",
@@ -49,46 +45,51 @@ pub struct Plugin {
 }
 
 /*
-  curl -k -i -X POST -H 'X-API-Key: **************************' \
-    -H "Content-Type: application/json" \
-    -d '{"name":"openvpn", "action":"enable"}' \
-    https://localhost:33033/api/v1/plugin
-*/
-#[post("/plugin")]
-async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
-    // Validate input.
+    curl -v -k -i -X GET -H 'X-API-Key: **************************' \
+        --header "Connection: Upgrade" \
+        --header "Upgrade: websocket" \
+        --header "Host: localhost:33033" \
+        --header "Origin: https://localhost:33033" \
+        --header "Sec-WebSocket-Key: ****************" \
+        --header "Sec-WebSocket-Version: 13" \
+        http://localhost:33033/api/v1/plugin/test/enable
+ */
+#[get("/plugin/{name}/{action}")]
+async fn plugin(req: HttpRequest, stream: web::Payload, info: web::Path<(String, String)>, cfg: web::Data<Arc<Config>>) ->  Result<HttpResponse> {
+    // URL path validation.
+    let (name, action) = info.into_inner();
+    let plugin = Plugin {
+        name,
+        action
+    };
     plugin.validate()?;
 
-    debug!(
-        "Locking FWCloud plugins mutex (thread id: {}) ...",
-        thread_id::get()
-    );
-    let mutex = Arc::clone(&cfg.mutex.plugins);
-    let mutex_data = mutex.lock().await;
-    debug!(
-        "FWCloud plugins mutex locked (thread id: {})!",
-        thread_id::get()
-    );
+    let output = CmdOutputData {
+        lines: vec![],
+        finished: false
 
-    // Only for debug purposes. It is useful for verify that the mutex makes its work.
-    //thread::sleep(time::Duration::from_millis(10_000));
+    };
+    let output = Arc::new(Mutex::new(output));
+    let output_clone = Arc::clone(&output);
+    
+    let res = match ws::start(CmdWebSocket { output }, &req, stream) {
+        Ok(data) => data,
+        Err(e) => { 
+            println!("ERROR: {}",e); 
+            return Err(FwcError::Internal(
+                "Upgrading to WebSocket connection",
+            ));
+        }
+    };
 
-    let res = run_cmd_rt_output(
+    run_cmd_rt_output(
         "sh",
         &[
-            format!("{}/{}/{}.sh", cfg.plugins_dir, plugin.name, plugin.name).as_str(),
-            plugin.action.as_str(),
+            format!("{}/{}/{}.sh", cfg.plugins_dir, plugin.name, plugin.name),
+            plugin.action,
         ],
-    )?;
-
-    debug!(
-        "Unlocking FWCloud plugins mutex (thread id: {}) ...",
-        thread_id::get()
-    );
-    drop(mutex_data);
-    debug!(
-        "FWCloud plugins mutex unlocked (thread id: {})!",
-        thread_id::get()
+        cfg,
+        output_clone
     );
 
     Ok(res)
