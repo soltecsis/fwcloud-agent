@@ -46,11 +46,7 @@ use crate::utils::ws::FwcAgentWs;
  */
 #[get("/ws")]
 async fn websocket(req: HttpRequest, stream: web::Payload, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
-    let new_ws = FwcAgentWs::new();
-    let data_clone = Arc::clone(&new_ws.data);
-
-    cfg.ws_map.lock().unwrap().insert(new_ws.get_id(), data_clone);
-
+    let new_ws = FwcAgentWs::new(Arc::clone(&cfg.ws_map));
     Ok(ws::start(new_ws, &req, stream)?)
 }
 

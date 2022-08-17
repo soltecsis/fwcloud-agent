@@ -23,7 +23,7 @@
 
 use actix::{Actor, StreamHandler, AsyncContext};
 use actix_web_actors::ws::{self, CloseReason};
-use std::{time::Duration, sync::{Arc, Mutex}};
+use std::{time::Duration, sync::{Arc, Mutex}, collections::HashMap};
 use uuid::Uuid;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -36,18 +36,25 @@ pub struct WsData {
 
 pub struct FwcAgentWs {
     id: Uuid,
-    pub data: Arc<Mutex<WsData>>
+    pub data: Arc<Mutex<WsData>>,
+    map: Arc<std::sync::Mutex<HashMap<Uuid, Arc<std::sync::Mutex<WsData>>>>>
 }
 
 impl FwcAgentWs {
-    pub fn new() -> FwcAgentWs {
-        FwcAgentWs {
+    pub fn new(map: Arc<std::sync::Mutex<HashMap<Uuid, Arc<std::sync::Mutex<WsData>>>>>) -> FwcAgentWs {
+        let new_ws = FwcAgentWs {
             id: Uuid::new_v4(),
             data: Arc::new(Mutex::new(WsData {
                 lines: vec![],
                 finished: false
-            }))
-        }
+            })),
+            map
+        };
+
+        let data_clone = Arc::clone(&new_ws.data);
+        new_ws.map.lock().unwrap().insert(new_ws.get_id(), data_clone);
+
+        new_ws
     }
 
     pub fn get_id(&self) -> Uuid {
@@ -69,6 +76,8 @@ impl FwcAgentWs {
                         description: Some(String::from("Closing websocket connection"))
                     }));
                     ctx.cancel_future(ctx.handle());
+                    // Remove websocket data from the map.
+                    act.map.lock().unwrap().remove(&act.id);
                 }
             }
         });
@@ -110,6 +119,8 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for FwcAgentWs {
             Ok(ws::Message::Close(reason)) => {
                 ctx.close(reason);
                 ctx.cancel_future(ctx.handle());
+                // Remove websocket data from the map.
+                self.map.lock().unwrap().remove(&self.id);
             }
             _ => (),
         }

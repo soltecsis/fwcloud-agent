@@ -43,7 +43,7 @@ pub struct Plugin {
     ))]
     pub action: String,
 
-    pub ws_id: Option<Uuid>
+    pub ws_id: Option<Uuid> // Optional parameter
 }
 
 /*
@@ -77,6 +77,9 @@ async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Resul
         plugin.action.as_str(),
     ];
 
+    // If the websocket id is present in the Plugin Json data received in the request, then 
+    // stream the command input to the websocket. If not, the command output will be sent
+    // as a whole when the command execution finishes.
     let res = match plugin.ws_id {
         Some(id) => {
             let ws_map = cfg.ws_map.lock().unwrap(); 
