@@ -20,10 +20,13 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-
-use actix::{Actor, StreamHandler, AsyncContext};
+use actix::{Actor, AsyncContext, StreamHandler};
 use actix_web_actors::ws::{self, CloseReason};
-use std::{time::Duration, sync::{Arc, Mutex}, collections::HashMap};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use uuid::Uuid;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -31,28 +34,28 @@ const POLLING_INTERVAL: Duration = Duration::from_millis(100);
 
 pub struct WsData {
     pub lines: Vec<String>,
-    pub finished: bool
+    pub finished: bool,
 }
 
 pub struct FwcAgentWs {
     id: Uuid,
     pub data: Arc<Mutex<WsData>>,
-    map: Arc<std::sync::Mutex<HashMap<Uuid, Arc<std::sync::Mutex<WsData>>>>>
 }
 
 impl FwcAgentWs {
-    pub fn new(map: Arc<std::sync::Mutex<HashMap<Uuid, Arc<std::sync::Mutex<WsData>>>>>) -> FwcAgentWs {
+    pub fn new(
+        map: Arc<std::sync::Mutex<HashMap<Uuid, Arc<std::sync::Mutex<WsData>>>>>,
+    ) -> FwcAgentWs {
         let new_ws = FwcAgentWs {
             id: Uuid::new_v4(),
             data: Arc::new(Mutex::new(WsData {
                 lines: vec![],
-                finished: false
+                finished: false,
             })),
-            map
         };
 
         let data_clone = Arc::clone(&new_ws.data);
-        new_ws.map.lock().unwrap().insert(new_ws.get_id(), data_clone);
+        map.lock().unwrap().insert(new_ws.get_id(), data_clone);
 
         new_ws
     }
@@ -63,22 +66,18 @@ impl FwcAgentWs {
 
     fn send_lines(&self, ctx: &mut ws::WebsocketContext<Self>) {
         ctx.run_interval(POLLING_INTERVAL, move |act, ctx| {
-            {
-                let mut data = act.data.lock().unwrap();
-                while ! data.lines.is_empty() {
-                    ctx.text(data.lines[0].as_str());
-                    data.lines.remove(0);
-                }
+            let mut data = act.data.lock().unwrap();
+            while !data.lines.is_empty() {
+                ctx.text(data.lines[0].as_str());
+                data.lines.remove(0);
+            }
 
-                if data.finished {
-                    ctx.close(Some(CloseReason {
-                        code: ws::CloseCode::Normal,
-                        description: Some(String::from("Closing websocket connection"))
-                    }));
-                    ctx.cancel_future(ctx.handle());
-                    // Remove websocket data from the map.
-                    act.map.lock().unwrap().remove(&act.id);
-                }
+            if data.finished {
+                ctx.close(Some(CloseReason {
+                    code: ws::CloseCode::Normal,
+                    description: Some(String::from("Closing websocket connection")),
+                }));
+                ctx.cancel_future(ctx.handle());
             }
         });
     }
@@ -86,7 +85,7 @@ impl FwcAgentWs {
     fn heart_beat(&self, ctx: &mut ws::WebsocketContext<Self>) {
         ctx.run_interval(HEARTBEAT_INTERVAL, move |act, ctx| {
             {
-                if act.data.lock().unwrap().finished { 
+                if act.data.lock().unwrap().finished {
                     ctx.cancel_future(ctx.handle());
                 }
             }
@@ -102,8 +101,8 @@ impl Actor for FwcAgentWs {
     // Start the heartbeat process for this connection
     fn started(&mut self, ctx: &mut Self::Context) {
         // The first message will be the id of the websocket connection.
-        ctx.text(format!("{}",self.id));
-        
+        ctx.text(format!("{}", self.id));
+
         self.heart_beat(ctx);
         self.send_lines(ctx);
     }
@@ -119,8 +118,6 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for FwcAgentWs {
             Ok(ws::Message::Close(reason)) => {
                 ctx.close(reason);
                 ctx.cancel_future(ctx.handle());
-                // Remove websocket data from the map.
-                self.map.lock().unwrap().remove(&self.id);
             }
             _ => (),
         }

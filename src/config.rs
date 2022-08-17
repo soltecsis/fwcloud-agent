@@ -22,18 +22,21 @@
 extern crate num_cpus;
 
 use rand::{distributions::Alphanumeric, Rng};
-use std::{env, fs, net::TcpListener, sync::Arc, collections::HashMap};
+use std::{
+    collections::HashMap,
+    env, fs,
+    net::TcpListener,
+    sync::{Arc, Mutex},
+};
 use uuid::Uuid;
-use async_mutex::Mutex;
 use validator::Validate; // A trait that the Validate derive will impl
-
 
 use crate::errors::Result;
 use crate::utils::ws::WsData;
 
 pub struct MyMutex {
-    pub openvpn: Arc<Mutex<u8>>,
-    pub fwcloud_script: Arc<Mutex<u8>>,
+    pub openvpn: Arc<tokio::sync::Mutex<u8>>,
+    pub fwcloud_script: Arc<tokio::sync::Mutex<u8>>,
     pub plugins: Arc<Mutex<u8>>,
 }
 
@@ -95,7 +98,7 @@ pub struct Config {
 
     pub mutex: MyMutex,
 
-    pub ws_map: Arc<std::sync::Mutex<HashMap<Uuid, Arc<std::sync::Mutex<WsData>>>>>
+    pub ws_map: Arc<Mutex<HashMap<Uuid, Arc<Mutex<WsData>>>>>,
 }
 
 impl Config {
@@ -164,12 +167,12 @@ impl Config {
                 .unwrap_or(10_485_760),
 
             mutex: MyMutex {
-                openvpn: Arc::new(Mutex::new(0)),
-                fwcloud_script: Arc::new(Mutex::new(0)),
+                openvpn: Arc::new(tokio::sync::Mutex::new(0)),
+                fwcloud_script: Arc::new(tokio::sync::Mutex::new(0)),
                 plugins: Arc::new(Mutex::new(0)),
             },
 
-            ws_map: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            ws_map: Arc::new(Mutex::new(HashMap::new())),
         };
 
         cfg.validate()?;

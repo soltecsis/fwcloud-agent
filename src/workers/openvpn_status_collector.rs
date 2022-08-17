@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -227,23 +227,25 @@ impl OpenVPNStCollector {
                 }
 
                 loop {
-                    debug!("Locking OpenVPM mutex (thread id: {})", thread_id::get());
-                    let mutex = Arc::clone(&cfg.mutex.openvpn);
-                    let mutex_data = mutex.lock().await;
-                    debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
+                    let pause: u64;
 
-                    // Only for debug purposes. It is useful for verify that the mutex makes its work.
-                    //thread::sleep(time::Duration::from_millis(10_000));
+                    // Start of mutex scope.
+                    {
+                        debug!("Locking OpenVPN mutex (thread id: {})", thread_id::get());
+                        let mutex = Arc::clone(&cfg.mutex.openvpn);
+                        let _mutex_data = mutex.lock().await;
+                        debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
 
-                    let mut collector = local_self.lock().unwrap();
-                    collector.collect_all_files_data();
+                        // Only for debug purposes. It is useful for verify that the mutex makes its work.
+                        //thread::sleep(time::Duration::from_millis(10_000));
 
-                    debug!("Unlocking OpenVPM mutex (thread id: {})", thread_id::get());
-                    drop(mutex_data);
-                    debug!("OpenVPN mutex unlocked (thread id: {})", thread_id::get());
+                        let mut collector = local_self.lock().unwrap();
+                        collector.collect_all_files_data();
+                        pause = collector.sampling_interval;
+                    } // End of mutex scope.
 
                     // Pause between samplings.
-                    for _n in 0..collector.sampling_interval {
+                    for _n in 0..pause {
                         thread::sleep(time::Duration::from_secs(1));
 
                         let cmd = rx.try_recv().unwrap_or(0);
