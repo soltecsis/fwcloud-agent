@@ -21,7 +21,7 @@
 #   along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 
 N=0
-while [ $N -lt 3600 ]; do
+while [ $N -lt 10 ]; do
   echo "Line $N"
   sleep 1
   N=`expr $N + 1`

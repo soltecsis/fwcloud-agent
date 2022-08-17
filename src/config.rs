@@ -22,17 +22,14 @@
 extern crate num_cpus;
 
 use rand::{distributions::Alphanumeric, Rng};
-use std::env;
-use std::fs;
-use std::net::TcpListener;
-use std::sync::Arc;
+use std::{env, fs, net::TcpListener, sync::Arc, collections::HashMap};
+use uuid::Uuid;
+use async_mutex::Mutex;
+use validator::Validate; // A trait that the Validate derive will impl
+
 
 use crate::errors::Result;
-
-use async_mutex::Mutex;
-
-// A trait that the Validate derive will impl
-use validator::Validate;
+use crate::utils::ws::WsData;
 
 pub struct MyMutex {
     pub openvpn: Arc<Mutex<u8>>,
@@ -97,6 +94,8 @@ pub struct Config {
     pub openvpn_status_cache_max_size: usize,
 
     pub mutex: MyMutex,
+
+    pub ws_map: Arc<std::sync::Mutex<HashMap<Uuid, Arc<std::sync::Mutex<WsData>>>>>
 }
 
 impl Config {
@@ -169,6 +168,8 @@ impl Config {
                 fwcloud_script: Arc::new(Mutex::new(0)),
                 plugins: Arc::new(Mutex::new(0)),
             },
+
+            ws_map: Arc::new(std::sync::Mutex::new(HashMap::new())),
         };
 
         cfg.validate()?;
