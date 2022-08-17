@@ -143,21 +143,6 @@ jobs:
           name: rpm-package
           path: ./target/release/rpmbuild/RPMS/x86_64/*
 
-  # raspbian-armv7:
-  #   needs: [build]
-  #   runs-on: ubuntu-latest
-  #   name: Raspbian armv7
-  #   steps:
-  #   - uses: actions/checkout@v2
-  #   - name: Build package
-  #     id: debbuild
-  #     uses: ebbflow-io/cargo-deb-armv7-debian@1.0
-  #   - name: Upload package
-  #     uses: actions/upload-artifact@v2
-  #     with:
-  #       name: raspbian
-  #       path: ./target/armv7-unknown-linux-musleabihf/debian/*
-
   deb-to-fwcloud:
     needs: [deb-package]
     runs-on: ubuntu-latest
@@ -168,13 +153,14 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v2
       - name: List packages
-        run: ls -lha 
+        run: ls -lha ./deb-package/
       - name: Upload DEB package
-        uses: SamKirkland/FTP-Deploy-Action@4.0.0
+        uses: SamKirkland/FTP-Deploy-Action@4.3.0
         with:
           server: ${{ secrets.FWCLOUD_PKG_FTP_HOST }}
           username: ${{ secrets.FWCLOUD_PKG_FTP_USERNAME }}
           password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
+          protocol: ftps
           local-dir: ./deb-package/
           server-dir: ./fwcloud-agent/deb/
 
@@ -188,20 +174,21 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v2
       - name: List packages
-        run: ls -lha 
+        run: ls -lha ./rpm-package/
       - name: Upload RPM package
-        uses: SamKirkland/FTP-Deploy-Action@4.0.0
+        uses: SamKirkland/FTP-Deploy-Action@4.3.0
         with:
           server: ${{ secrets.FWCLOUD_PKG_FTP_HOST }}
           username: ${{ secrets.FWCLOUD_PKG_FTP_USERNAME }}
           password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
+          protocol: ftps
           local-dir: ./rpm-package/
           server-dir: ./fwcloud-agent/rpm/
 
   deb-to-packagecloud:
     needs: [deb-package]
     runs-on: ubuntu-latest
-    #if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     name: DEB to Packagecloud
     strategy:
       matrix:
@@ -209,6 +196,10 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
+      - name: Download packages
+        uses: actions/download-artifact@v2
+      - name: List packages
+        run: ls -lha ./deb-package/
       - name: ${{ matrix.dist }}
         uses: danielmundi/upload-packagecloud@v1
         with:
@@ -216,19 +207,23 @@ jobs:
           PACKAGECLOUD-USERNAME: ${{ secrets.PACKAGECLOUD_USERNAME }}
           PACKAGECLOUD-REPO: FWCloud
           PACKAGECLOUD-DISTRIB: ${{ matrix.dist }}
-          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_PASSWORD }}
+          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
 
   rpm-to-packagecloud:
     needs: [rpm-package]
     runs-on: ubuntu-latest
-    #if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     name: RPM to Packagecloud
     strategy:
       matrix:
-        dist: [ol/7, ol/8, el/7, el/7, fedora/35, fedora/36]
+        dist: [ol/7, ol/8, el/7, el/8, fedora/35, fedora/36]
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
+      - name: Download packages
+        uses: actions/download-artifact@v2
+      - name: List packages
+        run: ls -lha ./rpm-package/
       - name: ${{ matrix.dist }}
         uses: danielmundi/upload-packagecloud@v1
         with:
@@ -236,4 +231,4 @@ jobs:
           PACKAGECLOUD-USERNAME: ${{ secrets.PACKAGECLOUD_USERNAME }}
           PACKAGECLOUD-REPO: FWCloud
           PACKAGECLOUD-DISTRIB: ${{ matrix.dist }}
-          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_PASSWORD }}
+          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}

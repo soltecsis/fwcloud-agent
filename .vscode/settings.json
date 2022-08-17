@@ -16,5 +16,9 @@
     "thiserror",
     "vect",
     "web"
+  ],
+  "cSpell.words": [
+    "httpdate",
+    "popen"
   ]
 }

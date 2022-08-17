@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -20,9 +20,13 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use crate::errors::Result;
 use actix_web::{http::header, HttpResponse};
+use log::error;
+use std::sync::{Arc, Mutex};
 use subprocess::{Exec, Redirection};
+
+use crate::errors::{FwcError, Result};
+use crate::utils::ws::WsData;
 
 pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
     let output = Exec::cmd(cmd)
@@ -39,4 +43,64 @@ pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
     );
 
     Ok(res)
+}
+
+pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>) -> Result<HttpResponse> {
+    let popen = Exec::cmd(cmd)
+        .args(args)
+        .stdout(Redirection::Pipe)
+        .stderr(Redirection::Merge) // Redirect stderr too stdout.
+        .popen();
+
+    let mut popen = match popen {
+        Ok(data) => data,
+        Err(e) => {
+            error!("Error: {}", e);
+            return Err(FwcError::Internal("Popen error"));
+        }
+    };
+
+    let mut communicator = popen.communicate_start(Option::None).limit_size(1); // IMPORTANT: Read the output byte by byte.
+
+    let mut line = String::new();
+    loop {
+        let (stdout, _stderr) = match communicator.read_string() {
+            Ok(data) => data,
+            Err(e) => {
+                error!("Subprocess communication error: {}", e.to_string());
+                break;
+            }
+        };
+
+        // Remember that with .stderr(Redirection::Merge) we have redirected
+        // the stderr output to stdout. Then we will have all the output in stdout.
+        let data = match stdout {
+            Some(data) => data,
+            None => String::new(),
+        };
+
+        // Finish when no more input data.
+        if data.is_empty() {
+            ws_data.lock().unwrap().finished = true;
+            break;
+        }
+
+        let c = data.chars().next().unwrap();
+        if c == '\r' {
+            // Ignore '\r' characters.
+            continue;
+        }
+        if c != '\n' {
+            line.push(c);
+            continue;
+        }
+
+        {
+            ws_data.lock().unwrap().lines.push(line);
+        }
+
+        line = String::new();
+    }
+
+    Ok(HttpResponse::Ok().finish())
 }

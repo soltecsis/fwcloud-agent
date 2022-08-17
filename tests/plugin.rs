@@ -64,6 +64,7 @@ async fn plugin_with_invalid_data() {
             Plugin {
                 name: String::from("openvpn"),
                 action: String::from("INVALID"),
+                ws_id: Option::None,
             },
             "{\"message\":\"action: Invalid plugin action\"}",
         ),
@@ -71,6 +72,7 @@ async fn plugin_with_invalid_data() {
             Plugin {
                 name: String::from("INVALID"),
                 action: String::from("enable"),
+                ws_id: Option::None,
             },
             "{\"message\":\"name: Invalid plugin name\"}",
         ),
@@ -99,6 +101,7 @@ async fn test_plugin_enable_and_disable() {
             Plugin {
                 name: String::from("test"),
                 action: String::from("enable"),
+                ws_id: Option::None,
             },
             "ENABLED\n",
         ),
@@ -106,6 +109,7 @@ async fn test_plugin_enable_and_disable() {
             Plugin {
                 name: String::from("test"),
                 action: String::from("disable"),
+                ws_id: Option::None,
             },
             "DISABLED\n",
         ),

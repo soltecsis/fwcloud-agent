@@ -22,7 +22,7 @@
 use actix_web::{put, HttpResponse, Responder};
 
 /*
-  curl -k -i -X PUT -H 'X-API-Key: **************************' https://localhost:33033/api/v1/ping
+  curl -v -k -i -X PUT -H 'X-API-Key: **************************' https://localhost:33033/api/v1/ping
 */
 #[put("/ping")]
 async fn ping() -> impl Responder {

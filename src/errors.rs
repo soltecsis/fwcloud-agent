@@ -73,6 +73,9 @@ pub enum FwcError {
     #[error("Only one file expected in request")]
     OnlyOneFileExpected,
 
+    #[error("WebSocket id not found")]
+    WebSocketIdNotFound,
+
     #[error("{0}")]
     Internal(&'static str),
 
@@ -84,6 +87,9 @@ pub enum FwcError {
 
     #[error(transparent)]
     BlockingError(#[from] actix_web::error::BlockingError),
+
+    #[error(transparent)]
+    ActixWebError(#[from] actix_web::Error),
 
     #[error(transparent)]
     PopenError(#[from] subprocess::PopenError),
