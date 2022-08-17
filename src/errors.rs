@@ -76,6 +76,9 @@ pub enum FwcError {
     #[error("WebSocket id not found")]
     WebSocketIdNotFound,
 
+    #[error("Too many concurrent WebSocket connections")]
+    WebSocketTooMany,
+
     #[error("{0}")]
     Internal(&'static str),
 
