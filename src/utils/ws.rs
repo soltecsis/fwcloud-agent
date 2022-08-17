@@ -25,7 +25,7 @@ use actix_web_actors::ws::{self, CloseReason};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use uuid::Uuid;
 
@@ -33,6 +33,7 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const POLLING_INTERVAL: Duration = Duration::from_millis(100);
 
 pub struct WsData {
+    pub created_at: SystemTime,
     pub lines: Vec<String>,
     pub finished: bool,
 }
@@ -49,6 +50,7 @@ impl FwcAgentWs {
         let new_ws = FwcAgentWs {
             id: Uuid::new_v4(),
             data: Arc::new(Mutex::new(WsData {
+                created_at: SystemTime::now(),
                 lines: vec![],
                 finished: false,
             })),
