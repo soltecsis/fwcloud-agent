@@ -127,7 +127,7 @@ async fn get_status(
         let mutex = Arc::clone(&cfg.mutex.openvpn);
         let _mutex_data = mutex.lock().await;
         debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
-        
+
         // Only one OpenVPN status file must be indicated in the request.
         if files_list.len() != 1 {
             return Err(FwcError::OnlyOneFileExpected);
