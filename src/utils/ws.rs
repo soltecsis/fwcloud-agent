@@ -20,7 +20,7 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use actix::{Actor, AsyncContext, StreamHandler};
+use actix::{Actor, AsyncContext, SpawnHandle, StreamHandler};
 use actix_web_actors::ws::{self, CloseReason};
 use std::{
     collections::HashMap,
@@ -40,6 +40,7 @@ pub struct WsData {
 
 pub struct FwcAgentWs {
     id: Uuid,
+    heart_beat_handler: Option<SpawnHandle>,
     pub data: Arc<Mutex<WsData>>,
 }
 
@@ -49,6 +50,7 @@ impl FwcAgentWs {
     ) -> FwcAgentWs {
         let new_ws = FwcAgentWs {
             id: Uuid::new_v4(),
+            heart_beat_handler: None,
             data: Arc::new(Mutex::new(WsData {
                 created_at: SystemTime::now(),
                 lines: vec![],
@@ -67,6 +69,8 @@ impl FwcAgentWs {
     }
 
     fn send_lines(&self, ctx: &mut ws::WebsocketContext<Self>) {
+        let handle = self.heart_beat_handler.unwrap();
+
         ctx.run_interval(POLLING_INTERVAL, move |act, ctx| {
             let mut data = act.data.lock().unwrap();
             while !data.lines.is_empty() {
@@ -80,20 +84,24 @@ impl FwcAgentWs {
                     description: Some(String::from("Closing websocket connection")),
                 }));
                 ctx.cancel_future(ctx.handle());
+
+                // IMPORTANT: Cancel the future for the heart beat task. If not, the websocket will not be closed until
+                // the next run of this task. This causes a delay in all the communications. For example,
+                // if we have the HEARTBEAT_INTERVAL as 5 seconds, the FWCloud-UI can wait a maximum of
+                // 5 seconds after the request has finished.
+                ctx.cancel_future(handle);
             }
         });
     }
 
-    fn heart_beat(&self, ctx: &mut ws::WebsocketContext<Self>) {
-        ctx.run_interval(HEARTBEAT_INTERVAL, move |act, ctx| {
-            {
-                if act.data.lock().unwrap().finished {
-                    ctx.cancel_future(ctx.handle());
-                }
+    fn heart_beat(&mut self, ctx: &mut ws::WebsocketContext<Self>) {
+        self.heart_beat_handler = Some(ctx.run_interval(HEARTBEAT_INTERVAL, move |act, ctx| {
+            if act.data.lock().unwrap().finished {
+                ctx.cancel_future(ctx.handle());
+            } else {
+                ctx.ping(b"PING\n");
             }
-
-            ctx.ping(b"PING\n");
-        });
+        }));
     }
 }
 
