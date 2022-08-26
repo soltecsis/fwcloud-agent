@@ -6,7 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.0] - Unreleased
 ### Added
-- New API call for create a WebSocket communication channel.
+- API call for get information about the host in which FWCloud-Agent is running.
+- API call for create a WebSocket communication channel.
 - Plugins ecosystem support.
 - Plugin for OpenVPN.
 - Plugin for GeoIP.

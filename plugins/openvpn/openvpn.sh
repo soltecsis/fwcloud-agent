@@ -23,15 +23,6 @@
 . ./plugins/lib.sh
 init
 
-N=0
-while [ $N -lt 600 ]; do
-  echo "Line $N"
-  sleep 1
-  N=`expr $N + 1`
-done
-
-sleep 45
-
 ################################################################
 enable() {
   echo "Installing OpenVPN package."
