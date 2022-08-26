@@ -25,6 +25,7 @@ mod interfaces;
 mod iptables_save;
 mod openvpn;
 mod ping;
+mod info;
 pub mod plugin;
 mod ws;
 
@@ -34,6 +35,7 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
     config.service(
         web::scope("/api/v1")
             .service(ping::ping)
+            .service(info::info)
             // FWCloud script.
             .service(fwcloud_script::upload_and_run)
             // OpenVPN.
