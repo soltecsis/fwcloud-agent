@@ -19,14 +19,14 @@
     You should have received a copy of the GNU General Public License
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
-use actix_web::{get, HttpResponse, http::header::ContentType};
+use actix_web::{get, http::header::ContentType, HttpResponse};
 use serde::Serialize;
 
 use crate::errors::Result;
 
 #[derive(Serialize)]
 struct Info {
-    fwc_agent_version: &'static str
+    fwc_agent_version: &'static str,
 }
 
 /*
@@ -34,11 +34,11 @@ struct Info {
 */
 #[get("/info")]
 async fn info() -> Result<HttpResponse> {
-  let info = Info {
-    fwc_agent_version: env!("CARGO_PKG_VERSION")
-  };
+    let info = Info {
+        fwc_agent_version: env!("CARGO_PKG_VERSION"),
+    };
 
-  Ok(HttpResponse::Ok()
-    .content_type(ContentType::json())
-    .body(serde_json::to_string(&info).unwrap_or(String::from(""))))
+    Ok(HttpResponse::Ok()
+        .content_type(ContentType::json())
+        .body(serde_json::to_string(&info).unwrap_or_else(|_| String::from(""))))
 }

@@ -21,11 +21,11 @@
 */
 
 mod fwcloud_script;
+mod info;
 mod interfaces;
 mod iptables_save;
 mod openvpn;
 mod ping;
-mod info;
 pub mod plugin;
 mod ws;
 
