@@ -73,16 +73,20 @@ impl FwcAgentWs {
         let handle = self.heart_beat_handler.unwrap();
         let id = self.get_id();
 
-        ctx.run_interval(POLLING_INTERVAL, move |act, ctx| {
+        debug!("Starting the websocket(id:{}) send_lines thread", id);
+        ctx.run_interval(POLLING_INTERVAL, move |act, ctx| {            
+            debug!("Locking websocket(id:{}) data mutex", id);
             let mut data = act.data.lock().unwrap();
+            debug!("Websocket(id:{}) data mutex locked", id);
+
             while !data.lines.is_empty() {
-                debug!("Sending to websocket (id: {}): {}", id, data.lines[0]);
+                debug!("Sending to websocket(id:{}): {}", id, data.lines[0]);
                 ctx.text(data.lines[0].as_str());
                 data.lines.remove(0);
             }
 
             if data.finished {
-                debug!("Closing websocket (id: {})", id);
+                debug!("Closing websocket(id:{})", id);
                 ctx.close(Some(CloseReason {
                     code: ws::CloseCode::Normal,
                     description: Some(String::from("Closing websocket connection")),

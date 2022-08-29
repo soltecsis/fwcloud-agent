@@ -96,7 +96,7 @@ pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>) -> Res
         }
 
         {
-            debug!("Add data: {}", line);
+            debug!("Add line to websocket buffer: {}", line);
             ws_data.lock().unwrap().lines.push(line);
         }
 
