@@ -21,7 +21,7 @@
 */
 
 use actix_web::{http::header, HttpResponse};
-use log::{error, debug};
+use log::error;
 use std::sync::{Arc, Mutex};
 use subprocess::{Exec, Redirection};
 
@@ -96,7 +96,6 @@ pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>) -> Res
         }
 
         {
-            debug!("Add line to websocket buffer: {}", line);
             ws_data.lock().unwrap().lines.push(line);
         }
 
