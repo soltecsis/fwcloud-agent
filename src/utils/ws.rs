@@ -76,7 +76,7 @@ impl FwcAgentWs {
         ctx.run_interval(POLLING_INTERVAL, move |act, ctx| {
             let mut data = act.data.lock().unwrap();
             while !data.lines.is_empty() {
-                debug!("Sending to websocket (id: {}): {})", id, data.lines[0]);
+                debug!("Sending to websocket (id: {}): {}", id, data.lines[0]);
                 ctx.text(data.lines[0].as_str());
                 data.lines.remove(0);
             }
