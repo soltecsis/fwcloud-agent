@@ -71,16 +71,18 @@ impl FwcAgentWs {
 
     fn send_lines(&self, ctx: &mut ws::WebsocketContext<Self>) {
         let handle = self.heart_beat_handler.unwrap();
+        let id = self.get_id();
 
         ctx.run_interval(POLLING_INTERVAL, move |act, ctx| {
             let mut data = act.data.lock().unwrap();
             while !data.lines.is_empty() {
-                debug!("Sending to websocket: {})", data.lines[0]);
+                debug!("Sending to websocket (id: {}): {})", id, data.lines[0]);
                 ctx.text(data.lines[0].as_str());
                 data.lines.remove(0);
             }
 
             if data.finished {
+                debug!("Closing websocket (id: {})", id);
                 ctx.close(Some(CloseReason {
                     code: ws::CloseCode::Normal,
                     description: Some(String::from("Closing websocket connection")),
