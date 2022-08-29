@@ -28,6 +28,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use uuid::Uuid;
+use log::debug;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const POLLING_INTERVAL: Duration = Duration::from_millis(100);
@@ -74,6 +75,7 @@ impl FwcAgentWs {
         ctx.run_interval(POLLING_INTERVAL, move |act, ctx| {
             let mut data = act.data.lock().unwrap();
             while !data.lines.is_empty() {
+                debug!("Sending to websocket: {})", data.lines[0]);
                 ctx.text(data.lines[0].as_str());
                 data.lines.remove(0);
             }
