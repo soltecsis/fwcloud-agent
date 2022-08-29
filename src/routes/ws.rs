@@ -77,7 +77,7 @@ async fn websocket(
         // Remove expired WebSockets from the map.
         for ws_id in to_remove.iter() {
             ws_map.remove(ws_id);
-            debug!("Removed expired WebSocket connection with id: {}", ws_id);
+            debug!("Removed expired websocket(id:{})", ws_id);
         }
 
         // Limit of concurrent WebSockets.

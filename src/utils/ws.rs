@@ -22,6 +22,7 @@
 
 use actix::{Actor, AsyncContext, SpawnHandle, StreamHandler};
 use actix_web_actors::ws::{self, CloseReason};
+use log::debug;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -70,15 +71,19 @@ impl FwcAgentWs {
 
     fn send_lines(&self, ctx: &mut ws::WebsocketContext<Self>) {
         let handle = self.heart_beat_handler.unwrap();
+        let id = self.get_id();
 
+        debug!("Starting the websocket(id:{}) send_lines thread", id);
         ctx.run_interval(POLLING_INTERVAL, move |act, ctx| {
             let mut data = act.data.lock().unwrap();
+
             while !data.lines.is_empty() {
                 ctx.text(data.lines[0].as_str());
                 data.lines.remove(0);
             }
 
             if data.finished {
+                debug!("Closing websocket(id:{})", id);
                 ctx.close(Some(CloseReason {
                     code: ws::CloseCode::Normal,
                     description: Some(String::from("Closing websocket connection")),

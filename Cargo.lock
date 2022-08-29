@@ -712,7 +712,6 @@ dependencies = [
  "httpdate",
  "lazy_static",
  "log",
- "num_cpus",
  "openssl",
  "rand",
  "regex",

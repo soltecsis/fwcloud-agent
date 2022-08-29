@@ -19,8 +19,6 @@
     You should have received a copy of the GNU General Public License
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
-extern crate num_cpus;
-
 use rand::{distributions::Alphanumeric, Rng};
 use std::{
     collections::HashMap,
@@ -105,9 +103,6 @@ impl Config {
     pub fn new() -> Result<Self> {
         dotenv::dotenv().ok();
 
-        // Amount of cores available.
-        let cpus = num_cpus::get();
-
         let mut cfg = Config {
             etc_dir: "./etc",
             tmp_dir: "./tmp",
@@ -122,9 +117,9 @@ impl Config {
                 .parse::<u16>()
                 .unwrap_or(33033),
             workers: env::var("WORKERS")
-                .unwrap_or_else(|_| cpus.to_string())
+                .unwrap_or_else(|_| String::from("5"))
                 .parse::<usize>()
-                .unwrap_or(cpus),
+                .unwrap_or(5),
             enable_tls: env::var("ENABLE_SSL")
                 .unwrap_or_else(|_| String::from("true"))
                 .parse::<bool>()
@@ -176,6 +171,12 @@ impl Config {
         };
 
         cfg.validate()?;
+
+        // We need at least two workers.
+        // If we have less than two workers websocket output is not displayed in real time.
+        if cfg.workers < 2 {
+            cfg.workers = 2;
+        }
 
         // Create the list of allowed IPs.
         for ip in cfg.allowed_ips_list.split(' ').filter(|&x| !x.is_empty()) {
