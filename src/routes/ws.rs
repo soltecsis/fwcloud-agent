@@ -54,37 +54,37 @@ async fn websocket(
     stream: web::Payload,
     cfg: web::Data<Arc<Config>>,
 ) -> Result<HttpResponse> {
-    // // WebSockets map mutex start.
-    // {
-    //     let mut ws_map = cfg.ws_map.lock().unwrap();
+    // WebSockets map mutex start.
+    {
+        let mut ws_map = cfg.ws_map.lock().unwrap();
 
-    //     // Remove expired WebSockets.
-    //     let mut to_remove: Vec<Uuid> = vec![];
-    //     for (key, value) in ws_map.iter() {
-    //         let mut ws_data = value.lock().unwrap();
-    //         match ws_data.created_at.elapsed() {
-    //             Ok(elapsed) => {
-    //                 if elapsed > WS_SECONDS_THRESHOLD {
-    //                     // Inform the WebSocket actor (if is still alive) to finish its task.
-    //                     ws_data.finished = true;
-    //                     // Add the WebSocket id to the list of the ones to be removed.
-    //                     to_remove.push(key.to_owned());
-    //                 }
-    //             }
-    //             Err(_e) => (),
-    //         }
-    //     }
-    //     // Remove expired WebSockets from the map.
-    //     for ws_id in to_remove.iter() {
-    //         ws_map.remove(ws_id);
-    //         debug!("Removed expired WebSocket connection with id: {}", ws_id);
-    //     }
+        // Remove expired WebSockets.
+        let mut to_remove: Vec<Uuid> = vec![];
+        for (key, value) in ws_map.iter() {
+            let mut ws_data = value.lock().unwrap();
+            match ws_data.created_at.elapsed() {
+                Ok(elapsed) => {
+                    if elapsed > WS_SECONDS_THRESHOLD {
+                        // Inform the WebSocket actor (if is still alive) to finish its task.
+                        ws_data.finished = true;
+                        // Add the WebSocket id to the list of the ones to be removed.
+                        to_remove.push(key.to_owned());
+                    }
+                }
+                Err(_e) => (),
+            }
+        }
+        // Remove expired WebSockets from the map.
+        for ws_id in to_remove.iter() {
+            ws_map.remove(ws_id);
+            debug!("Removed expired WebSocket connection with id: {}", ws_id);
+        }
 
-    //     // Limit of concurrent WebSockets.
-    //     if ws_map.keys().len() >= WS_MAX_CONCURRENT {
-    //         return Err(FwcError::WebSocketTooMany);
-    //     }
-    // } // WebSockets map mutex end.
+        // Limit of concurrent WebSockets.
+        if ws_map.keys().len() >= WS_MAX_CONCURRENT {
+            return Err(FwcError::WebSocketTooMany);
+        }
+    } // WebSockets map mutex end.
 
     let new_ws = FwcAgentWs::new(Arc::clone(&cfg.ws_map));
 
