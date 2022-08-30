@@ -25,15 +25,13 @@ init
 
 ################################################################
 enable() {
-  echo "Installing OpenVPN package."
-  pkgInstall "OpenVPN" "openvpn"
+  pkgInstall "openvpn"
 }
 ################################################################
 
 ################################################################
 disable() {
-  echo "Removing OpenVPN package."
-  pkgRemove "OpenVPN" "openvpn"
+  pkgRemove "openvpn"
 }
 ################################################################
 
