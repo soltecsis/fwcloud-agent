@@ -91,17 +91,17 @@ pkgInstalled() {
     FOUND=`dpkg -s $1 2>/dev/null | grep "^Status: install ok installed"`
   elif [ $DIST = "RedHat" -o $DIST = "CentOS" -o $DIST = "Fedora" ]; then
     rpm -q $1 >/dev/null 2>&1
-    if [ "$?" = 0 ]; then
+    if [ "$?" = "0" ]; then
       FOUND="1"
     fi
   elif [ $DIST = "OpenSUSE" ]; then
     zypper search -i $1 >/dev/null 2>&1
-    if [ "$?" = 0 ]; then
+    if [ "$?" = "0" ]; then
       FOUND="1"
     fi
   elif [ $DIST = "FreeBSD" ]; then
     pkg info $1 >/dev/null 2>&1
-    if [ "$?" = 0 ]; then
+    if [ "$?" = "0" ]; then
       FOUND="1"
     fi
   fi
@@ -116,29 +116,39 @@ pkgInstalled() {
 
 ################################################################
 pkgInstall() {
-  # $1=Display name.
-  # $2=pkg name.
+  # $1=Package name.
 
-  pkgInstalled "$2"
+  echo "(*) Installing '$1' package."
+  pkgInstalled "$1"
   if [ "$?" = "0" ]; then
-    $PKGM_CMD install -y $2
+    $PKGM_CMD install -y $1
+    if [ "$?" != "0" ]; then
+      echo "Error: Installing package."
+      exit 1
+    fi
   else
-    echo "Package '$2' already installed."
+    echo "Package '$1' already installed."
   fi
+  echo
 }
 ################################################################
 
 ################################################################
 pkgRemove() {
-  # $1=Display name.
-  # $2=pkg name.
+  # $1=Package name.
 
-  pkgInstalled "$2"
+  echo "(*) Removing '$1' package."
+  pkgInstalled "$1"
   if [ "$?" = "1" ]; then
-    $PKGM_CMD remove -y $2
+    $PKGM_CMD remove -y $1
+    if [ "$?" != "0" ]; then
+      echo "Error: Removing package."
+      exit 1
+    fi
   else
-    echo "Package '$2' not installed."
+    echo "Package '$1' not installed."
   fi
+  echo
 }
 ################################################################
 

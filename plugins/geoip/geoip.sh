@@ -24,39 +24,46 @@
 init
 
 DST_DIR="/usr/share/xt_geoip"
+CRON_FILE="/etc/cron.daily/xt_geoip_dl"
 
 ################################################################
 enable() {
-  echo "Installing packages: xtables-addons-common libtext-csv-xs-perl"
-  pkgInstall "xtables-addons-common" "xtables-addons-common"
-  pkgInstall "libtext-csv-xs-perl" "libtext-csv-xs-perl"
+  pkgInstall "xtables-addons-common"
+  pkgInstall "libtext-csv-xs-perl"
 
-  echo "Creating destination directory: ${DST_DIR}"
+  echo "(*) Creating destination directory: ${DST_DIR}"
   mkdir "${DST_DIR}"
+  echo
 
-  echo "Downloading the latest version of the GeoIP database."
+  echo "(*) Downloading the latest version of the GeoIP database."
   cd /tmp
   /usr/lib/xtables-addons/xt_geoip_dl
+  echo
 
-  echo "Generating binary files for the xt_geoip module."
+  echo "(*) Generating binary files for the xt_geoip module."
   chmod 755 /usr/lib/xtables-addons/xt_geoip_build
   /usr/lib/xtables-addons/xt_geoip_build -D "${DST_DIR}"
   rm -f dbip-country-lite.csv
 
-  echo "Creating cron task for daily update the GeoIP database."
+  echo "(*) Creating cron task for daily update the GeoIP database."
+  echo -e "#"'!'"/bin/sh\n\n/usr/lib/xtables-addons/xt_geoip_dl\n\nexit 0" > "${CRON_FILE}"
+  chmod 755 "${CRON_FILE}"
+  echo
 }
 ################################################################
 
 ################################################################
 disable() {
-  echo "Removing cron task for GeoIP database update."
+  echo "(*) Removing cron task for GeoIP database update."
+  rm -f "${CRON_FILE}"
+  echo
 
-  echo "Removing packages: xtables-addons-common libtext-csv-xs-perl"
-  pkgRemove "xtables-addons-common" "xtables-addons-common"
-  pkgRemove "libtext-csv-xs-perl" "libtext-csv-xs-perl"
-
-  echo "Removing destination directory: ${DST_DIR}"
+  echo "(*) Removing destination directory: ${DST_DIR}"
   rm -rf "${DST_DIR}"
+  echo
+
+  pkgRemove "xtables-addons-common"
+  pkgRemove "libtext-csv-xs-perl"
 }
 ################################################################
 
