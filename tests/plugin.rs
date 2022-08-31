@@ -23,6 +23,7 @@
 mod common;
 
 use reqwest::header::CONTENT_TYPE;
+use uuid::Uuid;
 
 use fwcloud_agent::routes::plugin::Plugin;
 
@@ -76,6 +77,14 @@ async fn plugin_with_invalid_data() {
             },
             "{\"message\":\"name: Invalid plugin name\"}",
         ),
+        (
+            Plugin {
+                name: String::from("test"),
+                action: String::from("enable"),
+                ws_id: Option::Some(Uuid::new_v4()),
+            },
+            "{\"message\":\"WebSocket id not found\"}",
+        ),
     ];
 
     for (invalid_data, error_message) in test_cases {
@@ -87,7 +96,11 @@ async fn plugin_with_invalid_data() {
             .await
             .unwrap();
 
-        assert_eq!(res.status().as_u16(), 400);
+        let expected_status_code = match invalid_data.ws_id {
+            Some(_ws_id) => 500,
+            None => 400
+        };
+        assert_eq!(res.status().as_u16(), expected_status_code);
         let body = res.text().await.unwrap();
         assert_eq!(body, error_message);
     }

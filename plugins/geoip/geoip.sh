@@ -44,6 +44,7 @@ enable() {
   chmod 755 /usr/lib/xtables-addons/xt_geoip_build
   /usr/lib/xtables-addons/xt_geoip_build -D "${DST_DIR}"
   rm -f dbip-country-lite.csv
+  echo
 
   echo "(*) Creating cron task for daily update the GeoIP database."
   echo -e "#"'!'"/bin/sh\n\n/usr/lib/xtables-addons/xt_geoip_dl\n\nexit 0" > "${CRON_FILE}"
