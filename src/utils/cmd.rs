@@ -62,7 +62,7 @@ pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>) -> Res
 
     let mut communicator = popen.communicate_start(Option::None).limit_size(1); // IMPORTANT: Read the output byte by byte.
 
-    let mut previous_char_is_cr = false; 
+    let mut previous_char_is_cr = false;
     let mut line = String::new();
     loop {
         let (stdout, _stderr) = match communicator.read_string() {

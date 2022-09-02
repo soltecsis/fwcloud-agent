@@ -98,7 +98,7 @@ async fn plugin_with_invalid_data() {
 
         let expected_status_code = match invalid_data.ws_id {
             Some(_ws_id) => 500,
-            None => 400
+            None => 400,
         };
         assert_eq!(res.status().as_u16(), expected_status_code);
         let body = res.text().await.unwrap();
