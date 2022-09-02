@@ -62,6 +62,7 @@ pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>) -> Res
 
     let mut communicator = popen.communicate_start(Option::None).limit_size(1); // IMPORTANT: Read the output byte by byte.
 
+    let mut previous_char_is_cr = false;
     let mut line = String::new();
     loop {
         let (stdout, _stderr) = match communicator.read_string() {
@@ -86,12 +87,15 @@ pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>) -> Res
         }
 
         let c = data.chars().next().unwrap();
-        if c == '\r' {
-            // Ignore '\r' characters.
+        if c != '\r' && c != '\n' {
+            line.push(c);
             continue;
         }
-        if c != '\n' {
-            line.push(c);
+
+        // We have already added the line to the lines buffer due to the '\r' character.
+        // With this code we avoid adding an empty line when we found a sequence of '\r' and '\n' characters.
+        if c == '\n' && previous_char_is_cr {
+            previous_char_is_cr = false;
             continue;
         }
 
@@ -100,6 +104,11 @@ pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>) -> Res
         }
 
         line = String::new();
+        if c == '\r' {
+            previous_char_is_cr = true;
+        } else {
+            previous_char_is_cr = false;
+        }
     }
 
     Ok(HttpResponse::Ok().finish())
