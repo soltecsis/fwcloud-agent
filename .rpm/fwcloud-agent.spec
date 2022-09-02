@@ -44,6 +44,9 @@ rm -rf %{buildroot}
 /opt/fwcloud/agent/data/
 /opt/fwcloud/agent/tmp/
 /opt/fwcloud/agent/log/
+/opt/fwcloud/agent/plugins/lib.sh
+/opt/fwcloud/agent/plugins/geoip/geoip.sh
+/opt/fwcloud/agent/plugins/openvpn/openvpn.sh
 /usr/share/man/man1/fwcloud-agent.1
 /lib/systemd/system/fwcloud-agent.service
 /etc/logrotate.d/fwcloud-agent

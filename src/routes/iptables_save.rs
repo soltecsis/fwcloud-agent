@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -20,11 +20,11 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use actix_web::{get, HttpResponse};
-use crate::utils::cmd::run_cmd;
 use crate::errors::Result;
+use crate::utils::cmd::run_cmd;
+use actix_web::{get, HttpResponse};
 
-#[get("/data")]
-pub async fn data() -> Result<HttpResponse> {
-  Ok(run_cmd("iptables-save", &[])?)
+#[get("/iptables-save/data")]
+async fn data() -> Result<HttpResponse> {
+    run_cmd("iptables-save", &[])
 }

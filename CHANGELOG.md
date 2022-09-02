@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2022-09-02
+### Added
+- API call for get information about the host in which FWCloud-Agent is running.
+- API call for create a WebSocket communication channel.
+- Plugins ecosystem support.
+- Plugin for OpenVPN.
+- Plugin for GeoIP.
+- Improve CI pipeline.
+- New config option (ENABLE_API_KEY) for enable/disable API access by means of API Key. By default it will be enabled.
+- Integration tests for all API calls.
+- Debian package dependency for sudo.
+
+### Changed
+- Updated all crates, including the Actix-Web ones.
+- Removed unnecessary crates.
+- Program structure for simplify integration tests creation.
+
 
 ## [1.0.0] - 2021-12-02
 ### Added

@@ -19,12 +19,27 @@
     You should have received a copy of the GNU General Public License
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
-use actix_web::{put, HttpResponse, Responder};
 
-/*
-  curl -v -k -i -X PUT -H 'X-API-Key: **************************' https://localhost:33033/api/v1/ping
-*/
-#[put("/ping")]
-async fn ping() -> impl Responder {
-    HttpResponse::Ok()
+mod common;
+
+// `tokio::test` is the testing equivalent of `tokio::main`.
+// It also spares you from having to specify the `#[test]` attribute.
+//
+// You can inspect what code gets generated using
+// `cargo expand --test health_check` (<- name of the test file)
+#[tokio::test]
+async fn get_info() {
+    let url = format!("{}/api/v1/info", common::spawn_app(None));
+
+    let res = reqwest::Client::new().get(url).send().await.unwrap();
+
+    assert_eq!(res.status().as_u16(), 200);
+    let body = res.text().await.unwrap();
+    assert_eq!(
+        body,
+        format!(
+            "{{\"fwc_agent_version\":\"{}\"}}",
+            env!("CARGO_PKG_VERSION")
+        )
+    );
 }

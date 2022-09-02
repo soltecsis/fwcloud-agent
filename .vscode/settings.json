@@ -1,5 +1,6 @@
 {
   "cSpell.ignoreWords": [
+    "PACKAGECLOUD",
     "actix",
     "chrono",
     "cpus",
@@ -8,11 +9,17 @@
     "myregex",
     "openvpn",
     "requestid",
+    "reqwest",
     "soltecsis",
     "soluciones",
     "tecnologicas",
     "thiserror",
+    "tungstenite",
     "vect",
     "web"
+  ],
+  "cSpell.words": [
+    "httpdate",
+    "popen"
   ]
 }

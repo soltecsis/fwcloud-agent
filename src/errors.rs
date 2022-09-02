@@ -22,93 +22,112 @@
 
 //use std::fmt::{self, Debug};
 
-use actix_web::{HttpResponse, ResponseError, http::{StatusCode, header}};
-use thiserror::Error;
+use actix_web::{
+    body::BoxBody,
+    http::{header, StatusCode},
+    HttpResponse, ResponseError,
+};
 use log::error;
+use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, FwcError>;
 
 #[derive(Error, Debug)]
 pub enum FwcError {
-  #[error("API key not found")]
-  ApiKeyNotFound,
+    #[error("API key not found")]
+    ApiKeyNotFound,
 
-  #[error("Invalid API key")]
-  ApiKeyNotValid,
+    #[error("Invalid API key")]
+    ApiKeyNotValid,
 
-  #[error("Authorization error, access from your IP is not allowed")]
-  NotAllowedIP,
+    #[error("Authorization error, access from your IP is not allowed")]
+    NotAllowedIP,
 
-  #[error("Not allowed parameter in request")]
-  NotAllowedParameter,
+    #[error("Not allowed parameter in request")]
+    NotAllowedParameter,
 
-  #[error("Directory not found")]
-  DirNotFound,
+    #[error("Directory not found")]
+    DirNotFound,
 
-  #[error("Parameter dst_dir must come before any file in the multipart stream")]
-  DstDirFirst,
+    #[error("Parameter dst_dir must come before any file in the multipart stream")]
+    DstDirFirst,
 
-  #[error("At least one file must be included in the request")]
-  AtLeastOneFile,
+    #[error("At least one file must be included in the request")]
+    AtLeastOneFile,
 
-  #[error("Too big file")]
-  TooBigFile,
+    #[error("Too big file")]
+    TooBigFile,
 
-  #[error("Too many files")]
-  TooManyFiles,
+    #[error("Too many files")]
+    TooManyFiles,
 
-  #[error("Less files than expected")]
-  LessFilesThanExpected,
+    #[error("Less files than expected")]
+    LessFilesThanExpected,
 
-  #[error("More files than expected")]
-  MoreFilesThanExpected,
+    #[error("More files than expected")]
+    MoreFilesThanExpected,
 
-  #[error("File name was not the expected one")]
-  NotExpectedFileName,
+    #[error("File name was not the expected one")]
+    NotExpectedFileName,
 
-  #[error("Only one file expected in request")]
-  OnlyOneFileExpected,
+    #[error("Only one file expected in request")]
+    OnlyOneFileExpected,
 
-  #[error("{0}")]
-  Internal(&'static str),
+    #[error("WebSocket id not found")]
+    WebSocketIdNotFound,
 
-  #[error(transparent)]
-  Validation(#[from] validator::ValidationErrors),
+    #[error("Too many concurrent WebSocket connections")]
+    WebSocketTooMany,
 
-  #[error(transparent)]
-  IOError(#[from] std::io::Error),
+    #[error("{0}")]
+    Internal(&'static str),
 
-  #[error(transparent)]
-  BlockingError(#[from] actix_web::error::BlockingError<std::io::Error>),
+    #[error(transparent)]
+    Validation(#[from] validator::ValidationErrors),
 
-  #[error(transparent)]
-  PopenError(#[from] subprocess::PopenError),
+    #[error(transparent)]
+    IOError(#[from] std::io::Error),
 
-  #[error(transparent)]
-  SendError(#[from] std::sync::mpsc::SendError<u8>)
+    #[error(transparent)]
+    BlockingError(#[from] actix_web::error::BlockingError),
+
+    #[error(transparent)]
+    ActixWebError(#[from] actix_web::Error),
+
+    #[error(transparent)]
+    PopenError(#[from] subprocess::PopenError),
+
+    #[error(transparent)]
+    SendError(#[from] std::sync::mpsc::SendError<u8>),
 }
 
 impl ResponseError for FwcError {
     fn status_code(&self) -> StatusCode {
-      match self {
-        FwcError::NotAllowedParameter | FwcError::AtLeastOneFile | FwcError::Validation(_) |
-        FwcError::TooBigFile | FwcError::TooManyFiles | FwcError::LessFilesThanExpected | 
-        FwcError::MoreFilesThanExpected | FwcError::NotExpectedFileName | FwcError::DstDirFirst
-          => StatusCode::BAD_REQUEST,
-        FwcError::ApiKeyNotValid | FwcError::ApiKeyNotFound | &FwcError::NotAllowedIP
-          =>  StatusCode::FORBIDDEN,
-        _ => StatusCode::INTERNAL_SERVER_ERROR
-      }
+        match self {
+            FwcError::NotAllowedParameter
+            | FwcError::AtLeastOneFile
+            | FwcError::Validation(_)
+            | FwcError::TooBigFile
+            | FwcError::TooManyFiles
+            | FwcError::LessFilesThanExpected
+            | FwcError::MoreFilesThanExpected
+            | FwcError::NotExpectedFileName
+            | FwcError::DstDirFirst => StatusCode::BAD_REQUEST,
+            FwcError::ApiKeyNotValid | FwcError::ApiKeyNotFound | &FwcError::NotAllowedIP => {
+                StatusCode::FORBIDDEN
+            }
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        }
     }
 
     fn error_response(&self) -> HttpResponse {
-      let mut resp = HttpResponse::new(self.status_code());
-      resp.headers_mut().insert(
-        header::CONTENT_TYPE,
-        header::HeaderValue::from_static("application/json"),
-      );
-      
-      error!("{}",self);
-      resp.set_body(actix_web::dev::Body::from(format!("{{\"message\":\"{}\"}}",self)))
+        let mut resp = HttpResponse::new(self.status_code());
+        resp.headers_mut().insert(
+            header::CONTENT_TYPE,
+            header::HeaderValue::from_static("application/json"),
+        );
+
+        error!("{}", self);
+        resp.set_body(BoxBody::new(format!("{{\"message\":\"{}\"}}", self)))
     }
 }

@@ -19,12 +19,15 @@
     You should have received a copy of the GNU General Public License
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
-use actix_web::{put, HttpResponse, Responder};
 
-/*
-  curl -v -k -i -X PUT -H 'X-API-Key: **************************' https://localhost:33033/api/v1/ping
-*/
-#[put("/ping")]
-async fn ping() -> impl Responder {
-    HttpResponse::Ok()
+mod common;
+
+#[tokio::test]
+async fn iptables_save_data_api_call_exists() {
+    let url = format!("{}/api/v1/iptables-save/data", common::spawn_app(None));
+
+    let res = reqwest::Client::new().get(url).send().await.unwrap();
+
+    assert_ne!(res.status().as_u16(), 400);
+    assert_ne!(res.status().as_u16(), 404);
 }

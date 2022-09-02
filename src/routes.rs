@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -20,37 +20,39 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-mod ping;
 mod fwcloud_script;
-mod openvpn;
+mod info;
 mod interfaces;
 mod iptables_save;
+mod openvpn;
+mod ping;
+pub mod plugin;
+mod ws;
 
 use actix_web::web;
 
 pub fn routes_setup(config: &mut web::ServiceConfig) {
-    config.service(web::scope("/api/v1")
-        .service(ping::ping)
-
-        .service(web::scope("/fwcloud_script/")
+    config.service(
+        web::scope("/api/v1")
+            .service(ping::ping)
+            .service(info::info)
+            // FWCloud script.
             .service(fwcloud_script::upload_and_run)
-        )
-
-        .service(web::scope("/openvpn/")
+            // OpenVPN.
             .service(openvpn::files_upload)
             .service(openvpn::files_remove)
             .service(openvpn::files_sha256)
             .service(openvpn::get_status)
             .service(openvpn::update_status)
             .service(openvpn::get_status_rt)
-        )
-
-        .service(web::scope("/interfaces/")
+            // Interfaces.
             .service(interfaces::info)
-        )
-
-        .service(web::scope("/iptables-save/")
+            // IPTables save.
             .service(iptables_save::data)
-        )
+            // Plugins.
+            .service(plugin::plugin)
+            // WebSocket.
+            .service(ws::websocket)
+            .service(ws::websocket_test),
     );
 }

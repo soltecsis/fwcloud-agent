@@ -25,12 +25,12 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use actix_service::{Service, Transform};
-use actix_web::{dev::ServiceRequest, dev::ServiceResponse, Error, web};
+use actix_web::{dev::ServiceRequest, dev::ServiceResponse, web, Error};
 use futures::future::{ok, Ready};
 use futures::Future;
 
-use crate::errors::FwcError;
 use crate::config::Config;
+use crate::errors::FwcError;
 
 // There are two steps in middleware processing.
 // 1. Middleware initialization, middleware factory gets called with
@@ -38,16 +38,16 @@ use crate::config::Config;
 // 2. Middleware's call method gets called with normal request.
 pub struct Authorize;
 
-// Middleware factory is `Transform` trait from actix-service crate
+// Middleware factory is `Transform` trait
 // `S` - type of the next service
 // `B` - type of response's body
-impl<S, B> Transform<S> for Authorize
+impl<S, B> Transform<S, ServiceRequest> for Authorize
 where
-    S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
     B: 'static,
 {
-    type Request = ServiceRequest;
+    //type Request = ServiceRequest;
     type Response = ServiceResponse<B>;
     type Error = Error;
     type InitError = ();
@@ -64,66 +64,78 @@ pub struct AuthorizeMiddleware<S> {
 }
 
 macro_rules! err {
-    ($x: expr) => { Box::pin(async { Err(Error::from($x)) }) };
+    ($x: expr) => {
+        Box::pin(async { Err(Error::from($x)) })
+    };
 }
 
-impl<S, B> Service for AuthorizeMiddleware<S>
+impl<S, B> Service<ServiceRequest> for AuthorizeMiddleware<S>
 where
-    S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
     B: 'static,
 {
-    type Request = ServiceRequest;
+    //type Request = ServiceRequest;
     type Response = ServiceResponse<B>;
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, req: ServiceRequest) -> Self::Future {
-        let api_key: String; 
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        let api_key: String;
 
         let cfg: &web::Data<Arc<Config>> = match req.app_data() {
             Some(val) => val,
-            None => return err!(FwcError::Internal("Error accessing configuration from authorization middleware"))
+            None => {
+                return err!(FwcError::Internal(
+                    "Error accessing configuration from authorization middleware"
+                ))
+            }
         };
 
-        // (1) Verify that the supplied API key is correct.
-        match req.headers().get("X-API-Key") {
-            Some(value) => api_key = String::from(value.to_str().unwrap()),
-            None => return err!(FwcError::ApiKeyNotFound)
-        }
+        // If the use of API Key is enabled.
+        if cfg.enable_api_key {
+            // (1) Verify that the supplied API key is correct.
+            match req.headers().get("X-API-Key") {
+                Some(value) => api_key = String::from(value.to_str().unwrap()),
+                None => return err!(FwcError::ApiKeyNotFound),
+            }
 
-        if cfg.api_key != api_key {
-            return err!(FwcError::ApiKeyNotValid);
-        }
+            if cfg.api_key != api_key {
+                return err!(FwcError::ApiKeyNotValid);
+            }
 
-        // (2) Now check that the peer IP is allowed.
-        // If allowed_ips vector is empty we are allowing connections form any IP.
-        if cfg.allowed_ips.len() > 0 { 
-            let mut found = false;
+            // (2) Now check that the peer IP is allowed.
+            // If allowed_ips vector is empty we are allowing connections form any IP.
+            if !cfg.allowed_ips.is_empty() {
+                let mut found = false;
 
-            let remote_ip = match req.connection_info().remote_addr() {
-                Some(data) => {
-                        let ip_and_port: Vec<&str> = data.split(":").collect(); 
+                let remote_ip = match req.connection_info().peer_addr() {
+                    Some(data) => {
+                        let ip_and_port: Vec<&str> = data.split(':').collect();
                         String::from(ip_and_port[0])
-                    },
-                None => return err!(FwcError::Internal("Allowed IPs list not empty and was not possible to get the remote IP"))
-            };
+                    }
+                    None => {
+                        return err!(FwcError::Internal(
+                            "Allowed IPs list not empty and was not possible to get the remote IP"
+                        ))
+                    }
+                };
 
-            for ip in cfg.allowed_ips.iter() {
-                if *ip == remote_ip {
-                    found = true;
-                    break;
+                for ip in cfg.allowed_ips.iter() {
+                    if *ip == remote_ip {
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    return err!(FwcError::NotAllowedIP);
                 }
             }
-            if ! found {
-                return err!(FwcError::NotAllowedIP);
-            }
         }
-
 
         let fut = self.service.call(req);
 

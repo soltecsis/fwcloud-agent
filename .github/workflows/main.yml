@@ -11,96 +11,224 @@ jobs:
     outputs:
       version: ${{ steps.rustversion.outputs.rustversion }}
     steps:
-    - uses: actions/checkout@v2
-    - run: cargo check
-    - run: cargo pkgid
-    - run: 'echo "$(cargo pkgid | cut -d# -f2)"'
-    - id: rustversion
-      run: 'echo "::set-output name=rustversion::$(cargo pkgid | cut -d# -f2)"'
-  
-  build:
+      - uses: actions/checkout@v2
+      - run: cargo check
+      - run: cargo pkgid
+      - run: 'echo "$(cargo pkgid | cut -d# -f2)"'
+      - id: rustversion
+        run: 'echo "::set-output name=rustversion::$(cargo pkgid | cut -d# -f2)"'
+
+  security_audit:
     needs: checks
+    name: Security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    needs: checks
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+
+  fmt:
+    needs: checks
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+  clippy:
+    needs: checks
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: clippy
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: -- -D warnings
+
+  coverage:
+    needs: checks
+    name: Code coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Run cargo-tarpaulin
+        uses: actions-rs/tarpaulin@v0.1
+        with:
+          args: '--ignore-tests'
+
+  build:
+    needs: [security_audit, test, fmt, clippy, coverage]
     name: Build
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Build
-      run: cargo build
-    - name: Run tests
-      run: cargo test
+      - uses: actions/checkout@v2
+      - name: Build
+        run: cargo build
 
-  ubuntu-amd64:
+  deb-package:
     needs: [build]
     runs-on: ubuntu-latest
-    name: Ubuntu amd64
+    name: DEB package
     steps:
-    - uses: actions/checkout@v2
-    - name: Build DEB package
-      id: ubuntu
-      uses: ebbflow-io/cargo-deb-amd64-ubuntu@1.0
-    - name: Upload package
-      uses: actions/upload-artifact@v2
-      with:
-        name: ubuntu-amd64
-        path: ./target/x86_64-unknown-linux-musl/debian/*
+      - uses: actions/checkout@v2
+      - name: Install required packages
+        run: sudo apt install -y curl libssl-dev pkg-config gcc
+      - name: Install rustup
+        run: curl https://sh.rustup.rs -sSf | sh -s -- -y && source "$HOME/.cargo/env"
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+      - name: Build DEB package
+        run: cargo deb --verbose --target=x86_64-unknown-linux-gnu
+      - name: Upload package
+        uses: actions/upload-artifact@v2
+        with:
+          name: deb-package
+          path: ./target/x86_64-unknown-linux-gnu/debian/*
 
-  fedora-amd64:
+  rpm-package:
     needs: [build]
     runs-on: ubuntu-latest
-    name: Fedora amd64
+    name: RPM package
     steps:
-    - uses: actions/checkout@v2
-    - name: Install required packages
-      run: sudo apt install -y cargo rpm libssl-dev pkg-config
-    - name: Install cargo-rpm
-      run: cargo install cargo-rpm
-    - name: Build RPM package
-      run: cargo rpm build
-    - name: Upload RPM Artifact
-      uses: actions/upload-artifact@v2
-      with:
-        name: fedora-amd64
-        path: ./target/release/rpmbuild/RPMS/x86_64/*
+      - uses: actions/checkout@v2
+      - name: Install required packages
+        run: sudo apt install -y curl rpm libssl-dev pkg-config gcc
+      - name: Install rustup
+        run: curl https://sh.rustup.rs -sSf | sh -s -- -y && source "$HOME/.cargo/env"
+      - name: Install cargo-rpm
+        run: cargo install cargo-rpm
+      - name: Build RPM package
+        run: cargo rpm build -v
+      - name: Upload RPM Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: rpm-package
+          path: ./target/release/rpmbuild/RPMS/x86_64/*
 
-  # raspbian-armv7:
-  #   needs: [build]
-  #   runs-on: ubuntu-latest
-  #   name: Raspbian armv7
-  #   steps:
-  #   - uses: actions/checkout@v2
-  #   - name: Build package
-  #     id: debbuild
-  #     uses: ebbflow-io/cargo-deb-armv7-debian@1.0
-  #   - name: Upload package
-  #     uses: actions/upload-artifact@v2
-  #     with:
-  #       name: raspbian
-  #       path: ./target/armv7-unknown-linux-musleabihf/debian/*
-
-  upload:
-    needs: [ubuntu-amd64, fedora-amd64]
+  deb-to-fwcloud:
+    needs: [deb-package]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    name: Deploy
+    name: DEB to FWCloud
     steps:
-    - uses: actions/checkout@v2
-    - name: Download packages
-      uses: actions/download-artifact@v2
-    - name: List packages
-      run: ls -lha 
-    - name: Upload Ubuntu amd64 package
-      uses: SamKirkland/FTP-Deploy-Action@4.0.0
-      with:
-        server: pkg.fwcloud.net
-        username: fwcloud-pkg
-        password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
-        local-dir: ./ubuntu-amd64/
-        server-dir: ./fwcloud-agent/deb/
-    - name: Upload Fedora amd64 package
-      uses: SamKirkland/FTP-Deploy-Action@4.0.0
-      with:
-        server: pkg.fwcloud.net
-        username: fwcloud-pkg
-        password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
-        local-dir: ./fedora-amd64/
-        server-dir: ./fwcloud-agent/rpm/
+      - uses: actions/checkout@v2
+      - name: Download packages
+        uses: actions/download-artifact@v2
+      - name: List packages
+        run: ls -lha ./deb-package/
+      - name: Upload DEB package
+        uses: SamKirkland/FTP-Deploy-Action@4.3.0
+        with:
+          server: ${{ secrets.FWCLOUD_PKG_FTP_HOST }}
+          username: ${{ secrets.FWCLOUD_PKG_FTP_USERNAME }}
+          password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: ./deb-package/
+          server-dir: ./fwcloud-agent/deb/
+
+  rpm-to-fwcloud:
+    needs: [rpm-package]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    name: RPM to FWCloud
+    steps:
+      - uses: actions/checkout@v2
+      - name: Download packages
+        uses: actions/download-artifact@v2
+      - name: List packages
+        run: ls -lha ./rpm-package/
+      - name: Upload RPM package
+        uses: SamKirkland/FTP-Deploy-Action@4.3.0
+        with:
+          server: ${{ secrets.FWCLOUD_PKG_FTP_HOST }}
+          username: ${{ secrets.FWCLOUD_PKG_FTP_USERNAME }}
+          password: ${{ secrets.FWCLOUD_PKG_FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: ./rpm-package/
+          server-dir: ./fwcloud-agent/rpm/
+
+  deb-to-packagecloud:
+    needs: [deb-package]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    name: DEB to Packagecloud
+    strategy:
+      matrix:
+        dist: [ubuntu/bionic, ubuntu/jammy, ubuntu/focal, debian/jessie, debian/bullseye, debian/buster, debian/stretch]
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v2
+      - name: Download packages
+        uses: actions/download-artifact@v2
+      - name: List packages
+        run: ls -lha ./deb-package/
+      - name: ${{ matrix.dist }}
+        uses: danielmundi/upload-packagecloud@v1
+        with:
+          PACKAGE-NAME: ./deb-package/*.deb
+          PACKAGECLOUD-USERNAME: ${{ secrets.PACKAGECLOUD_USERNAME }}
+          PACKAGECLOUD-REPO: FWCloud
+          PACKAGECLOUD-DISTRIB: ${{ matrix.dist }}
+          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
+
+  rpm-to-packagecloud:
+    needs: [rpm-package]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    name: RPM to Packagecloud
+    strategy:
+      matrix:
+        dist: [ol/7, ol/8, ol/9, el/7, el/8, el/9, fedora/34, fedora/35, fedora/36]
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v2
+      - name: Download packages
+        uses: actions/download-artifact@v2
+      - name: List packages
+        run: ls -lha ./rpm-package/
+      - name: ${{ matrix.dist }}
+        uses: danielmundi/upload-packagecloud@v1
+        with:
+          PACKAGE-NAME: ./rpm-package/*.rpm
+          PACKAGECLOUD-USERNAME: ${{ secrets.PACKAGECLOUD_USERNAME }}
+          PACKAGECLOUD-REPO: FWCloud
+          PACKAGECLOUD-DISTRIB: ${{ matrix.dist }}
+          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
