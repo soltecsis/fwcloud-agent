@@ -164,7 +164,7 @@ jobs:
           local-dir: ./deb-package/
           server-dir: ./fwcloud-agent/deb/
           exclude: |
-            **/*.tmp0-stripped 
+            *.tmp0-stripped 
 
   rpm-to-fwcloud:
     needs: [rpm-package]
