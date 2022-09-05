@@ -64,7 +64,7 @@ discoverLinuxDist() {
 setGlobalVars() {
   case $DIST in
     'Ubuntu'|'Debian') 
-      PKGM_CMD="apt"
+      PKGM_CMD="apt-get"
       ;;
 
     'RedHat'|'CentOS'|'Fedora') 

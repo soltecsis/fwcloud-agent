@@ -24,6 +24,7 @@ extended-description = """\
 FWCloud Agent daemon for simplify and improve \
 firewalls management from a FWCloud console."""
 depends = "openssl sudo"
+conflicts = "firewalld"
 section = "utility"
 priority = "optional"
 assets = [
