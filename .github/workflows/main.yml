@@ -110,18 +110,20 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install required packages
-        run: sudo apt install -y curl libssl-dev pkg-config gcc
+        run: sudo apt install -y curl libssl-dev pkg-config gcc musl-tools
       - name: Install rustup
         run: curl https://sh.rustup.rs -sSf | sh -s -- -y && source "$HOME/.cargo/env"
+      - name: Install x86_64-unknown-linux-musl target
+        run: rustup target add x86_64-unknown-linux-musl
       - name: Install cargo-deb
         run: cargo install cargo-deb
       - name: Build DEB package
-        run: cargo deb --verbose --target=x86_64-unknown-linux-gnu
+        run: cargo deb --verbose --target=x86_64-unknown-linux-musl
       - name: Upload package
         uses: actions/upload-artifact@v2
         with:
           name: deb-package
-          path: ./target/x86_64-unknown-linux-gnu/debian/*
+          path: ./target/x86_64-unknown-linux-musl/debian/*
 
   rpm-package:
     needs: [build]

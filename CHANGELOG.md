@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2022-09-06
+### Fixed
+- Bug in `.dep` package generation. Use target `x86_64-unknown-linux-musl` instead of `x86_64-unknown-linux-gnu` for avoid `glibc` dependency.
+
+
 ## [1.1.3] - 2022-09-05
 ### Fixed
 - Exclude `.tmp0-stripped` file in `.deb` package upload.
