@@ -1,12 +1,16 @@
 #!/bin/sh
 set -e
 
+#echo "PARAMETERS: $0 $1 $2 $3 $4 $5"
+
 if [ ! -d /opt ]; then
   if mkdir /opt 2>/dev/null; then
     chown root:root /opt
     chmod 755 /opt
   fi
-else
+fi
+
+if [ "$1" != "upgrade" ]; then
   ROOT_DIR="/opt/fwcloud/agent"
   DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log ${ROOT_DIR} /opt/fwcloud"
   for DIR in $DIR_LIST; do

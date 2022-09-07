@@ -1,18 +1,23 @@
 #!/bin/sh
 set -e
 
+#echo "PARAMETERS: $0 $1 $2 $3 $4 $5"
+
 systemctl stop fwcloud-agent
 
 ROOT_DIR="/opt/fwcloud/agent"
-DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log"
-for DIR in $DIR_LIST; do
-  if [ -d "$DIR" ]; then
-    FL=`ls $DIR`
-    for F in $FL; do
-      rm "${DIR}/${F}" 
-    done
-  fi
-done
+
+if [ "$1" != "upgrade" ]; then
+  DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log"
+  for DIR in $DIR_LIST; do
+    if [ -d "$DIR" ]; then
+      FL=`ls $DIR`
+      for F in $FL; do
+        rm "${DIR}/${F}" 
+      done
+    fi
+  done
+fi
 
 #DEBHELPER#
 

@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+#echo "PARAMETERS: $0 $1 $2 $3 $4 $5"
+
+ROOT_DIR="/opt/fwcloud/agent"
+
+if [ "$1" = "upgrade" ]; then
+  # Preserve the .env configuration file.
+  mv -f "${ROOT_DIR}/.env" "${ROOT_DIR}/.env.upgrade"
+fi
+
+exit 0
+
