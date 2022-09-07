@@ -2,18 +2,10 @@
 set -e
 
 ROOT_DIR="/opt/fwcloud/agent"
-UPGRADE_DIR="${ROOT_DIR}/.upgrade"
 
-# If root directory exists, then we suppose that this is a FWCloud-Agent upgrade.
-# Preserve the files that we want to keep after upgrade.
-if [ -d "${ROOT_DIR}" ]; then
-  mkdir "${UPGRADE_DIR}"
-  chmod 700 "${UPGRADE_DIR}"
-
-  ITEMS_LIST=".env etc data log"
-  for ITEM in $ITEMS_LIST; do
-    cp -pr "${ROOT_DIR}/${ITEM}" "${UPGRADE_DIR}/"
-  done
+# If we are upgrading the FWCloud-Agent package, then preserve the .env config file.
+if [ "$1" = "upgrade" ]; then
+  mv -f "${ROOT_DIR}/.env" "${ROOT_DIR}/.env.upgrade"
 fi
 
 exit 0

@@ -1,22 +1,24 @@
 #!/bin/sh
 set -e
 
-if [ ! -d /opt ]; then
-  if mkdir /opt 2>/dev/null; then
-    chown root:root /opt
-    chmod 755 /opt
-  fi
-else
-  ROOT_DIR="/opt/fwcloud/agent"
-  DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log ${ROOT_DIR} /opt/fwcloud"
-  for DIR in $DIR_LIST; do
-    if [ -d "$DIR" ]; then
-      FL=`ls $DIR`
-      if [ -z "$FL" ]; then
-        rmdir "$DIR"
-      fi
+if [ "$1" != "upgrade" ]; then
+  if [ ! -d /opt ]; then
+    if mkdir /opt 2>/dev/null; then
+      chown root:root /opt
+      chmod 755 /opt
     fi
-  done
+  else
+    ROOT_DIR="/opt/fwcloud/agent"
+    DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log ${ROOT_DIR} /opt/fwcloud"
+    for DIR in $DIR_LIST; do
+      if [ -d "$DIR" ]; then
+        FL=`ls $DIR`
+        if [ -z "$FL" ]; then
+          rmdir "$DIR"
+        fi
+      fi
+    done
+  fi
 fi
 
 #DEBHELPER#

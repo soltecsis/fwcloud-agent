@@ -10,15 +10,9 @@ for DIR in $DIR_LIST; do
   chmod 700 "$DIR"
 done
 
-UPGRADE_DIR="${ROOT_DIR}/.upgrade"
-if [ -d "${UPGRADE_DIR}" ]; then
-  # Restore the files that we want to preserve after the upgrade.
-  ITEMS_LIST=".env etc data log"
-  for ITEM in $ITEMS_LIST; do
-    cp -pr "${UPGRADE_DIR}/${ITEM}" "${ROOT_DIR}"
-  done
-
-  rm -rf "${UPGRADE_DIR}"
+if [ "$1" = "upgrade" ]; then
+  # Restore the .env config file.
+  mv -f "${ROOT_DIR}/.env.upgrade" "${ROOT_DIR}/.env"
 else
   # Generate self-signed certificate.
   cd "${ROOT_DIR}/etc"
