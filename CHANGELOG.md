@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.5] - 2022-09-07
 ### Fixed
-- In the FWCloud-Agent update procedure, preserve the files that we want to keep after the update has been completed.
+- For the `.deb` package, in the update procedure, preserve the files that we want to keep after the update has been completed.
 
 
 ## [1.1.4] - 2022-09-06

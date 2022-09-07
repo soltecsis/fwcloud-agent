@@ -2,6 +2,7 @@
 set -e
 
 #echo "PARAMETERS: $0 $1 $2 $3 $4 $5"
+
 if [ ! -d /opt ]; then
   if mkdir /opt 2>/dev/null; then
     chown root:root /opt
