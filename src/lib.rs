@@ -45,7 +45,10 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
         env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     }
 
-    info!("Starting fwcloud-agent application (version: {})",env!("CARGO_PKG_VERSION"));
+    info!(
+        "Starting fwcloud-agent application (version: {})",
+        env!("CARGO_PKG_VERSION")
+    );
     info!("Listening on: {}:{}", config.bind_ip, config.bind_port);
 
     let cfg = Arc::new(config);
