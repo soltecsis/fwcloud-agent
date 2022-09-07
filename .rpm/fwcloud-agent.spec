@@ -31,8 +31,6 @@ mkdir %{buildroot}/opt/fwcloud/agent/data
 mkdir %{buildroot}/opt/fwcloud/agent/tmp
 mkdir %{buildroot}/opt/fwcloud/agent/log
 chmod -R 700 %{buildroot}/opt/fwcloud/agent
-touch %{buildroot}/opt/fwcloud/agent/log/fwcloud-agent.log
-chmod 644 %{buildroot}/opt/fwcloud/agent/log/fwcloud-agent.log
 
 %clean
 rm -rf %{buildroot}
@@ -54,42 +52,45 @@ rm -rf %{buildroot}
 %defattr(-,root,root,-)
 /opt/fwcloud/agent/fwcloud-agent
 
+%pre
+ROOT_DIR="/opt/fwcloud/agent"
+if [ $1 -gt 1 ]; then
+  # Preserve the .env configuration file.
+  mv -f "${ROOT_DIR}/.env" "${ROOT_DIR}/.env.upgrade"
+fi
+
 %post
+ROOT_DIR="/opt/fwcloud/agent"
 # Generate self-signed certificate.
-cd /opt/fwcloud/agent/etc
-openssl req -x509 -newkey rsa:4096 -nodes -keyout key.pem -out cert.pem -days 36500 -subj '/CN=fwcloud-agent' > /dev/null 2>&1
-chmod 600 key.pem cert.pem
+if [ ! -f "${ROOT_DIR}/etc/key.pem" -o ! -f "${ROOT_DIR}/etc/cert.pem" ]; then
+  cd "${ROOT_DIR}/etc"
+  openssl req -x509 -newkey rsa:4096 -nodes -keyout key.pem -out cert.pem -days 36500 -subj '/CN=fwcloud-agent' > /dev/null 2>&1
+  chmod 600 key.pem cert.pem
+fi
 
 # Generate API KEY
-KEY=`openssl rand -base64 48|sed 's/[[:punct:]]/x/g'`
-sed -i -E "s|API_KEY=\"([a-zA-Z0-9[:punct:]]){64}\"|API_KEY=\"$KEY\"|" /opt/fwcloud/agent/.env
-chmod 600 /opt/fwcloud/agent/.env
+if [ -f "${ROOT_DIR}/.env.upgrade" ]; then
+  mv -f "${ROOT_DIR}/.env.upgrade" "${ROOT_DIR}/.env"
+else
+  KEY=`openssl rand -base64 48|sed 's/[[:punct:]]/x/g'`
+  sed -i -E "s|API_KEY=\"([a-zA-Z0-9[:punct:]]){64}\"|API_KEY=\"$KEY\"|" "${ROOT_DIR}/.env"
+fi
 
 # Enable and start FWCloud-Agent daemon.
 systemctl enable fwcloud-agent
-systemctl start fwcloud-agent
+if [ $1 -gt 1 ] ; then
+  systemctl restart fwcloud-agent
+else
+  systemctl start fwcloud-agent
+fi
 #systemctl status fwcloud-agent
 
 %preun
-systemctl stop fwcloud-agent
-ROOT_DIR="/opt/fwcloud/agent"
-DIR_LIST="${ROOT_DIR}/etc ${ROOT_DIR}/tmp ${ROOT_DIR}/data ${ROOT_DIR}/log"
-for DIR in $DIR_LIST; do
-  if [ -d "$DIR" ]; then
-    FL=`ls $DIR`
-    for F in $FL; do
-      rm "${DIR}/${F}" 
-    done
-  fi
-done
+if [ $1 -eq 0 ]; then
+  systemctl stop fwcloud-agent
+fi
 
 %postun
-if [ -d /opt/fwcloud/agent ]; then
-  if [ ! "$(ls /opt/fwcloud/agent)" ]; then
-    rmdir /opt/fwcloud/agent
-  fi
+if [ $1 -eq 0 ]; then
+  rm -rf /opt/fwcloud
 fi
-if [ ! "$(ls /opt/fwcloud)" ]; then
-  rmdir /opt/fwcloud
-fi
-

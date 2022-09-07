@@ -15,7 +15,7 @@ for DIR in $DIR_LIST; do
 done
 
 # Generate self-signed certificate.
-if [ ! -f "${ROOT_DIR}/etc/key.pem" -a ! -f "${ROOT_DIR}/etc/cert.pem" ]; then
+if [ ! -f "${ROOT_DIR}/etc/key.pem" -o ! -f "${ROOT_DIR}/etc/cert.pem" ]; then
   cd "${ROOT_DIR}/etc"
   openssl req -x509 -newkey rsa:4096 -nodes -keyout key.pem -out cert.pem -days 36500 -subj '/CN=fwcloud-agent' > /dev/null 2>&1
   chmod 600 key.pem cert.pem
