@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+#echo "PARAMETERS: $0 $1 $2 $3 $4 $5"
+
 ROOT_DIR="/opt/fwcloud/agent"
 
 # If we are upgrading the FWCloud-Agent package, then preserve the .env config file.

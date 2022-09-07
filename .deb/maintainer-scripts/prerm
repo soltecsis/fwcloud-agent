@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+#echo "PARAMETERS: $0 $1 $2 $3 $4 $5"
+
 systemctl stop fwcloud-agent
 
 ROOT_DIR="/opt/fwcloud/agent"
