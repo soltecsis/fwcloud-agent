@@ -13,9 +13,9 @@ done
 UPGRADE_DIR="${ROOT_DIR}/.upgrade"
 if [ -d "${UPGRADE_DIR}" ]; then
   # Restore the files that we want to preserve after the upgrade.
-  ITEMS_LIST="${UPGRADE_DIR}/.env ${UPGRADE_DIR}/etc ${UPGRADE_DIR}/data ${UPGRADE_DIR}/log"
+  ITEMS_LIST=".env etc data log"
   for ITEM in $ITEMS_LIST; do
-    cp -pr "${ITEM}" "${ROOT_DIR}/"
+    cp -pr "${UPGRADE_DIR}/${ITEM}" "${ROOT_DIR}"
   done
 
   rm -rf "${UPGRADE_DIR}"

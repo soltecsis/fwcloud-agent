@@ -10,9 +10,9 @@ if [ -d "${ROOT_DIR}" ]; then
   mkdir "${UPGRADE_DIR}"
   chmod 700 "${UPGRADE_DIR}"
 
-  ITEMS_LIST="${ROOT_DIR}/.env ${ROOT_DIR}/etc ${ROOT_DIR}/data ${ROOT_DIR}/log"
+  ITEMS_LIST=".env etc data log"
   for ITEM in $ITEMS_LIST; do
-    cp -pr "${ITEM}" "${UPGRADE_DIR}/"
+    cp -pr "${ROOT_DIR}/${ITEM}" "${UPGRADE_DIR}/"
   done
 fi
 
