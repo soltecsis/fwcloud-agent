@@ -104,7 +104,16 @@ impl HttpFiles {
         self.move_tmp_files()?;
 
         // Install de FWCloud script.
-        let mut res = run_cmd("sh", &[&self.files[0].dst_path[..], "install"])?;
+        let mut res: HttpResponse;
+        if self.ws_id != Uuid::nil() {
+            let ws_map = cfg.ws_map.lock().unwrap();
+            let ws_data = ws_map
+                .get(&self.ws_id)
+                .ok_or(FwcError::WebSocketIdNotFound)?;
+            res = run_cmd_ws("sh", &[&self.files[0].dst_path[..], "install"], ws_data, false)?;
+        } else {
+            res = run_cmd("sh", &[&self.files[0].dst_path[..], "install"])?;
+        }
 
         // Load policy.
         for file in cfg.fwcloud_script_paths.iter() {
@@ -114,7 +123,7 @@ impl HttpFiles {
                     let ws_data = ws_map
                         .get(&self.ws_id)
                         .ok_or(FwcError::WebSocketIdNotFound)?;
-                    res = run_cmd_ws("sh", &[&file[..], "start"], ws_data)?;
+                    res = run_cmd_ws("sh", &[&file[..], "start"], ws_data, true)?;
                     ws_map.remove(&self.ws_id);
                 } else {
                     res = run_cmd("sh", &[&file[..], "start"])?;

@@ -75,7 +75,7 @@ async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Resul
             Some(id) => {
                 let mut ws_map = cfg.ws_map.lock().unwrap();
                 let ws_data = ws_map.get(&id).ok_or(FwcError::WebSocketIdNotFound)?;
-                let res = run_cmd_ws(cmd, &args, ws_data)?;
+                let res = run_cmd_ws(cmd, &args, ws_data, true)?;
                 ws_map.remove(&id);
                 res
             }

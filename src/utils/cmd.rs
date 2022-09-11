@@ -45,7 +45,7 @@ pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
     Ok(res)
 }
 
-pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>) -> Result<HttpResponse> {
+pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>, finish_ws: bool) -> Result<HttpResponse> {
     let popen = Exec::cmd(cmd)
         .args(args)
         .stdout(Redirection::Pipe)
@@ -82,7 +82,9 @@ pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>) -> Res
 
         // Finish when no more input data.
         if data.is_empty() {
-            ws_data.lock().unwrap().finished = true;
+            if finish_ws {
+                ws_data.lock().unwrap().finished = true;
+            }
             break;
         }
 
