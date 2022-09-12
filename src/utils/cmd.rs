@@ -21,6 +21,7 @@
 */
 
 use actix_web::{http::header, HttpResponse};
+use log::debug;
 use log::error;
 use std::sync::{Arc, Mutex};
 use subprocess::{Exec, Redirection};
@@ -45,7 +46,12 @@ pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
     Ok(res)
 }
 
-pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>, finish_ws: bool) -> Result<HttpResponse> {
+pub fn run_cmd_ws(
+    cmd: &str,
+    args: &[&str],
+    ws_data: &Arc<Mutex<WsData>>,
+    finish_ws: bool,
+) -> Result<HttpResponse> {
     let popen = Exec::cmd(cmd)
         .args(args)
         .stdout(Redirection::Pipe)
@@ -83,7 +89,9 @@ pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>, finish
         // Finish when no more input data.
         if data.is_empty() {
             if finish_ws {
+                debug!("Locking ws data mutex (thread id: {})", thread_id::get());
                 ws_data.lock().unwrap().finished = true;
+                debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
             }
             break;
         }
@@ -102,7 +110,9 @@ pub fn run_cmd_ws(cmd: &str, args: &[&str], ws_data: &Arc<Mutex<WsData>>, finish
         }
 
         {
+            debug!("Locking ws data mutex (thread id: {})", thread_id::get());
             ws_data.lock().unwrap().lines.push(line);
+            debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
         }
 
         line = String::new();

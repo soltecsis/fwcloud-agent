@@ -23,12 +23,13 @@
 use actix_web::{get, web, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use log::debug;
+use std::sync::Mutex;
 use std::{sync::Arc, thread, time::Duration};
 use uuid::Uuid;
 
 use crate::config::Config;
 use crate::errors::{FwcError, Result};
-use crate::utils::ws::FwcAgentWs;
+use crate::utils::ws::{FwcAgentWs, WsData};
 
 const WS_MAX_CONCURRENT: usize = 256;
 const WS_SECONDS_THRESHOLD: Duration = Duration::from_secs(7200);
@@ -56,11 +57,13 @@ async fn websocket(
 ) -> Result<HttpResponse> {
     // WebSockets map mutex start.
     {
+        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
         let mut ws_map = cfg.ws_map.lock().unwrap();
 
         // Remove expired WebSockets.
         let mut to_remove: Vec<Uuid> = vec![];
         for (key, value) in ws_map.iter() {
+            debug!("Locking ws data mutex (thread id: {})", thread_id::get());
             let mut ws_data = value.lock().unwrap();
             match ws_data.created_at.elapsed() {
                 Ok(elapsed) => {
@@ -73,6 +76,8 @@ async fn websocket(
                 }
                 Err(_e) => (),
             }
+
+            debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
         }
         // Remove expired WebSockets from the map.
         for ws_id in to_remove.iter() {
@@ -84,6 +89,8 @@ async fn websocket(
         if ws_map.keys().len() >= WS_MAX_CONCURRENT {
             return Err(FwcError::WebSocketTooMany);
         }
+
+        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
     } // WebSockets map mutex end.
 
     let new_ws = FwcAgentWs::new(Arc::clone(&cfg.ws_map));
@@ -102,22 +109,34 @@ async fn websocket_test(
 ) -> Result<HttpResponse> {
     let (id, mut seconds) = info.into_inner();
 
-    let ws_map = cfg.ws_map.lock().unwrap();
-    let ws_data = ws_map.get(&id).ok_or(FwcError::WebSocketIdNotFound)?;
+    let ws_data: Arc<Mutex<WsData>>;
+    {
+        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+        let ws_map = cfg.ws_map.lock().unwrap();
+        ws_data = ws_map
+            .get(&id)
+            .ok_or(FwcError::WebSocketIdNotFound)?
+            .clone();
+        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+    }
 
     while seconds > 0 {
         {
+            debug!("Locking ws data mutex (thread id: {})", thread_id::get());
             ws_data
                 .lock()
                 .unwrap()
                 .lines
                 .push(format!("{} seconds left", seconds));
+            debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
         }
         seconds -= 1;
         thread::sleep(Duration::from_secs(1));
     }
     {
+        debug!("Locking ws data mutex (thread id: {})", thread_id::get());
         ws_data.lock().unwrap().finished = true;
+        debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
     }
 
     Ok(HttpResponse::Ok().finish())

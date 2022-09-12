@@ -23,9 +23,10 @@
 use actix_multipart::{Field, Multipart};
 use actix_web::{web, HttpResponse};
 use futures::{StreamExt, TryStreamExt};
+use log::debug;
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{io::Write, os::unix::prelude::PermissionsExt};
 use uuid::Uuid;
 use validator::Validate;
@@ -33,6 +34,8 @@ use validator::Validate;
 use crate::config::Config;
 use crate::errors::{FwcError, Result};
 use crate::utils::cmd::{run_cmd, run_cmd_ws};
+
+use super::ws::WsData;
 
 struct FileData {
     src_path: String,
@@ -106,11 +109,22 @@ impl HttpFiles {
         // Install de FWCloud script.
         let mut res: HttpResponse;
         if self.ws_id != Uuid::nil() {
-            let ws_map = cfg.ws_map.lock().unwrap();
-            let ws_data = ws_map
-                .get(&self.ws_id)
-                .ok_or(FwcError::WebSocketIdNotFound)?;
-            res = run_cmd_ws("sh", &[&self.files[0].dst_path[..], "install"], ws_data, false)?;
+            let ws_data: Arc<Mutex<WsData>>;
+            {
+                debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+                let ws_map = cfg.ws_map.lock().unwrap();
+                ws_data = ws_map
+                    .get(&self.ws_id)
+                    .ok_or(FwcError::WebSocketIdNotFound)?
+                    .clone();
+                debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+            }
+            res = run_cmd_ws(
+                "sh",
+                &[&self.files[0].dst_path[..], "install"],
+                &ws_data,
+                false,
+            )?;
         } else {
             res = run_cmd("sh", &[&self.files[0].dst_path[..], "install"])?;
         }
@@ -119,12 +133,23 @@ impl HttpFiles {
         for file in cfg.fwcloud_script_paths.iter() {
             if Path::new(file).is_file() {
                 if self.ws_id != Uuid::nil() {
-                    let mut ws_map = cfg.ws_map.lock().unwrap();
-                    let ws_data = ws_map
-                        .get(&self.ws_id)
-                        .ok_or(FwcError::WebSocketIdNotFound)?;
-                    res = run_cmd_ws("sh", &[&file[..], "start"], ws_data, true)?;
-                    ws_map.remove(&self.ws_id);
+                    let ws_data: Arc<Mutex<WsData>>;
+                    {
+                        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+                        let ws_map = cfg.ws_map.lock().unwrap();
+                        ws_data = ws_map
+                            .get(&self.ws_id)
+                            .ok_or(FwcError::WebSocketIdNotFound)?
+                            .clone();
+                        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+                    }
+                    res = run_cmd_ws("sh", &[&file[..], "start"], &ws_data, true)?;
+                    {
+                        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+                        let mut ws_map = cfg.ws_map.lock().unwrap();
+                        ws_map.remove(&self.ws_id);
+                        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+                    }
                 } else {
                     res = run_cmd("sh", &[&file[..], "start"])?;
                 }

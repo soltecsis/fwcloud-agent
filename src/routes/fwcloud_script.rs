@@ -44,6 +44,8 @@ async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Resu
         res = HttpFiles::new(cfg.tmp_dir, false)
             .fwcloud_script(payload, &cfg)
             .await?;
+
+        debug!("Releasing script mutex (thread id: {})", thread_id::get());
     } // End of mutex scope.
 
     Ok(res)
