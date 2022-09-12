@@ -21,6 +21,7 @@
   "cSpell.words": [
     "httpdate",
     "popen",
-    "rustup"
+    "rustup",
+    "websockets"
   ]
 }

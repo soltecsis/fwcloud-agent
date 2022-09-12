@@ -20,18 +20,22 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::{io::Write, os::unix::prelude::PermissionsExt};
-
 use actix_multipart::{Field, Multipart};
 use actix_web::{web, HttpResponse};
 use futures::{StreamExt, TryStreamExt};
+use log::debug;
 use std::fs;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::{io::Write, os::unix::prelude::PermissionsExt};
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::config::Config;
 use crate::errors::{FwcError, Result};
-use crate::utils::cmd::run_cmd;
+use crate::utils::cmd::{run_cmd, run_cmd_ws};
+
+use super::ws::WsData;
 
 struct FileData {
     src_path: String,
@@ -57,6 +61,8 @@ pub struct HttpFiles {
     max_file_size: usize,
     expected_files: u32,
     n_files: u32,
+    ws_id: Uuid,
+    ws_id_buf: String,
 }
 
 impl HttpFiles {
@@ -72,6 +78,8 @@ impl HttpFiles {
             max_file_size: 10_485_760, // Ten megabytes.
             expected_files: 0,
             n_files: 0,
+            ws_id: Uuid::nil(),
+            ws_id_buf: String::from(""),
         }
     }
 
@@ -86,7 +94,7 @@ impl HttpFiles {
     pub async fn fwcloud_script(
         &mut self,
         payload: Multipart,
-        fwcloud_script_paths: &[String],
+        cfg: &web::Data<Arc<Config>>,
     ) -> Result<HttpResponse> {
         self.expected_files = 1;
         self.extract_multipart_data(payload).await?;
@@ -99,12 +107,52 @@ impl HttpFiles {
         self.move_tmp_files()?;
 
         // Install de FWCloud script.
-        let mut res = run_cmd("sh", &[&self.files[0].dst_path[..], "install"])?;
+        let mut res: HttpResponse;
+        if self.ws_id != Uuid::nil() {
+            let ws_data: Arc<Mutex<WsData>>;
+            {
+                debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+                let ws_map = cfg.ws_map.lock().unwrap();
+                ws_data = ws_map
+                    .get(&self.ws_id)
+                    .ok_or(FwcError::WebSocketIdNotFound)?
+                    .clone();
+                debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+            }
+            res = run_cmd_ws(
+                "sh",
+                &[&self.files[0].dst_path[..], "install"],
+                &ws_data,
+                false,
+            )?;
+        } else {
+            res = run_cmd("sh", &[&self.files[0].dst_path[..], "install"])?;
+        }
 
         // Load policy.
-        for file in fwcloud_script_paths.iter() {
+        for file in cfg.fwcloud_script_paths.iter() {
             if Path::new(file).is_file() {
-                res = run_cmd("sh", &[&file[..], "start"])?;
+                if self.ws_id != Uuid::nil() {
+                    let ws_data: Arc<Mutex<WsData>>;
+                    {
+                        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+                        let ws_map = cfg.ws_map.lock().unwrap();
+                        ws_data = ws_map
+                            .get(&self.ws_id)
+                            .ok_or(FwcError::WebSocketIdNotFound)?
+                            .clone();
+                        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+                    }
+                    res = run_cmd_ws("sh", &[&file[..], "start"], &ws_data, true)?;
+                    {
+                        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+                        let mut ws_map = cfg.ws_map.lock().unwrap();
+                        ws_map.remove(&self.ws_id);
+                        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+                    }
+                } else {
+                    res = run_cmd("sh", &[&file[..], "start"])?;
+                }
                 break;
             }
         }
@@ -184,6 +232,8 @@ impl HttpFiles {
         } else if name == "perms" {
             self.perms.clear();
             buf = &mut self.perms;
+        } else if name == "ws_id" {
+            buf = &mut self.ws_id_buf;
         } else {
             return Err(FwcError::NotAllowedParameter);
         }
@@ -207,6 +257,14 @@ impl HttpFiles {
                 fs::create_dir_all(&self.dst_dir)?;
             } else {
                 return Err(FwcError::DirNotFound);
+            }
+        }
+
+        // If we receive a WebSocket id verify that it is a valid one.
+        if name == "ws_id" {
+            match Uuid::parse_str(&self.ws_id_buf) {
+                Ok(id) => self.ws_id = id,
+                Err(_e) => return Err(FwcError::WebSocketIdBad),
             }
         }
 

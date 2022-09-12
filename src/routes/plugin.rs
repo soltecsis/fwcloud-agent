@@ -15,7 +15,7 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use actix_web::{post, web, HttpResponse};
 use log::debug;
@@ -26,6 +26,7 @@ use validator::Validate;
 use crate::config::Config;
 use crate::errors::{FwcError, Result};
 use crate::utils::cmd::{run_cmd, run_cmd_ws};
+use crate::utils::ws::WsData;
 
 //use std::{thread, time};
 
@@ -73,14 +74,29 @@ async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Resul
         // as a whole when the command execution finishes.
         res = match plugin.ws_id {
             Some(id) => {
-                let mut ws_map = cfg.ws_map.lock().unwrap();
-                let ws_data = ws_map.get(&id).ok_or(FwcError::WebSocketIdNotFound)?;
-                let res = run_cmd_ws(cmd, &args, ws_data)?;
-                ws_map.remove(&id);
+                let ws_data: Arc<Mutex<WsData>>;
+                {
+                    debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+                    let ws_map = cfg.ws_map.lock().unwrap();
+                    ws_data = ws_map
+                        .get(&id)
+                        .ok_or(FwcError::WebSocketIdNotFound)?
+                        .clone();
+                    debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+                }
+                let res = run_cmd_ws(cmd, &args, &ws_data, true)?;
+                {
+                    debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+                    let mut ws_map = cfg.ws_map.lock().unwrap();
+                    ws_map.remove(&id);
+                    debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+                }
                 res
             }
             None => run_cmd(cmd, &args)?,
         };
+
+        debug!("Releasing plugins mutex (thread id: {})", thread_id::get());
     } // Mutex scope end.
 
     Ok(res)

@@ -60,7 +60,9 @@ impl FwcAgentWs {
         };
 
         let data_clone = Arc::clone(&new_ws.data);
+        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
         map.lock().unwrap().insert(new_ws.get_id(), data_clone);
+        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
 
         new_ws
     }
@@ -75,6 +77,7 @@ impl FwcAgentWs {
 
         debug!("Starting the websocket(id:{}) send_lines thread", id);
         ctx.run_interval(POLLING_INTERVAL, move |act, ctx| {
+            debug!("Locking ws data mutex (thread id: {})", thread_id::get());
             let mut data = act.data.lock().unwrap();
 
             while !data.lines.is_empty() {
@@ -96,16 +99,20 @@ impl FwcAgentWs {
                 // 5 seconds after the request has finished.
                 ctx.cancel_future(handle);
             }
+
+            debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
         });
     }
 
     fn heart_beat(&mut self, ctx: &mut ws::WebsocketContext<Self>) {
         self.heart_beat_handler = Some(ctx.run_interval(HEARTBEAT_INTERVAL, move |act, ctx| {
+            debug!("Locking ws data mutex (thread id: {})", thread_id::get());
             if act.data.lock().unwrap().finished {
                 ctx.cancel_future(ctx.handle());
             } else {
                 ctx.ping(b"PING\n");
             }
+            debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
         }));
     }
 }

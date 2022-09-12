@@ -242,6 +242,8 @@ impl OpenVPNStCollector {
                         let mut collector = local_self.lock().unwrap();
                         collector.collect_all_files_data();
                         pause = collector.sampling_interval;
+
+                        debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
                     } // End of mutex scope.
 
                     // Pause between samplings.
