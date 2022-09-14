@@ -42,6 +42,12 @@ maintainer-scripts = ".deb/maintainer-scripts"
 [package.metadata.rpm]
 package = "fwcloud-agent"
 
+[package.metadata.generate-rpm.requires]
+openssl = "*"
+
+[package.metadata.generate-rpm.conflicts]
+firewalld = "*"
+
 [package.metadata.rpm.cargo]
 buildflags = ["--release"]
 

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Debug logs for all mutex locking and release operations.
 
 ### Fixed
+- Bug in plugins lib `discoverLinuxDist` function.
 - Websockets map was locked during all the plugins and firewall policy load scripts run time. Now lock only for get the websocket data structure and release it immediately.
 
 
