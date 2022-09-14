@@ -196,7 +196,7 @@ jobs:
     name: DEB to Packagecloud
     strategy:
       matrix:
-        dist: [ubuntu/bionic, ubuntu/jammy, ubuntu/focal, debian/jessie, debian/bullseye, debian/buster, debian/stretch]
+        dist: [ubuntu/bionic, ubuntu/cosmic, ubuntu/disco, ubuntu/eoan, ubuntu/focal, ubuntu/groovy, ubuntu/hirsute, ubuntu/impish, ubuntu/jammy, debian/jessie, debian/stretch, debian/buster, debian/bullseye, debian/bookworm, debian/trixie, linuxmint/ulyana, linuxmint/ulyssa, linuxmint/uma, linuxmint/una]
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
@@ -220,7 +220,7 @@ jobs:
     name: RPM to Packagecloud
     strategy:
       matrix:
-        dist: [ol/7, ol/8, el/7, el/8, el/9, fedora/34, fedora/35, fedora/36]
+        dist: [sles/15.1, sles/15.2, sles/15.3, opensuse/15.0, opensuse/15.1, opensuse/15.2, opensuse/15.3, ol/7, ol/8, el/7, el/8, el/9, fedora/30, fedora/31, fedora/32, fedora/33, fedora/34, fedora/35, fedora/36]
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2

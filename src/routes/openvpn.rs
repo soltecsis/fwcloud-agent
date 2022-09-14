@@ -50,6 +50,8 @@ async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result
         HttpFiles::new(cfg.tmp_dir, true)
             .files_upload(payload)
             .await?;
+
+        debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
     }
 
     Ok(HttpResponse::Ok().finish())
@@ -68,6 +70,8 @@ async fn files_remove(
         debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
 
         files_list.remove()?;
+
+        debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
     } // Mutex scope end.
 
     Ok(HttpResponse::Ok().finish())
@@ -97,6 +101,8 @@ async fn files_sha256(
             // If the dir doesn't exists return an empty result.
             String::from("file,sha256\n")
         };
+
+        debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
     } // Mutex scope end.
 
     let mut resp = HttpResponse::Ok().body(result);
@@ -145,6 +151,8 @@ async fn get_status(
                 "Timestamp,Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since",
             ),
         );
+
+        debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
     } // Mutex scope end.
 
     let mut resp = HttpResponse::Ok().body(result.join("\n"));

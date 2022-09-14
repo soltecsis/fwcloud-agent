@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.7] - 2022-09-14
+### Added
+- More Linux distributions support in packagecloud.io.
+- Allow the use of websocket realtime output in the API call for upload and install firewall policy.
+- Debug logs for all mutex locking and release operations.
+- Conflict packages list for `.rpm` package.
+
+### Fixed
+- Bug in plugins lib `discoverLinuxDist` function.
+- Websockets map was locked during all the plugins and firewall policy load scripts run time. Now lock only for get the websocket data structure and release it immediately.
+
+
 ## [1.1.6] - 2022-09-07
 ### Added
 - Display FWCloud-Agent version on startup.
