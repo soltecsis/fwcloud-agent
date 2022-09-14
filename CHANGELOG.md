@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.7] - 2022-09-14
 ### Added
+- More Linux distributions support in packagecloud.io.
 - Allow the use of websocket realtime output in the API call for upload and install firewall policy.
 - Debug logs for all mutex locking and release operations.
 - Conflict packages list for `.rpm` package.
