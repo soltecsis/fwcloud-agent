@@ -66,11 +66,12 @@ pub fn run_cmd_ws(
         }
     };
 
-    //let mut communicator = popen.communicate_start(Option::None).limit_size(1); // IMPORTANT: Read the output byte by byte.
-    let mut communicator = popen.communicate_start(Option::None);
+    let mut communicator = popen.communicate_start(Option::None).limit_size(1); // IMPORTANT: Read the output byte by byte.
 
+    let mut previous_char_is_cr = false;
+    let mut line_u8: Vec<u8> = Vec::new();
     loop {
-        let (stdout, _stderr) = match communicator.read_string() {
+        let (stdout, _stderr) = match communicator.read() {
             Ok(data) => data,
             Err(e) => {
                 error!("Subprocess communication error: {}", e.to_string());
@@ -82,7 +83,7 @@ pub fn run_cmd_ws(
         // the stderr output to stdout. Then we will have all the output in stdout.
         let data = match stdout {
             Some(data) => data,
-            None => String::new(),
+            None => Vec::new(),
         };
 
         // Finish when no more input data.
@@ -95,10 +96,38 @@ pub fn run_cmd_ws(
             break;
         }
 
+        let c = data[0];
+        // \n == 10
+        // \r == 13
+        if c != 13 && c != 10 {
+            line_u8.push(c);
+            continue;
+        }
+
+        // We have already added the line to the lines buffer due to the '\r' character.
+        // With this code we avoid adding an empty line when we found a sequence of '\r' and '\n' characters.
+        // \n == 10
+        if c == 10 && previous_char_is_cr {
+            previous_char_is_cr = false;
+            continue;
+        }
+
         {
             debug!("Locking ws data mutex (thread id: {})", thread_id::get());
-            ws_data.lock().unwrap().lines.push(data);
+            ws_data
+                .lock()
+                .unwrap()
+                .lines
+                .push(String::from_utf8_lossy(&line_u8).to_string());
             debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
+        }
+
+        line_u8 = Vec::new();
+        // \r == 13
+        if c == 13 {
+            previous_char_is_cr = true;
+        } else {
+            previous_char_is_cr = false;
         }
     }
 
