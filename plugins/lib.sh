@@ -23,7 +23,6 @@
 
 ################################################################
 init() {
-  echo "á"
   discoverLinuxDist
   if [ -z "$DIST" ]; then
     echo "ERROR: Linux distribution not supported."

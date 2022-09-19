@@ -80,21 +80,26 @@ pub fn run_cmd_ws(
 
         // Remember that with .stderr(Redirection::Merge) we have redirected
         // the stderr output to stdout. Then we will have all the output in stdout.
-        match stdout {
-            Some(data) => {
-                debug!("Locking ws data mutex (thread id: {})", thread_id::get());
-                ws_data.lock().unwrap().lines.push(data);
-                debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
-            },
-            None => { // Finish when no more input data.
-                if finish_ws {
-                    debug!("Locking ws data mutex (thread id: {})", thread_id::get());
-                    ws_data.lock().unwrap().finished = true;
-                    debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
-                }
-                break;
-            },
+        let data = match stdout {
+            Some(data) => data,
+            None => String::new(),
         };
+
+        // Finish when no more input data.
+        if data.is_empty() {
+            if finish_ws {
+                debug!("Locking ws data mutex (thread id: {})", thread_id::get());
+                ws_data.lock().unwrap().finished = true;
+                debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
+            }
+            break;
+        }
+
+        {
+            debug!("Locking ws data mutex (thread id: {})", thread_id::get());
+            ws_data.lock().unwrap().lines.push(data);
+            debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
+        }
     }
 
     Ok(HttpResponse::Ok().finish())
