@@ -220,7 +220,7 @@ jobs:
     name: RPM to Packagecloud
     strategy:
       matrix:
-        dist: [sles/15.1, sles/15.2, sles/15.3, sles/15.4, ol/7, ol/8, el/7, el/8, el/9, fedora/30, fedora/31, fedora/32, fedora/33, fedora/34, fedora/35, fedora/36]
+        dist: [el/7, el/8, el/9, fedora/30, fedora/31, fedora/32, fedora/33, fedora/34, fedora/35, fedora/36]
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
