@@ -25,6 +25,9 @@ init
 
 ################################################################
 enable() {
+  if [ $DIST = "RedHat" -o $DIST = "Rocky" ]; then
+    pkgInstall "epel-release"
+  fi
   pkgInstall "openvpn"
 }
 ################################################################
