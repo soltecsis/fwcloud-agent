@@ -66,10 +66,9 @@ pub fn run_cmd_ws(
         }
     };
 
-    let mut communicator = popen.communicate_start(Option::None).limit_size(1); // IMPORTANT: Read the output byte by byte.
+    //let mut communicator = popen.communicate_start(Option::None).limit_size(1); // IMPORTANT: Read the output byte by byte.
+    let mut communicator = popen.communicate_start(Option::None);
 
-    let mut previous_char_is_cr = false;
-    let mut line = String::new();
     loop {
         let (stdout, _stderr) = match communicator.read_string() {
             Ok(data) => data,
@@ -81,46 +80,21 @@ pub fn run_cmd_ws(
 
         // Remember that with .stderr(Redirection::Merge) we have redirected
         // the stderr output to stdout. Then we will have all the output in stdout.
-        let data = match stdout {
-            Some(data) => data,
-            None => String::new(),
-        };
-
-        // Finish when no more input data.
-        if data.is_empty() {
-            if finish_ws {
+        match stdout {
+            Some(data) => {
                 debug!("Locking ws data mutex (thread id: {})", thread_id::get());
-                ws_data.lock().unwrap().finished = true;
+                ws_data.lock().unwrap().lines.push(data);
                 debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
-            }
-            break;
-        }
-
-        let c = data.chars().next().unwrap();
-        if c != '\r' && c != '\n' {
-            line.push(c);
-            continue;
-        }
-
-        // We have already added the line to the lines buffer due to the '\r' character.
-        // With this code we avoid adding an empty line when we found a sequence of '\r' and '\n' characters.
-        if c == '\n' && previous_char_is_cr {
-            previous_char_is_cr = false;
-            continue;
-        }
-
-        {
-            debug!("Locking ws data mutex (thread id: {})", thread_id::get());
-            ws_data.lock().unwrap().lines.push(line);
-            debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
-        }
-
-        line = String::new();
-        if c == '\r' {
-            previous_char_is_cr = true;
-        } else {
-            previous_char_is_cr = false;
-        }
+            },
+            None => { // Finish when no more input data.
+                if finish_ws {
+                    debug!("Locking ws data mutex (thread id: {})", thread_id::get());
+                    ws_data.lock().unwrap().finished = true;
+                    debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
+                }
+                break;
+            },
+        };
     }
 
     Ok(HttpResponse::Ok().finish())

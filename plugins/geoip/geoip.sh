@@ -27,27 +27,73 @@ DST_DIR="/usr/share/xt_geoip"
 CRON_FILE="/etc/cron.daily/xt_geoip_dl"
 
 ################################################################
+where_is() {
+  if [ "$1" = "xt_geoip_dl" ]; then
+    XT_GEOIP_DL=""
+    DIR_L="lib libexec"
+    for DIR in $DIR_L; do
+      if [ -f "/usr/${DIR}/xtables-addons/xt_geoip_dl" ]; then
+        XT_GEOIP_DL="/usr/${DIR}/xtables-addons/xt_geoip_dl"
+        break
+      fi
+    done
+    if [ -z "$XT_GEOIP_DL" ]; then
+      echo "Error: xt_geoip_dl file not found."
+      exit 1
+    fi
+  else
+    XT_GEOIP_BUILD=""
+    DIR_L="lib libexec"
+    for DIR in $DIR_L; do
+      if [ -f "/usr/${DIR}/xtables-addons/xt_geoip_build" ]; then
+        XT_GEOIP_BUILD="/usr/${DIR}/xtables-addons/xt_geoip_build"
+        break
+      fi
+    done
+    if [ -z "$XT_GEOIP_BUILD" ]; then
+      echo "Error: xt_geoip_build file not found."
+      exit 1
+    fi
+  fi
+}
+################################################################
+
+################################################################
 enable() {
   pkgInstall "xtables-addons-common"
   pkgInstall "libtext-csv-xs-perl"
 
   echo "(*) Creating destination directory: ${DST_DIR}"
-  mkdir "${DST_DIR}"
+  if [ ! -d "${DST_DIR}" ]; then
+    mkdir "${DST_DIR}"
+  else
+    echo "Already exists."
+  fi
   echo
 
   echo "(*) Downloading the latest version of the GeoIP database."
   cd /tmp
-  /usr/lib/xtables-addons/xt_geoip_dl
+  where_is "xt_geoip_dl"
+  $XT_GEOIP_DL
+  if [ "$?" != "0" ]; then
+    echo "Error: Running xt_geoip_dl"
+    exit 1
+  fi
   echo
 
   echo "(*) Generating binary files for the xt_geoip module."
-  chmod 755 /usr/lib/xtables-addons/xt_geoip_build
-  /usr/lib/xtables-addons/xt_geoip_build -D "${DST_DIR}"
+  where_is "xt_geoip_build"
+  chmod 755 "${XT_GEOIP_BUILD}"
+  $XT_GEOIP_BUILD -D "${DST_DIR}"
+  if [ "$?" != "0" ]; then
+    echo "Error: Running xt_geoip_build"
+    exit 1
+  fi
   rm -f dbip-country-lite.csv
   echo
 
   echo "(*) Creating cron task for daily update the GeoIP database."
-  echo -e "#"'!'"/bin/sh\n\n/usr/lib/xtables-addons/xt_geoip_dl\n\nexit 0" > "${CRON_FILE}"
+  echo "#"'!'"/bin/sh\n\ncd /tmp\n${XT_GEOIP_DL}\n$XT_GEOIP_BUILD -D \"${DST_DIR}\"\nrm -f dbip-country-lite.csv\n\nexit 0" > "${CRON_FILE}"
   chmod 755 "${CRON_FILE}"
   echo
 }

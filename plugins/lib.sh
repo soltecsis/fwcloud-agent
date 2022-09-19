@@ -23,6 +23,7 @@
 
 ################################################################
 init() {
+  echo "á"
   discoverLinuxDist
   if [ -z "$DIST" ]; then
     echo "ERROR: Linux distribution not supported."
@@ -55,6 +56,7 @@ discoverLinuxDist() {
     'Fedora '*) DIST="Fedora";;
     'openSUSE '*) DIST="OpenSUSE";;
     'FreeBSD '*) DIST="FreeBSD";;
+    'Rocky '*) DIST="Rocky";;
     *) DIST="";;
   esac
 }
@@ -67,7 +69,7 @@ setGlobalVars() {
       PKGM_CMD="apt-get"
       ;;
 
-    'RedHat'|'CentOS'|'Fedora') 
+    'RedHat'|'CentOS'|'Fedora'|'Rocky') 
       PKGM_CMD="yum"
       ;;
 
@@ -89,7 +91,7 @@ pkgInstalled() {
   FOUND=""
   if [ $DIST = "Debian" -o $DIST = "Ubuntu" ]; then
     FOUND=`dpkg -s $1 2>/dev/null | grep "^Status: install ok installed"`
-  elif [ $DIST = "RedHat" -o $DIST = "CentOS" -o $DIST = "Fedora" ]; then
+  elif [ $DIST = "RedHat" -o $DIST = "CentOS" -o $DIST = "Fedora" -o $DIST = "Rocky" ]; then
     rpm -q $1 >/dev/null 2>&1
     if [ "$?" = "0" ]; then
       FOUND="1"
