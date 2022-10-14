@@ -47,6 +47,7 @@ discoverLinuxDist() {
       fi
     fi
   fi
+
   case $OS in
     'Ubuntu '*) DIST="Ubuntu";;
     'Debian '*) DIST="Debian";;
@@ -58,6 +59,8 @@ discoverLinuxDist() {
     'Rocky '*) DIST="Rocky";;
     *) DIST="";;
   esac
+
+  RELEASE=`echo "$OS" | awk -F" " '{print $2}'`
 }
 ################################################################
 
