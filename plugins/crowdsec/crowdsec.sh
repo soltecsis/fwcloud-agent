@@ -25,16 +25,40 @@ init
 
 ################################################################
 enable() {
-  if [ $DIST = "RedHat" -o $DIST = "Rocky" ]; then
-    pkgInstall "epel-release"
+  if [ $DIST = "Ubuntu" -o $DIST = "Debian" ]; then
+    echo "(*) Adding the CrowdSec repository."
+    curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | sudo bash
+    if [ "$?" != "0" ]; then
+      echo "Error: Adding CrowdSec repository"
+      exit 1
+    fi
+
+    echo "(*) Installing CrowdSec packages."
+    pkgInstall "crowdsec"
+    pkgInstall "crowdsec-firewall-bouncer-iptables"
+  elif [ $DIST = "CentOS" -o $DIST = "Rocky" ]; then
+    curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.rpm.sh | sudo bash
+    if [ "$?" != "0" ]; then
+      echo "Error: Adding CrowdSec repository"
+      exit 1
+    fi
+
+    echo "(*) Installing CrowdSec packages."
+    pkgInstall "crowdsec"
+    pkgInstall "crowdsec-firewall-bouncer-iptables"
+  else
+    echo "ERROR: Linux distribution not supported."
+    echo "NOT_SUPORTED"
+    exit 1
   fi
-  pkgInstall "openvpn"
 }
 ################################################################
 
 ################################################################
 disable() {
-  pkgRemove "openvpn"
+  echo "(*) Removing CrowdSec packages."
+  pkgRemove "crowdsec-firewall-bouncer-iptables"
+  pkgRemove "crowdsec"
 }
 ################################################################
 

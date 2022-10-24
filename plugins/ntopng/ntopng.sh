@@ -26,18 +26,18 @@ init
 ################################################################
 enable() {
   if [ $DIST = "Ubuntu" -o $DIST = "Debian" ]; then
-    echo "(*) Adding the ntop repository."
+    echo "(*) Adding the NtopNG repository."
     pkgInstall "software-properties-common"
     pkgInstall "wget"
     add-apt-repository universe
     wget https://packages.ntop.org/apt-stable/`echo $RELEASE | cut -c1-5`/all/apt-ntop-stable.deb
     if [ "$?" != "0" ]; then
-      echo "Error: Adding ntopng repository"
+      echo "Error: Adding NtopNG repository"
       exit 1
     fi
     apt install ./apt-ntop-stable.deb
 
-    echo "(*) Installing ntop packages."
+    echo "(*) Installing NtopNG packages."
     apt-get clean all
     apt-get update
     pkgInstall "pfring-dkms"
@@ -47,9 +47,9 @@ enable() {
     pkgInstall "cento"
     pkgInstall "pfring-drivers-zc-dkms"
   elif [ $DIST = "CentOS" -o $DIST = "Rocky" ]; then
-    echo "(*) Adding the ntop repository."
+    echo "(*) Adding the NtopNG repository."
 
-    echo "(*) Installing ntop packages."
+    echo "(*) Installing NtopNG packages."
   else
     echo "ERROR: Linux distribution not supported."
     echo "NOT_SUPORTED"
@@ -60,6 +60,7 @@ enable() {
 
 ################################################################
 disable() {
+  echo "(*) Removing NtopNG packages."
   pkgRemove "pfring-drivers-zc-dkms"
   pkgRemove "cento"
   pkgRemove "n2disk"
