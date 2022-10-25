@@ -69,10 +69,17 @@ enable() {
     wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
     echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-8.x.list
     apt-get update
+    echo
     pkgInstall "elasticsearch"
     pkgInstall "kibana" 
     pkgInstall "logstash"
 
+    echo "(*) Kibana setup."
+    KIBANA_CFG="/etc/kibana/kibana.yml"
+    echo >> "$KIBANA_CFG"
+    echo "server.port: 5601" >> "$KIBANA_CFG"
+    echo "server.host: \"0.0.0.0\"" >> "$KIBANA_CFG"
+    
     echo
     echo "(*) Creating logstash input/outpu config."
     cp ./plugins/suricata/10-input.conf /etc/logstash/conf.d/
