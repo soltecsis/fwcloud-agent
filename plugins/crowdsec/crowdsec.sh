@@ -56,7 +56,6 @@ enable() {
 
 ################################################################
 disable() {
-  echo "(*) Removing CrowdSec packages."
   pkgRemove "crowdsec-firewall-bouncer-iptables"
   pkgRemove "crowdsec"
 }

@@ -60,7 +60,6 @@ enable() {
 
 ################################################################
 disable() {
-  echo "(*) Removing NtopNG packages."
   pkgRemove "pfring-drivers-zc-dkms"
   pkgRemove "cento"
   pkgRemove "n2disk"
