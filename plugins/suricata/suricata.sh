@@ -107,9 +107,9 @@ enable() {
 
 ################################################################
 disable() {
-  pkgInstall "logstash"
-  pkgInstall "kibana" 
-  pkgInstall "elasticsearch"
+  pkgRemove "logstash"
+  pkgRemove "kibana" 
+  pkgRemove "elasticsearch"
   pkgRemove "suricata"
 }
 ################################################################
