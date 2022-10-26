@@ -54,7 +54,12 @@ enable() {
     echo 
     echo "(*) Enabling free rules sources."
     suricata-update enable-source oisf/trafficid
+    suricata-update enable-source etnetera/aggressive
     suricata-update enable-source sslbl/ssl-fp-blacklist
+    suricata-update enable-source et/open
+    suricata-update enable-source tgreen/hunting
+    suricata-update enable-source sslbl/ja3-fingerprints
+    suricata-update enable-source ptresearch/attackdetection
 
     echo
     echo "(*) Updating rulesets."
@@ -88,14 +93,20 @@ enable() {
     echo
     echo "(*) Enabling ELK services."
     systemctl daemon-reload
+    echo "Elastiksearch ..."
     systemctl enable elasticsearch.service
+    echo "Kibana ..."
     systemctl enable kibana.service
+    echo "Logstash ..."
     systemctl enable logstash.service
 
     echo
     echo "(*) Restarting ELK services."
+    echo "Elasticsearch ..."
     systemctl restart elasticsearch.service
+    echo "Kibana ..."
     systemctl restart kibana.service
+    echo "Logstash ..."
     systemctl restart logstash.service
   else
     echo "ERROR: Linux distribution not supported."
