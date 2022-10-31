@@ -70,6 +70,27 @@ enable() {
     systemctl start suricata.service
 
     echo
+    echo "(*) Installing Zeek."
+    echo 'deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_20.10/ /' | sudo tee /etc/apt/sources.list.d/security:zeek.list
+    curl -fsSL https://download.opensuse.org/repositories/security:zeek/xUbuntu_20.10/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/security_zeek.gpg > /dev/null
+    apt-get update
+    echo
+    pkgInstall "zeek"
+
+    echo
+    echo "(*) Setting up Zeek."
+    CFG_FILE="/opt/zeek/etc/node.cfg"
+    NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
+    sed -i 's/interface=eth0/interface='$NETIF'/g' "$CFG_FILE"
+
+    echo
+    echo "(*) Starting Zeek."
+    cp ./plugins/suricata/zeek.service /etc/systemd/system/    
+    systemctl enable zeek
+    /opt/zeek/bin/zeekctl install
+    systemctl start zeek
+
+    echo
     echo "(*) Installing ELK (Elastisearch Logstash Kibana)."
     wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
     echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-8.x.list
@@ -86,7 +107,7 @@ enable() {
     echo "server.host: \"0.0.0.0\"" >> "$KIBANA_CFG"
     
     echo
-    echo "(*) Creating logstash input/outpu config."
+    echo "(*) Creating logstash input/output config."
     cp ./plugins/suricata/10-input.conf /etc/logstash/conf.d/
     cp ./plugins/suricata/30-outputs.conf /etc/logstash/conf.d/
 
@@ -108,6 +129,8 @@ enable() {
     systemctl restart kibana.service
     echo "Logstash ..."
     systemctl restart logstash.service
+
+    echo
   else
     echo "ERROR: Linux distribution not supported."
     echo "NOT_SUPORTED"

@@ -50,6 +50,7 @@ rm -rf %{buildroot}
 /opt/fwcloud/agent/plugins/suricata/suricata.sh
 /opt/fwcloud/agent/plugins/suricata/10-input.conf
 /opt/fwcloud/agent/plugins/suricata/30-outputs.conf
+/opt/fwcloud/agent/plugins/suricata/zeek.service
 /opt/fwcloud/agent/plugins/keepalived/keepalived.sh
 /usr/share/man/man1/fwcloud-agent.1
 /lib/systemd/system/fwcloud-agent.service
