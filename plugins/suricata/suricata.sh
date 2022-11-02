@@ -75,7 +75,10 @@ enable() {
     echo "deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_${MAJMIN}/ /" | sudo tee /etc/apt/sources.list.d/security:zeek.list
     curl -fsSL "https://download.opensuse.org/repositories/security:zeek/xUbuntu_${MAJMIN}/Release.key" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/security_zeek.gpg > /dev/null
     apt-get update
-    
+
+    echo
+    echo "postfix postfix/main_mailer_type string 'Internet Site'" | debconf-set-selections
+    apt-get install -y postfix
     pkgInstall "zeek"
 
     echo
