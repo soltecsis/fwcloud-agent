@@ -82,6 +82,7 @@ enable() {
     apt-get update
 
     echo
+    echo "postfix postfix/mailname string example.com" | debconf-set-selections
     echo "postfix postfix/main_mailer_type string 'Internet Site'" | debconf-set-selections
     apt-get install -y postfix
     pkgInstall "zeek"
