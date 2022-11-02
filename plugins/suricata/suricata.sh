@@ -145,12 +145,13 @@ enable() {
     #echo "xpack.security.enabled: true" >> "$CFG_FILE"
     echo "xpack.security.authc.api_key.enabled: true" >> "$CFG_FILE"
     # Add user.
+    ES_USER="admin"
     passGen 32
-    ELASTIC_PASS="$PASSGEN"
-    /usr/share/elasticsearch/bin/elasticsearch-users useradd elastic -p $ELASTIC_PASS -r superuser
+    ES_PASS="$PASSGEN"
+    /usr/share/elasticsearch/bin/elasticsearch-users useradd $ES_USER -p $ES_PASS -r superuser
     # Setup for only one node cluster.
-    curl -u elastic:$ELASTIC_PASS -X PUT http://localhost:9200/_template/default -H 'Content-Type: application/json' -d '{"index_patterns": ["*"],"order": -1,"settings": {"number_of_shards": "1","number_of_replicas": "0"}}'
-    curl -u elastic:$ELASTIC_PASS -X PUT http://localhost:9200/_settings -H 'Content-Type: application/json' -d '{"index": {"number_of_shards": "1","number_of_replicas": "0"}}'
+    curl -u $ES_USER:$ES_PASS -X PUT http://localhost:9200/_template/default -H 'Content-Type: application/json' -d '{"index_patterns": ["*"],"order": -1,"settings": {"number_of_shards": "1","number_of_replicas": "0"}}'
+    curl -u $ES_USER:$ES_PASS -X PUT http://localhost:9200/_settings -H 'Content-Type: application/json' -d '{"index": {"number_of_shards": "1","number_of_replicas": "0"}}'
     # Increase systemctl start timeout.
     mkdir /etc/systemd/system/elasticsearch.service.d
     echo "[Service]" > /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
@@ -159,7 +160,7 @@ enable() {
 
     echo
     echo "(*) Creating logstash input config."
-    sed 's/GENERATED_PASSWORD/'$ELASTIC_PASS'/g' ./plugins/suricata/filebeat-input.conf > /etc/logstash/conf.d/filebeat-input.conf
+    sed 's/ES_USER/'$ES_USER'/g' ./plugins/suricata/filebeat-input.conf | sed 's/ES_PASS/'$ES_PASS'/g' > /etc/logstash/conf.d/filebeat-input.conf
 
     echo
     echo "(*) Logstash setup."
@@ -190,9 +191,10 @@ enable() {
 
     echo
     echo "(*) Elasticsearch access data:"
-    echo "USER: elastic"
-    echo "PASS: $ELASTIC_PASS"
+    echo "USER: $ES_USER"
+    echo "PASS: $ES_PASS"
     echo "Kibana enrollement token: `/usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s kibana`"
+    echo "Kibana verification code: `/usr/share/kibana/bin/kibana-verification-code`"
 
     echo
   else
