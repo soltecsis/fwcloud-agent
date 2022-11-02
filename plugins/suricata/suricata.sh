@@ -134,7 +134,7 @@ enable() {
     CFG_FILE="/etc/filebeat/filebeat.yml"
     sed -i 's/^output.elasticsearch\:$/#output.elasticsearch\:/g' "$CFG_FILE"
     sed -i 's/^  hosts\: \[\"localhost\:9200\"\]$/  #hosts\: \[\"localhost\:9200\"\]/g' "$CFG_FILE"
-    sed -i 's/^  #output.logstash\:$/  output.logstash\:/g' "$CFG_FILE"
+    sed -i 's/^#output.logstash\:$/  output.logstash\:/g' "$CFG_FILE"
     sed -i 's/#hosts\: \[\"localhost\:5044\"\]/hosts\: \[\"localhost\:5044\"\]/g' "$CFG_FILE"
 
     echo
@@ -153,7 +153,8 @@ enable() {
     curl -u elastic:$ELASTIC_PASS -X PUT http://localhost:9200/_settings -H 'Content-Type: application/json' -d '{"index": {"number_of_shards": "1","number_of_replicas": "0"}}'
     # Increase systemctl start timeout.
     mkdir /etc/systemd/system/elasticsearch.service.d
-    echo -e "[Service]\nTimeoutStartSec=600" > /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
+    echo "[Service]" > /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
+    echo "TimeoutStartSec=600" >> /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
     systemctl daemon-reload
 
     echo
@@ -188,9 +189,10 @@ enable() {
     systemctl start unattended-upgrades
 
     echo
-    echo "Elasticsearch access data:"
+    echo "(*) Elasticsearch access data:"
     echo "USER: elastic"
     echo "PASS: $ELASTIC_PASS"
+    echo "Kibana enrollement token: `/usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s kibana`"
 
     echo
   else
