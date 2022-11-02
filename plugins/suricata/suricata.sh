@@ -51,7 +51,14 @@ enable() {
     sed -i 's/community-id: false$/community-id: true/g' "$CFG_FILE"
     NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
     sed -i 's/interface: eth0$/interface: '$NETIF'/g' "$CFG_FILE"
-    
+    # For avoid error messages like this one:
+    # [ERRCODE: SC_ERR_CONF_YAML_ERROR(242)] - App-Layer protocol sip enable status not set, so enabling by default. This behavior will change in Suricata 7, so please update your config. See ticket #4744 for more details.
+    sed -z -i 's/    sip\:\n      \#enabled\: no/    sip\:\n      enabled\: no/g' "$CFG_FILE"
+    sed -z -i 's/    rdp\:\n      \#enabled\: yes/    rdp\:\n      enabled\: no/g' "$CFG_FILE"
+    sed -z -i 's/    mqtt\:\n      \# enabled\: no/    mqtt\:\n      enabled\: no/g' "$CFG_FILE"
+    # Replace network interface in /etc/default/suricata
+    sed -i 's/^IFACE=eth0$/IFACE='$NETIF'/g' /etc/default/suricata
+
     echo 
     echo "(*) Updating rules sources index."
     suricata-update update-sources
@@ -84,10 +91,10 @@ enable() {
     echo
     echo "postfix postfix/mailname string example.com" | debconf-set-selections
     echo "postfix postfix/main_mailer_type string 'Internet Site'" | debconf-set-selections
-    apt-get install -y postfix
+    pkgInstall "postfix"
+
     pkgInstall "zeek"
 
-    echo
     echo "(*) Setting up Zeek."
     CFG_FILE="/opt/zeek/etc/node.cfg"
     NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
@@ -111,25 +118,52 @@ enable() {
     pkgInstall "logstash"
     pkgInstall "filebeat"
 
+    echo "(*) Enabling ELK services."
+    systemctl daemon-reload
+    systemctl enable elasticsearch
+    systemctl enable kibana
+    systemctl enable logstash
+    systemctl enable filebeat
+
     echo
     echo "(*) Filebeat setup."
     filebeat modules enable suricata
     filebeat modules enable zeek
-    filebeat modules enable system
     /usr/share/filebeat/bin/filebeat setup
-    filebeat setup --pipelines --modules suricata, zeek, system
+    filebeat setup --pipelines --modules suricata, zeek
     CFG_FILE="/etc/filebeat/filebeat.yml"
-    sed -i 's/hosts\: \[\"localhost\:9200\"\]/#hosts\: \[\"localhost\:9200\"\]/g' "$CFG_FILE"
+    sed -i 's/^output.elasticsearch\:$/#output.elasticsearch\:/g' "$CFG_FILE"
+    sed -i 's/^  hosts\: \[\"localhost\:9200\"\]$/  #hosts\: \[\"localhost\:9200\"\]/g' "$CFG_FILE"
+    sed -i 's/^  #output.logstash\:$/  output.logstash\:/g' "$CFG_FILE"
     sed -i 's/#hosts\: \[\"localhost\:5044\"\]/hosts\: \[\"localhost\:5044\"\]/g' "$CFG_FILE"
 
     echo
+    echo "(*) Elasticksearch setup."
+    # Enable Elasticsearch security setup.
+    CFG_FILE="/etc/elasticsearch/elasticsearch.yml"
+    echo >> "$CFG_FILE"
+    echo "xpack.security.enabled: true" >> "$CFG_FILE"
+    echo "xpack.security.authc.api_key.enabled: true" >> "$CFG_FILE"
+    # Add user.
+    passGen 32
+    ELASTIC_PASS="$PASSGEN"
+    /usr/share/elasticsearch/bin/elasticsearch-users useradd elastic -p $ELASTIC_PASS -r superuser
+    # Setup for only one node cluster.
+    curl -u elastic:$ELASTIC_PASS -X PUT http://localhost:9200/_template/default -H 'Content-Type: application/json' -d '{"index_patterns": ["*"],"order": -1,"settings": {"number_of_shards": "1","number_of_replicas": "0"}}'
+    curl -u elastic:$ELASTIC_PASS -X PUT http://localhost:9200/_settings -H 'Content-Type: application/json' -d '{"index": {"number_of_shards": "1","number_of_replicas": "0"}}'
+    # Increase systemctl start timeout.
+    mkdir /etc/systemd/system/elasticsearch.service.d
+    echo -e "[Service]\nTimeoutStartSec=600" > /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
+    systemctl daemon-reload
+
+    echo
     echo "(*) Creating logstash input config."
-    cp ./plugins/suricata/filebeat-input.conf /etc/logstash/conf.d/
+    sed 's/GENERATED_PASSWORD/'$ELASTIC_PASS'/g' ./plugins/suricata/filebeat-input.conf > /etc/logstash/conf.d/filebeat-input.conf
 
     echo
     echo "(*) Logstash setup."
     usermod -a -G adm logstash
-    /usr/share/logstash/bin/logstash-plugin update
+    /usr/share/logstash/bin/logstash-plugin update >/dev/null 2>&1 &
 
     echo
     echo "(*) Kibana setup."
@@ -138,18 +172,6 @@ enable() {
     echo "server.port: 5601" >> "$KIBANA_CFG"
     echo "server.host: \"0.0.0.0\"" >> "$KIBANA_CFG"
     
-    echo
-    echo "(*) Enabling ELK services."
-    systemctl daemon-reload
-    echo "Elastiksearch ..."
-    systemctl enable elasticsearch.service
-    echo "Kibana ..."
-    systemctl enable kibana.service
-    echo "Logstash ..."
-    systemctl enable logstash.service
-    echo "Filebeat ..."
-    systemctl enable filebeat.service
-
     echo
     echo "(*) Restarting ELK services."
     echo "Elasticsearch ..."
@@ -164,6 +186,11 @@ enable() {
     echo
     echo "(*) Starting unattended-upgrades."
     systemctl start unattended-upgrades
+
+    echo
+    echo "Elasticsearch access data:"
+    echo "USER: elastic"
+    echo "PASS: $ELASTIC_PASS"
 
     echo
   else
