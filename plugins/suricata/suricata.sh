@@ -26,6 +26,11 @@ init
 ################################################################
 enable() {
   if [ $DIST = "Ubuntu" -o $DIST = "Debian" ]; then
+    # Stop unattended-upgrades in order to avoid interferences with the installation process.
+    echo "(*) Stopping unattended-upgrades."
+    systemctl stop unattended-upgrades
+
+    echo
     echo "(*) Adding the Suricata repository."
     add-apt-repository ppa:oisf/suricata-stable --yes
     if [ "$?" != "0" ]; then
@@ -154,6 +159,10 @@ enable() {
     systemctl restart logstash.service
     echo "Filebeat ..."
     systemctl restart filebeat.service
+
+    echo
+    echo "(*) Starting unattended-upgrades."
+    systemctl start unattended-upgrades
 
     echo
   else
