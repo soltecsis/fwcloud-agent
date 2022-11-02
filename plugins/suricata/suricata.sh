@@ -70,11 +70,12 @@ enable() {
     systemctl start suricata.service
 
     echo
-    echo "(*) Installing Zeek."
-    echo 'deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_20.10/ /' | sudo tee /etc/apt/sources.list.d/security:zeek.list
-    curl -fsSL https://download.opensuse.org/repositories/security:zeek/xUbuntu_20.10/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/security_zeek.gpg > /dev/null
+    echo "(*) Adding the Zeek repository."
+    MAJMIN=`echo $RELEASE | cut -c1-5`
+    echo "deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_${MAJMIN}/ /" | sudo tee /etc/apt/sources.list.d/security:zeek.list
+    curl -fsSL "https://download.opensuse.org/repositories/security:zeek/xUbuntu_${MAJMIN}/Release.key" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/security_zeek.gpg > /dev/null
     apt-get update
-    echo
+    
     pkgInstall "zeek"
 
     echo
@@ -91,7 +92,7 @@ enable() {
     systemctl start zeek
 
     echo
-    echo "(*) Installing ELK (Elastisearch Logstash Kibana)."
+    echo "(*) Installing ELK (Elastisearch Logstash Kibana) and Filebeat."
     wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
     echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-8.x.list
     apt-get update
@@ -99,18 +100,35 @@ enable() {
     pkgInstall "elasticsearch"
     pkgInstall "kibana" 
     pkgInstall "logstash"
+    pkgInstall "filebeat"
 
+    echo
+    echo "(*) Filebeat setup."
+    filebeat modules enable suricata
+    filebeat modules enable zeek
+    filebeat modules enable system
+    /usr/share/filebeat/bin/filebeat setup
+    filebeat setup --pipelines --modules suricata, zeek, system
+    CFG_FILE="/etc/filebeat/filebeat.yml"
+    sed -i 's/hosts\: \[\"localhost\:9200\"\]/#hosts\: \[\"localhost\:9200\"\]/g' "$CFG_FILE"
+    sed -i 's/#hosts\: \[\"localhost\:5044\"\]/hosts\: \[\"localhost\:5044\"\]/g' "$CFG_FILE"
+
+    echo
+    echo "(*) Creating logstash input config."
+    cp ./plugins/suricata/filebeat-input.conf /etc/logstash/conf.d/
+
+    echo
+    echo "(*) Logstash setup."
+    usermod -a -G adm logstash
+    /usr/share/logstash/bin/logstash-plugin update
+
+    echo
     echo "(*) Kibana setup."
     KIBANA_CFG="/etc/kibana/kibana.yml"
     echo >> "$KIBANA_CFG"
     echo "server.port: 5601" >> "$KIBANA_CFG"
     echo "server.host: \"0.0.0.0\"" >> "$KIBANA_CFG"
     
-    echo
-    echo "(*) Creating logstash input/output config."
-    cp ./plugins/suricata/10-input.conf /etc/logstash/conf.d/
-    cp ./plugins/suricata/30-outputs.conf /etc/logstash/conf.d/
-
     echo
     echo "(*) Enabling ELK services."
     systemctl daemon-reload
@@ -120,6 +138,8 @@ enable() {
     systemctl enable kibana.service
     echo "Logstash ..."
     systemctl enable logstash.service
+    echo "Filebeat ..."
+    systemctl enable filebeat.service
 
     echo
     echo "(*) Restarting ELK services."
@@ -129,6 +149,8 @@ enable() {
     systemctl restart kibana.service
     echo "Logstash ..."
     systemctl restart logstash.service
+    echo "Filebeat ..."
+    systemctl restart filebeat.service
 
     echo
   else
@@ -141,9 +163,11 @@ enable() {
 
 ################################################################
 disable() {
+  pkgRemove "filebeat"
   pkgRemove "logstash"
   pkgRemove "kibana" 
   pkgRemove "elasticsearch"
+  pkgRemove "zeek"
   pkgRemove "suricata"
 }
 ################################################################
