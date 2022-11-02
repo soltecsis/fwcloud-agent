@@ -142,7 +142,7 @@ enable() {
     # Enable Elasticsearch security setup.
     CFG_FILE="/etc/elasticsearch/elasticsearch.yml"
     echo >> "$CFG_FILE"
-    echo "xpack.security.enabled: true" >> "$CFG_FILE"
+    #echo "xpack.security.enabled: true" >> "$CFG_FILE"
     echo "xpack.security.authc.api_key.enabled: true" >> "$CFG_FILE"
     # Add user.
     passGen 32
