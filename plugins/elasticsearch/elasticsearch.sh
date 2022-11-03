@@ -26,14 +26,11 @@ init
 ################################################################
 enable() {
   if [ $DIST = "Ubuntu" -o $DIST = "Debian" ]; then
-    # Stop unattended-upgrades in order to avoid interferences with the installation process.
-    echo "(*) Stopping unattended-upgrades."
-    systemctl stop unattended-upgrades
-
     echo
-    echo "(*) Installing ELK (Elastisearch Logstash Kibana) and Filebeat."
-    wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
-    echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-8.x.list
+    echo "(*) Adding the Elasticsearch repository."
+    echo -n "Importing Elasticsearch GPG key ... "
+    wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE="1" apt-key add -
+    echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" > /etc/apt/sources.list.d/elastic-8.x.list
     apt-get update
     echo
     pkgInstall "elasticsearch"
@@ -68,10 +65,6 @@ enable() {
     systemctl daemon-reload
 
     echo
-    echo "(*) Creating logstash input config."
-    sed 's/ES_USER/'$ES_USER'/g' ./plugins/suricata/filebeat-input.conf | sed 's/ES_PASS/'$ES_PASS'/g' > /etc/logstash/conf.d/filebeat-input.conf
-
-    echo
     echo "(*) Logstash setup."
     usermod -a -G adm logstash
     /usr/share/logstash/bin/logstash-plugin update >/dev/null 2>&1 &
@@ -91,10 +84,6 @@ enable() {
     systemctl restart kibana.service
     echo "Logstash ..."
     systemctl restart logstash.service
-
-    echo
-    echo "(*) Starting unattended-upgrades."
-    systemctl start unattended-upgrades
 
     echo
     echo "(*) Elasticsearch access data:"

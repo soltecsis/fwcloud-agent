@@ -50,9 +50,10 @@ rm -rf %{buildroot}
 /opt/fwcloud/agent/plugins/suricata/suricata.sh
 /opt/fwcloud/agent/plugins/zeek/zeek.sh
 /opt/fwcloud/agent/plugins/zeek/zeek.service
-/opt/fwcloud/agent/plugins/elk/elk.sh
+/opt/fwcloud/agent/plugins/elasticsearch/elasticsearch.sh
+/opt/fwcloud/agent/plugins/kibana/kibana.sh
+/opt/fwcloud/agent/plugins/logstash/logstash.sh
 /opt/fwcloud/agent/plugins/filebeat/filebeat.sh
-/opt/fwcloud/agent/plugins/filebeat/filebeat-input.conf
 /opt/fwcloud/agent/plugins/keepalived/keepalived.sh
 /opt/fwcloud/agent/plugins/websafetyproxy/websafetyproxy.sh
 /usr/share/man/man1/fwcloud-agent.1
