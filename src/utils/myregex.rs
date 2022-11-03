@@ -37,6 +37,6 @@ lazy_static! {
   pub static ref ABSOLUTE_PATH: Regex = Regex::new("^/{1}(((/{1}\\.{1})?[a-zA-Z0-9 -_]+/?)+(\\.{1}[a-zA-Z0-9]{2,4})?)$").unwrap();
   pub static ref ABSOLUTE_PATH_LIST: Regex = Regex::new("^((/{1}(((/{1}\\.{1})?[a-zA-Z0-9 -_]+/?)+(\\.{1}[a-zA-Z0-9]{2,4})?))(,?))*$").unwrap();
 
-  pub static ref PLUGINS_NAMES: Regex = Regex::new("^(test|openvpn|geoip|crowdsec|ntopng|suricata|keepalived)$").unwrap();
+  pub static ref PLUGINS_NAMES: Regex = Regex::new("^(test|openvpn|geoip|crowdsec|ntopng|suricata|keepalived|zeek|elk)$").unwrap();
   pub static ref PLUGINS_ACTIONS: Regex = Regex::new("^(enable|disable)$").unwrap();
 }

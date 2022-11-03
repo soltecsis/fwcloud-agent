@@ -26,11 +26,6 @@ init
 ################################################################
 enable() {
   if [ $DIST = "Ubuntu" -o $DIST = "Debian" ]; then
-    # Stop unattended-upgrades in order to avoid interferences with the installation process.
-    echo "(*) Stopping unattended-upgrades."
-    systemctl stop unattended-upgrades
-
-    echo
     echo "(*) Adding the Suricata repository."
     add-apt-repository ppa:oisf/suricata-stable --yes
     if [ "$?" != "0" ]; then
@@ -82,121 +77,6 @@ enable() {
     systemctl start suricata.service
 
     echo
-    echo "(*) Adding the Zeek repository."
-    MAJMIN=`echo $RELEASE | cut -c1-5`
-    echo "deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_${MAJMIN}/ /" | sudo tee /etc/apt/sources.list.d/security:zeek.list
-    curl -fsSL "https://download.opensuse.org/repositories/security:zeek/xUbuntu_${MAJMIN}/Release.key" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/security_zeek.gpg > /dev/null
-    apt-get update
-
-    echo
-    echo "postfix postfix/mailname string example.com" | debconf-set-selections
-    echo "postfix postfix/main_mailer_type string 'Internet Site'" | debconf-set-selections
-    pkgInstall "postfix"
-
-    pkgInstall "zeek"
-
-    echo "(*) Setting up Zeek."
-    CFG_FILE="/opt/zeek/etc/node.cfg"
-    NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
-    sed -i 's/interface=eth0/interface='$NETIF'/g' "$CFG_FILE"
-
-    echo
-    echo "(*) Starting Zeek."
-    cp ./plugins/suricata/zeek.service /etc/systemd/system/    
-    systemctl enable zeek
-    /opt/zeek/bin/zeekctl install
-    systemctl start zeek
-
-    echo
-    echo "(*) Installing ELK (Elastisearch Logstash Kibana) and Filebeat."
-    wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
-    echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-8.x.list
-    apt-get update
-    echo
-    pkgInstall "elasticsearch"
-    pkgInstall "kibana" 
-    pkgInstall "logstash"
-    pkgInstall "filebeat"
-
-    echo "(*) Enabling ELK services."
-    systemctl daemon-reload
-    systemctl enable elasticsearch
-    systemctl enable kibana
-    systemctl enable logstash
-    systemctl enable filebeat
-
-    echo
-    echo "(*) Filebeat setup."
-    filebeat modules enable suricata
-    filebeat modules enable zeek
-    /usr/share/filebeat/bin/filebeat setup
-    filebeat setup --pipelines --modules suricata, zeek
-    CFG_FILE="/etc/filebeat/filebeat.yml"
-    sed -i 's/^output.elasticsearch\:$/#output.elasticsearch\:/g' "$CFG_FILE"
-    sed -i 's/^  hosts\: \[\"localhost\:9200\"\]$/  #hosts\: \[\"localhost\:9200\"\]/g' "$CFG_FILE"
-    sed -i 's/^#output.logstash\:$/  output.logstash\:/g' "$CFG_FILE"
-    sed -i 's/#hosts\: \[\"localhost\:5044\"\]/hosts\: \[\"localhost\:5044\"\]/g' "$CFG_FILE"
-
-    echo
-    echo "(*) Elasticksearch setup."
-    # Enable Elasticsearch security setup.
-    CFG_FILE="/etc/elasticsearch/elasticsearch.yml"
-    echo >> "$CFG_FILE"
-    #echo "xpack.security.enabled: true" >> "$CFG_FILE"
-    echo "xpack.security.authc.api_key.enabled: true" >> "$CFG_FILE"
-    # Add user.
-    ES_USER="admin"
-    passGen 32
-    ES_PASS="$PASSGEN"
-    /usr/share/elasticsearch/bin/elasticsearch-users useradd $ES_USER -p $ES_PASS -r superuser
-    # Setup for only one node cluster.
-    curl -u $ES_USER:$ES_PASS -X PUT http://localhost:9200/_template/default -H 'Content-Type: application/json' -d '{"index_patterns": ["*"],"order": -1,"settings": {"number_of_shards": "1","number_of_replicas": "0"}}'
-    curl -u $ES_USER:$ES_PASS -X PUT http://localhost:9200/_settings -H 'Content-Type: application/json' -d '{"index": {"number_of_shards": "1","number_of_replicas": "0"}}'
-    # Increase systemctl start timeout.
-    mkdir /etc/systemd/system/elasticsearch.service.d
-    echo "[Service]" > /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
-    echo "TimeoutStartSec=600" >> /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
-    systemctl daemon-reload
-
-    echo
-    echo "(*) Creating logstash input config."
-    sed 's/ES_USER/'$ES_USER'/g' ./plugins/suricata/filebeat-input.conf | sed 's/ES_PASS/'$ES_PASS'/g' > /etc/logstash/conf.d/filebeat-input.conf
-
-    echo
-    echo "(*) Logstash setup."
-    usermod -a -G adm logstash
-    /usr/share/logstash/bin/logstash-plugin update >/dev/null 2>&1 &
-
-    echo
-    echo "(*) Kibana setup."
-    KIBANA_CFG="/etc/kibana/kibana.yml"
-    echo >> "$KIBANA_CFG"
-    echo "server.port: 5601" >> "$KIBANA_CFG"
-    echo "server.host: \"0.0.0.0\"" >> "$KIBANA_CFG"
-    
-    echo
-    echo "(*) Restarting ELK services."
-    echo "Elasticsearch ..."
-    systemctl restart elasticsearch.service
-    echo "Kibana ..."
-    systemctl restart kibana.service
-    echo "Logstash ..."
-    systemctl restart logstash.service
-    echo "Filebeat ..."
-    systemctl restart filebeat.service
-
-    echo
-    echo "(*) Starting unattended-upgrades."
-    systemctl start unattended-upgrades
-
-    echo
-    echo "(*) Elasticsearch access data:"
-    echo "USER: $ES_USER"
-    echo "PASS: $ES_PASS"
-    echo "Kibana enrollement token: `/usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s kibana`"
-    echo "Kibana verification code: `/usr/share/kibana/bin/kibana-verification-code`"
-
-    echo
   else
     echo "ERROR: Linux distribution not supported."
     echo "NOT_SUPORTED"
@@ -207,11 +87,6 @@ enable() {
 
 ################################################################
 disable() {
-  pkgRemove "filebeat"
-  pkgRemove "logstash"
-  pkgRemove "kibana" 
-  pkgRemove "elasticsearch"
-  pkgRemove "zeek"
   pkgRemove "suricata"
 }
 ################################################################

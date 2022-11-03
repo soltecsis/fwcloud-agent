@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [] - Unreleased
 ### Added
 - Plugin for Keepalived support.
+- Plugin for Suricata support.
+- Plugin for Zeek support.
+- Plugin for ELK support.
+- Plugin for Web Safety Proxy support.
 
 
 ## [1.1.8] - 2022-09-19

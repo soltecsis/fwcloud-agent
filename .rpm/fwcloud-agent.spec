@@ -48,8 +48,10 @@ rm -rf %{buildroot}
 /opt/fwcloud/agent/plugins/crowdsec/crowdsec.sh
 /opt/fwcloud/agent/plugins/ntopng/ntopng.sh
 /opt/fwcloud/agent/plugins/suricata/suricata.sh
-/opt/fwcloud/agent/plugins/suricata/filebeat-input.conf
-/opt/fwcloud/agent/plugins/suricata/zeek.service
+/opt/fwcloud/agent/plugins/zeek/zeek.sh
+/opt/fwcloud/agent/plugins/zeek/zeek.service
+/opt/fwcloud/agent/plugins/elk/elk.sh
+/opt/fwcloud/agent/plugins/elk/filebeat-input.conf
 /opt/fwcloud/agent/plugins/keepalived/keepalived.sh
 /usr/share/man/man1/fwcloud-agent.1
 /lib/systemd/system/fwcloud-agent.service
