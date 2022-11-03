@@ -37,6 +37,7 @@ enable() {
     fi
     apt install ./apt-ntop-stable.deb
 
+    echo
     echo "(*) Installing NtopNG packages."
     apt-get clean all
     apt-get update
