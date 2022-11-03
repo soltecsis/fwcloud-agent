@@ -39,26 +39,12 @@ enable() {
     pkgInstall "elasticsearch"
     pkgInstall "kibana" 
     pkgInstall "logstash"
-    pkgInstall "filebeat"
 
     echo "(*) Enabling ELK services."
     systemctl daemon-reload
     systemctl enable elasticsearch
     systemctl enable kibana
     systemctl enable logstash
-    systemctl enable filebeat
-
-    echo
-    echo "(*) Filebeat setup."
-    filebeat modules enable suricata
-    filebeat modules enable zeek
-    /usr/share/filebeat/bin/filebeat setup
-    filebeat setup --pipelines --modules suricata, zeek
-    CFG_FILE="/etc/filebeat/filebeat.yml"
-    sed -i 's/^output.elasticsearch\:$/#output.elasticsearch\:/g' "$CFG_FILE"
-    sed -i 's/^  hosts\: \[\"localhost\:9200\"\]$/  #hosts\: \[\"localhost\:9200\"\]/g' "$CFG_FILE"
-    sed -i 's/^#output.logstash\:$/  output.logstash\:/g' "$CFG_FILE"
-    sed -i 's/#hosts\: \[\"localhost\:5044\"\]/hosts\: \[\"localhost\:5044\"\]/g' "$CFG_FILE"
 
     echo
     echo "(*) Elasticsearch setup."
@@ -105,8 +91,6 @@ enable() {
     systemctl restart kibana.service
     echo "Logstash ..."
     systemctl restart logstash.service
-    echo "Filebeat ..."
-    systemctl restart filebeat.service
 
     echo
     echo "(*) Starting unattended-upgrades."
@@ -130,12 +114,9 @@ enable() {
 
 ################################################################
 disable() {
-  pkgRemove "filebeat"
   pkgRemove "logstash"
   pkgRemove "kibana" 
   pkgRemove "elasticsearch"
-  pkgRemove "zeek"
-  pkgRemove "suricata"
 }
 ################################################################
 
