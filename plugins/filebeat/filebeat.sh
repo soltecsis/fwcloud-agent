@@ -39,20 +39,15 @@ enable() {
     systemctl daemon-reload
     systemctl enable filebeat
 
-    echo
-    echo "(*) Filebeat setup."
-    CFG_FILE="/etc/filebeat/filebeat.yml"
-    sed -i 's/^output.elasticsearch\:$/#output.elasticsearch\:/g' "$CFG_FILE"
-    sed -i 's/^  hosts\: \[\"localhost\:9200\"\]$/  #hosts\: \[\"localhost\:9200\"\]/g' "$CFG_FILE"
-    sed -i 's/^#output.logstash\:$/output.logstash\:/g' "$CFG_FILE"
-    sed -i 's/#hosts\: \[\"localhost\:5044\"\]/hosts\: \[\"localhost\:5044\"\]/g' "$CFG_FILE"
-    filebeat modules enable suricata
-    filebeat modules enable zeek
-    /usr/share/filebeat/bin/filebeat setup
+    # echo
+    # echo "(*) Filebeat setup."
+    # filebeat modules enable suricata
+    # filebeat modules enable zeek
+    # /usr/share/filebeat/bin/filebeat setup
 
     echo
-    echo "(*) Restarting Filebeat services."
-    systemctl restart filebeat.service
+    echo "(*) Starting Filebeat service."
+    systemctl start filebeat
 
     echo
   else

@@ -26,79 +26,27 @@ init
 ################################################################
 enable() {
   if [ $DIST = "Ubuntu" -o $DIST = "Debian" ]; then
-    # Stop unattended-upgrades in order to avoid interferences with the installation process.
-    echo "(*) Stopping unattended-upgrades."
-    systemctl stop unattended-upgrades
-
-    echo
     echo "(*) Adding the Elasticsearch repository."
     echo -n "Importing Elasticsearch GPG key ... "
     wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE="1" apt-key add -
     echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" > /etc/apt/sources.list.d/elastic-8.x.list
     apt-get update
     echo
-    pkgInstall "elasticsearch"
     pkgInstall "kibana" 
-    pkgInstall "logstash"
 
-    echo "(*) Enabling ELK services."
+    echo "(*) Enabling Kibana service."
     systemctl daemon-reload
-    systemctl enable elasticsearch
     systemctl enable kibana
-    systemctl enable logstash
-
-    echo
-    echo "(*) Elasticsearch setup."
-    # Enable Elasticsearch security setup.
-    CFG_FILE="/etc/elasticsearch/elasticsearch.yml"
-    echo >> "$CFG_FILE"
-    #echo "xpack.security.enabled: true" >> "$CFG_FILE"
-    echo "xpack.security.authc.api_key.enabled: true" >> "$CFG_FILE"
-    # Add user.
-    ES_USER="admin"
-    passGen 32
-    ES_PASS="$PASSGEN"
-    /usr/share/elasticsearch/bin/elasticsearch-users useradd $ES_USER -p $ES_PASS -r superuser
-    # Setup for only one node cluster.
-    curl -u $ES_USER:$ES_PASS -X PUT http://localhost:9200/_template/default -H 'Content-Type: application/json' -d '{"index_patterns": ["*"],"order": -1,"settings": {"number_of_shards": "1","number_of_replicas": "0"}}'
-    curl -u $ES_USER:$ES_PASS -X PUT http://localhost:9200/_settings -H 'Content-Type: application/json' -d '{"index": {"number_of_shards": "1","number_of_replicas": "0"}}'
-    # Increase systemctl start timeout.
-    mkdir /etc/systemd/system/elasticsearch.service.d
-    echo "[Service]" > /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
-    echo "TimeoutStartSec=600" >> /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
-    systemctl daemon-reload
-
-    echo
-    echo "(*) Logstash setup."
-    usermod -a -G adm logstash
-    /usr/share/logstash/bin/logstash-plugin update >/dev/null 2>&1 &
 
     echo
     echo "(*) Kibana setup."
     KIBANA_CFG="/etc/kibana/kibana.yml"
-    echo >> "$KIBANA_CFG"
-    echo "server.port: 5601" >> "$KIBANA_CFG"
-    echo "server.host: \"0.0.0.0\"" >> "$KIBANA_CFG"
+    sed -i "s/^#server.port\: 5601$/server.port: 5601/g" "$KIBANA_CFG"
+    sed -i "s/^#server.host\: \"localhost\"$/#server.host\: \"localhost\"\nserver.host\: \"0.0.0.0\"/g" "$KIBANA_CFG"
     
     echo
-    echo "(*) Restarting ELK services."
-    echo "Elasticsearch ..."
-    systemctl restart elasticsearch.service
-    echo "Kibana ..."
-    systemctl restart kibana.service
-    echo "Logstash ..."
-    systemctl restart logstash.service
-
-    echo
-    echo "(*) Starting unattended-upgrades."
-    systemctl start unattended-upgrades
-
-    echo
-    echo "(*) Elasticsearch access data:"
-    echo "USER: $ES_USER"
-    echo "PASS: $ES_PASS"
-    echo "Kibana enrollement token: `/usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s kibana`"
-    echo "Kibana verification code: `/usr/share/kibana/bin/kibana-verification-code`"
+    echo "(*) Starting Kibana service."
+    systemctl start kibana
 
     echo
   else
@@ -111,9 +59,7 @@ enable() {
 
 ################################################################
 disable() {
-  pkgRemove "logstash"
   pkgRemove "kibana" 
-  pkgRemove "elasticsearch"
 }
 ################################################################
 
