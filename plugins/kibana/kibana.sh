@@ -41,12 +41,17 @@ enable() {
     echo
     echo "(*) Kibana setup."
     KIBANA_CFG="/etc/kibana/kibana.yml"
-    sed -i "s/^#server.port\: 5601$/server.port: 5601/g" "$KIBANA_CFG"
+    KIBANA_PORT="5601"
+    sed -i "s/^#server.port\: '$KIBANA_PORT'$/server.port: '$KIBANA_PORT'/g" "$KIBANA_CFG"
     sed -i "s/^#server.host\: \"localhost\"$/#server.host\: \"localhost\"\nserver.host\: \"0.0.0.0\"/g" "$KIBANA_CFG"
     
     echo
     echo "(*) Starting Kibana service."
     systemctl start kibana
+
+    echo
+    echo "(*) Waiting for Kibana service start up."
+    waitForTcpPort "$KIBANA_PORT" "Kibana" 120
 
     echo
   else

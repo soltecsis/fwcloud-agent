@@ -161,3 +161,23 @@ passGen() {
   PASSGEN=`cat /dev/urandom | tr -dc a-zA-Z0-9 | fold -w ${1} | head -n 1`
 }
 ################################################################
+
+################################################################
+waitForTcpPort() {
+  PORT=$1
+  SERVICE="$2"
+  N_TRY=$3
+
+  echo "Waiting for ${SERVICE} servive in TCP port ${PORT} a maximum of ${N_TRY} seconds"
+  while [ $N_TRY -gt 0 ]; do
+    echo "$N_TRY seconds left"
+    OUT=`lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep "\:${PORT}"`
+    if [ "$OUT" ]; then
+      echo "$SERVICE service started"
+      break
+    fi
+    N_TRY=`expr $N_TRY - 1`
+    sleep 1
+  done
+}
+################################################################
