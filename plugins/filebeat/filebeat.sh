@@ -39,24 +39,23 @@ enable() {
     CFG_FILE="/etc/filebeat/filebeat.yml"
     sed -i 's/^  #protocol: \"https\"$/  protocol: \"https\"\n  ssl.verification_mode: none/g' "$CFG_FILE"
 
+    echo
     echo "(*) Enabling Filebeat service."
     systemctl daemon-reload
     systemctl enable filebeat
 
     echo
-    pkgInstall "fprobe"
-
-    echo "(*) Setting up Fprobe service."
-    CFG_FILE="/etc/default/fprobe"
     NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
     FPROBE_PORT="2055"
-    sed -i 's/^INTERFACE=\"eth0\"$/INTERFACE=\"'$NETIF'\"/g' "$CFG_FILE"
-    sed -i 's/^FLOW_COLLECTOR=\"localhost:555\"$/FLOW_COLLECTOR=\"localhost:'$FPROBE_PORT'\"/g' "$CFG_FILE"
+    echo "fprobe fprobe/interface string ${NETIF}" | debconf-set-selections
+    echo "fprobe fprobe/collector string localhost:${FPROBE_PORT}" | debconf-set-selections
+    pkgInstall "fprobe"
 
     echo "(*) Enabling Fprobe service."
     systemctl daemon-reload
     systemctl enable fprobe
 
+    echo
     echo "(*) Starting Fprobe service."
     systemctl start fprobe
 
