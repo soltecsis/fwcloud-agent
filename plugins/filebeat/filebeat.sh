@@ -73,6 +73,8 @@ enable() {
     echo "WARNING: This steps must be accomplished manually in the destination server."
     echo "- Set up the hosts, username and password parameters of the output.elasticsearch section"
     echo "  for your Elasticsearch server in the /etc/filebeat/filebeat.yml configuration file."
+    echo "- Check the Filebeat config file with: filebeat test config"
+    echo "- Verify the Filebeat-Elasticsearch communication with: filebeat test output"
     echo "- Run the command: /usr/share/filebeat/bin/filebeat setup"
     echo "- Start Filebeat with: systemctl start filebeat"
 
@@ -87,6 +89,7 @@ enable() {
 
 ################################################################
 disable() {
+  pkgRemove "fprobe"
   pkgRemove "filebeat"
 }
 ################################################################
