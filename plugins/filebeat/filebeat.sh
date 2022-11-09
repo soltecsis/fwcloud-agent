@@ -35,19 +35,46 @@ enable() {
     echo
     pkgInstall "filebeat"
 
-    echo "(*) Enabling Filebeat services."
+    echo "(*) Setting up Filebeat service."
+    CFG_FILE="/etc/filebeat/filebeat.yml"
+    sed -i 's/^  #protocol: \"https\"$/  protocol: \"https\"\n  ssl.verification_mode: none/g' "$CFG_FILE"
+
+    echo "(*) Enabling Filebeat service."
     systemctl daemon-reload
     systemctl enable filebeat
 
-    # echo
-    # echo "(*) Filebeat setup."
-    # filebeat modules enable suricata
-    # filebeat modules enable zeek
-    # /usr/share/filebeat/bin/filebeat setup
+    echo
+    pkgInstall "fprobe"
+
+    echo "(*) Setting up Fprobe service."
+    CFG_FILE="/etc/default/fprobe"
+    NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
+    FPROBE_PORT="2055"
+    sed -i 's/^INTERFACE=\"eth0\"$/INTERFACE=\"'$NETIF'\"/g' "$CFG_FILE"
+    sed -i 's/^FLOW_COLLECTOR=\"localhost:555\"$/FLOW_COLLECTOR=\"localhost:'$FPROBE_PORT'\"/g' "$CFG_FILE"
+
+    echo "(*) Enabling Fprobe service."
+    systemctl daemon-reload
+    systemctl enable fprobe
+
+    echo "(*) Starting Fprobe service."
+    systemctl start fprobe
 
     echo
-    echo "(*) Starting Filebeat service."
-    systemctl start filebeat
+    echo "(*) Enabling filebeat modules."
+    MODULES_DIR="/etc/filebeat/modules.d"
+    MODULES="suricata zeek netflow"
+    for MODULE in $MODULES; do
+      filebeat modules enable $MODULE
+      sed -i 's/^    enabled: false$/    enabled: true/g' "${MODULES_DIR}/${MODULE}.yml"
+    done
+
+    echo
+    echo "(*) Final steps."
+    echo "- Set up the hosts, username and password parameters of the output.elasticsearch section"
+    echo "  for your Elasticsearch server in the /etc/filebeat/filebeat.yml configuration file."
+    echo "- Run the command: /usr/share/filebeat/bin/filebeat setup"
+    echo "- Start Filebeat with: systemctl start filebeat"
 
     echo
   else
