@@ -71,6 +71,7 @@ enable() {
 
     echo
     echo "(*) Final steps."
+    echo "WARNING: This steps must be accomplished manually in the destination server."
     echo "- Set up the hosts, username and password parameters of the output.elasticsearch section"
     echo "  for your Elasticsearch server in the /etc/filebeat/filebeat.yml configuration file."
     echo "- Run the command: /usr/share/filebeat/bin/filebeat setup"
