@@ -38,6 +38,11 @@ enable() {
     echo "(*) Setting up Filebeat service."
     CFG_FILE="/etc/filebeat/filebeat.yml"
     sed -i 's/^  #protocol: \"https\"$/  protocol: \"https\"\n  ssl.verification_mode: none/g' "$CFG_FILE"
+    TEST=`grep setup.ilm.overwrite "$CFG_FILE"`
+    if [ -z "$TEST" ]; then
+      echo "" >> "$CFG_FILE"
+      echo "setup.ilm.overwrite: true" >> "$CFG_FILE"
+    fi
 
     echo
     echo "(*) Enabling Filebeat service."
@@ -73,6 +78,8 @@ enable() {
     echo "WARNING: This steps must be accomplished manually in the destination server."
     echo "- Set up the hosts, username and password parameters of the output.elasticsearch section"
     echo "  for your Elasticsearch server in the /etc/filebeat/filebeat.yml configuration file."
+    echo "- Set up the Kibana host and space.id of the setup.kibana section"
+    echo "  for your Kibana server in the /etc/filebeat/filebeat.yml configuration file."
     echo "- Check the Filebeat config file with: filebeat test config"
     echo "- Verify the Filebeat-Elasticsearch communication with: filebeat test output"
     echo "- Run the command: /usr/share/filebeat/bin/filebeat setup"
