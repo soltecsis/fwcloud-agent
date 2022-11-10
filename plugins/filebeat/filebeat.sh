@@ -80,7 +80,7 @@ enable() {
 
   echo
   echo "(*) Final steps."
-  echo "WARNING: This steps must be accomplished manually in the destination server."
+  echo "WARNING: These steps must be accomplished manually in the destination server."
   echo "- Set up the hosts, username and password parameters of the output.elasticsearch section"
   echo "  for your Elasticsearch server in the /etc/filebeat/filebeat.yml configuration file."
   echo "- Set up the Kibana host and space.id of the setup.kibana section"
