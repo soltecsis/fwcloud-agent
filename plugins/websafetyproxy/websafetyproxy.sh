@@ -23,11 +23,13 @@
 . ./plugins/lib.sh
 init
 
+################################################################
 notSupported() {
   echo "Error: Your Linux distribution ($DIST $RELEASE) is not supported. Only Ubuntu 20 is supported for this plugin."
   echo "NOT_SUPPORTED"
   exit 1
 }
+################################################################
 
 ################################################################
 enable() {
