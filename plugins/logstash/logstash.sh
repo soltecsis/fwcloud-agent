@@ -25,34 +25,34 @@ init
 
 ################################################################
 enable() {
-  if [ $DIST = "Ubuntu" -o $DIST = "Debian" ]; then
-    echo "(*) Adding the Elasticsearch repository."
-    echo -n "Importing Elasticsearch GPG key ... "
-    wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE="1" apt-key add -
-    echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" > /etc/apt/sources.list.d/elastic-8.x.list
-    apt-get update
-    echo
-    pkgInstall "logstash"
-
-    echo "(*) Enabling Logstash service."
-    systemctl daemon-reload
-    systemctl enable logstash
-
-    echo
-    echo "(*) Logstash setup."
-    usermod -a -G adm logstash
-    /usr/share/logstash/bin/logstash-plugin update >/dev/null 2>&1 &
-
-    echo
-    echo "(*) Starting Logstash service."
-    systemctl start logstash
-
-    echo
-  else
-    echo "Error: Linux distribution not supported."
+  if [ $DIST != "Ubuntu" -a $DIST != "Debian" ]; then
+    echo "Error: Linux distribution not supported. Only Ubuntu and Debian are supported."
     echo "NOT_SUPPORTED"
     exit 1
   fi
+
+  echo "(*) Adding the Elasticsearch repository."
+  echo -n "Importing Elasticsearch GPG key ... "
+  wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE="1" apt-key add -
+  echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" > /etc/apt/sources.list.d/elastic-8.x.list
+  apt-get update
+  echo
+  pkgInstall "logstash"
+
+  echo "(*) Enabling Logstash service."
+  systemctl daemon-reload
+  systemctl enable logstash
+
+  echo
+  echo "(*) Logstash setup."
+  usermod -a -G adm logstash
+  /usr/share/logstash/bin/logstash-plugin update >/dev/null 2>&1 &
+
+  echo
+  echo "(*) Starting Logstash service."
+  systemctl start logstash
+
+  echo
 }
 ################################################################
 

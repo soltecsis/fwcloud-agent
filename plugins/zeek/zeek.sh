@@ -25,38 +25,38 @@ init
 
 ################################################################
 enable() {
-  if [ $DIST = "Ubuntu" -o $DIST = "Debian" ]; then
-    echo "(*) Adding the Zeek repository."
-    MAJMIN=`echo $RELEASE | cut -c1-5`
-    echo "deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_${MAJMIN}/ /" | sudo tee /etc/apt/sources.list.d/security:zeek.list
-    curl -fsSL "https://download.opensuse.org/repositories/security:zeek/xUbuntu_${MAJMIN}/Release.key" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/security_zeek.gpg > /dev/null
-    apt-get update
-
-    echo
-    echo "postfix postfix/mailname string example.com" | debconf-set-selections
-    echo "postfix postfix/main_mailer_type string 'Internet Site'" | debconf-set-selections
-    pkgInstall "postfix"
-
-    pkgInstall "zeek"
-
-    echo "(*) Setting up Zeek."
-    CFG_FILE="/opt/zeek/etc/node.cfg"
-    NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
-    sed -i 's/interface=eth0/interface='$NETIF'/g' "$CFG_FILE"
-
-    echo
-    echo "(*) Starting Zeek."
-    cp ./plugins/zeek/zeek.service /etc/systemd/system/    
-    systemctl enable zeek
-    /opt/zeek/bin/zeekctl install
-    systemctl start zeek
-
-    echo
-  else
-    echo "Error: Linux distribution not supported."
+  if [ $DIST != "Ubuntu" -a $DIST != "Debian" ]; then
+    echo "Error: Linux distribution not supported. Only Ubuntu and Debian are supported."
     echo "NOT_SUPPORTED"
     exit 1
   fi
+
+  echo "(*) Adding the Zeek repository."
+  MAJMIN=`echo $RELEASE | cut -c1-5`
+  echo "deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_${MAJMIN}/ /" | sudo tee /etc/apt/sources.list.d/security:zeek.list
+  curl -fsSL "https://download.opensuse.org/repositories/security:zeek/xUbuntu_${MAJMIN}/Release.key" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/security_zeek.gpg > /dev/null
+  apt-get update
+
+  echo
+  echo "postfix postfix/mailname string example.com" | debconf-set-selections
+  echo "postfix postfix/main_mailer_type string 'Internet Site'" | debconf-set-selections
+  pkgInstall "postfix"
+
+  pkgInstall "zeek"
+
+  echo "(*) Setting up Zeek."
+  CFG_FILE="/opt/zeek/etc/node.cfg"
+  NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
+  sed -i 's/interface=eth0/interface='$NETIF'/g' "$CFG_FILE"
+
+  echo
+  echo "(*) Starting Zeek."
+  cp ./plugins/zeek/zeek.service /etc/systemd/system/    
+  systemctl enable zeek
+  /opt/zeek/bin/zeekctl install
+  systemctl start zeek
+
+  echo
 }
 ################################################################
 

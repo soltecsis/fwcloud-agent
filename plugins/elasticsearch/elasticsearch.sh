@@ -25,61 +25,61 @@ init
 
 ################################################################
 enable() {
-  if [ $DIST = "Ubuntu" -o $DIST = "Debian" ]; then
-    echo "(*) Adding the Elasticsearch repository."
-    echo -n "Importing Elasticsearch GPG key ... "
-    wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE="1" apt-key add -
-    echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" > /etc/apt/sources.list.d/elastic-8.x.list
-    apt-get update
-    echo
-    pkgInstall "elasticsearch"
-
-    echo "(*) Enabling Elasticsearch service."
-    echo "Increase systemctl start timeout"
-    mkdir /etc/systemd/system/elasticsearch.service.d
-    echo "[Service]" > /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
-    echo "TimeoutStartSec=600" >> /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
-    echo "Enable service"
-    systemctl daemon-reload
-    systemctl enable elasticsearch
-
-    echo
-    echo "(*) Starting Elasticsearch service."
-    systemctl start elasticsearch
-
-    echo
-    echo "(*) Elasticsearch setup."
-    echo "Reset the password of the elastic built-in superuser"
-    ES_USER="elastic"
-    N_TRY=5
-    while [ $N_TRY -gt 0 ]; do
-      ES_PASS=`/usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b 2>/dev/null | tail -n 1 | awk '{print $3}'`
-      if [ -z "$ES_PASS" ]; then
-        sleep 1
-      else
-        break
-      fi
-      N_TRY=`expr $N_TRY - 1`
-      if [ $N_TRY = 0 ]; then
-        /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b
-      fi
-    done
-
-    echo "Generate an enrollment token for Kibana instances"
-    KIBANA_TOKEN=`/usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s kibana`
-
-    echo
-    echo "(*) Elasticsearch access data."
-    echo "Username: $ES_USER"
-    echo "Password: $ES_PASS"
-    echo "Kibana enrollement token: $KIBANA_TOKEN"
-
-    echo
-  else
-    echo "Error: Linux distribution not supported."
+  if [ $DIST != "Ubuntu" -a $DIST != "Debian" ]; then
+    echo "Error: Linux distribution not supported. Only Ubuntu and Debian are supported."
     echo "NOT_SUPPORTED"
     exit 1
   fi
+
+  echo "(*) Adding the Elasticsearch repository."
+  echo -n "Importing Elasticsearch GPG key ... "
+  wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE="1" apt-key add -
+  echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" > /etc/apt/sources.list.d/elastic-8.x.list
+  apt-get update
+  echo
+  pkgInstall "elasticsearch"
+
+  echo "(*) Enabling Elasticsearch service."
+  echo "Increase systemctl start timeout"
+  mkdir /etc/systemd/system/elasticsearch.service.d
+  echo "[Service]" > /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
+  echo "TimeoutStartSec=600" >> /etc/systemd/system/elasticsearch.service.d/startup-timeout.conf
+  echo "Enable service"
+  systemctl daemon-reload
+  systemctl enable elasticsearch
+
+  echo
+  echo "(*) Starting Elasticsearch service."
+  systemctl start elasticsearch
+
+  echo
+  echo "(*) Elasticsearch setup."
+  echo "Reset the password of the elastic built-in superuser"
+  ES_USER="elastic"
+  N_TRY=5
+  while [ $N_TRY -gt 0 ]; do
+    ES_PASS=`/usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b 2>/dev/null | tail -n 1 | awk '{print $3}'`
+    if [ -z "$ES_PASS" ]; then
+      sleep 1
+    else
+      break
+    fi
+    N_TRY=`expr $N_TRY - 1`
+    if [ $N_TRY = 0 ]; then
+      /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b
+    fi
+  done
+
+  echo "Generate an enrollment token for Kibana instances"
+  KIBANA_TOKEN=`/usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s kibana`
+
+  echo
+  echo "(*) Elasticsearch access data."
+  echo "Username: $ES_USER"
+  echo "Password: $ES_PASS"
+  echo "Kibana enrollement token: $KIBANA_TOKEN"
+
+  echo
 }
 ################################################################
 

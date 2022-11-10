@@ -25,63 +25,63 @@ init
 
 ################################################################
 enable() {
-  if [ $DIST = "Ubuntu" -o $DIST = "Debian" ]; then
-    echo "(*) Adding the Suricata repository."
-    add-apt-repository ppa:oisf/suricata-stable --yes
-    if [ "$?" != "0" ]; then
-      echo "Error: Adding Suricata repository"
-      exit 1
-    fi
-    apt-get update
-
-    echo
-    pkgInstall "suricata"
-
-    echo "(*) Enabling Suricata service."
-    systemctl enable suricata
-
-    echo
-    echo "(*) Setting up Suricata service."
-    CFG_FILE="/etc/suricata/suricata.yaml"
-    sed -i 's/community-id: false$/community-id: true/g' "$CFG_FILE"
-    NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
-    sed -i 's/interface: eth0$/interface: '$NETIF'/g' "$CFG_FILE"
-    # For avoid error messages like this one:
-    # [ERRCODE: SC_ERR_CONF_YAML_ERROR(242)] - App-Layer protocol sip enable status not set, so enabling by default. This behavior will change in Suricata 7, so please update your config. See ticket #4744 for more details.
-    sed -z -i 's/    sip\:\n      \#enabled\: no/    sip\:\n      enabled\: no/g' "$CFG_FILE"
-    sed -z -i 's/    rdp\:\n      \#enabled\: yes/    rdp\:\n      enabled\: no/g' "$CFG_FILE"
-    sed -z -i 's/    mqtt\:\n      \# enabled\: no/    mqtt\:\n      enabled\: no/g' "$CFG_FILE"
-    # Replace network interface in /etc/default/suricata
-    sed -i 's/^IFACE=eth0$/IFACE='$NETIF'/g' /etc/default/suricata
-
-    echo 
-    echo "(*) Updating rules sources index."
-    suricata-update update-sources
-
-    echo 
-    echo "(*) Enabling free rules sources."
-    suricata-update enable-source oisf/trafficid
-    suricata-update enable-source etnetera/aggressive
-    suricata-update enable-source sslbl/ssl-fp-blacklist
-    suricata-update enable-source et/open
-    suricata-update enable-source tgreen/hunting
-    suricata-update enable-source sslbl/ja3-fingerprints
-    suricata-update enable-source ptresearch/attackdetection
-
-    echo
-    echo "(*) Updating rulesets."
-    suricata-update
-
-    echo 
-    echo "(*) Starting Suricata."
-    systemctl start suricata.service
-
-    echo
-  else
-    echo "Error: Linux distribution not supported."
+  if [ $DIST != "Ubuntu" -a $DIST != "Debian" ]; then
+    echo "Error: Linux distribution not supported. Only Ubuntu and Debian are supported."
     echo "NOT_SUPPORTED"
     exit 1
   fi
+
+  echo "(*) Adding the Suricata repository."
+  add-apt-repository ppa:oisf/suricata-stable --yes
+  if [ "$?" != "0" ]; then
+    echo "Error: Adding Suricata repository"
+    exit 1
+  fi
+  apt-get update
+
+  echo
+  pkgInstall "suricata"
+
+  echo "(*) Enabling Suricata service."
+  systemctl enable suricata
+
+  echo
+  echo "(*) Setting up Suricata service."
+  CFG_FILE="/etc/suricata/suricata.yaml"
+  sed -i 's/community-id: false$/community-id: true/g' "$CFG_FILE"
+  NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
+  sed -i 's/interface: eth0$/interface: '$NETIF'/g' "$CFG_FILE"
+  # For avoid error messages like this one:
+  # [ERRCODE: SC_ERR_CONF_YAML_ERROR(242)] - App-Layer protocol sip enable status not set, so enabling by default. This behavior will change in Suricata 7, so please update your config. See ticket #4744 for more details.
+  sed -z -i 's/    sip\:\n      \#enabled\: no/    sip\:\n      enabled\: no/g' "$CFG_FILE"
+  sed -z -i 's/    rdp\:\n      \#enabled\: yes/    rdp\:\n      enabled\: no/g' "$CFG_FILE"
+  sed -z -i 's/    mqtt\:\n      \# enabled\: no/    mqtt\:\n      enabled\: no/g' "$CFG_FILE"
+  # Replace network interface in /etc/default/suricata
+  sed -i 's/^IFACE=eth0$/IFACE='$NETIF'/g' /etc/default/suricata
+
+  echo 
+  echo "(*) Updating rules sources index."
+  suricata-update update-sources
+
+  echo 
+  echo "(*) Enabling free rules sources."
+  suricata-update enable-source oisf/trafficid
+  suricata-update enable-source etnetera/aggressive
+  suricata-update enable-source sslbl/ssl-fp-blacklist
+  suricata-update enable-source et/open
+  suricata-update enable-source tgreen/hunting
+  suricata-update enable-source sslbl/ja3-fingerprints
+  suricata-update enable-source ptresearch/attackdetection
+
+  echo
+  echo "(*) Updating rulesets."
+  suricata-update
+
+  echo 
+  echo "(*) Starting Suricata."
+  systemctl start suricata.service
+
+  echo
 }
 ################################################################
 
