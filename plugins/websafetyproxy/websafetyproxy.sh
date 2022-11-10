@@ -42,6 +42,7 @@ enable() {
   
   echo "(*) Cloning Web Safety Proxy GitHUB repository."
   cd /tmp
+  rm -rf websafety
   git clone https://github.com/diladele/websafety.git
   cd websafety/core.ubuntu20
 
@@ -112,6 +113,7 @@ enable() {
   cd ..
 
 
+  echo
   echo "(*) Install Web Safety Core."
   # install web safety core daemons
   MAJOR="8.2.0"
@@ -158,6 +160,7 @@ enable() {
   systemctl start wsicapd && service squid restart
 
 
+  echo
   echo "(*) Install Admin UI for Web Safety."
   # install pip3 and other python modules, ldap/sasl (we need it for python ldap module)
   pkgInstall "python3-pip"
