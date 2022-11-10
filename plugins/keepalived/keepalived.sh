@@ -207,6 +207,7 @@ enable() {
 
   echo "Content"
   for IF in $IFL; do
+    echo "  Network interface: $IF"
     cfgVirtualInstance "$IF"
     scriptSection "$IF"
   done
