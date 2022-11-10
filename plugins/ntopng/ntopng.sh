@@ -52,8 +52,8 @@ enable() {
 
     echo "(*) Installing NtopNG packages."
   else
-    echo "ERROR: Linux distribution not supported."
-    echo "NOT_SUPORTED"
+    echo "Error: Linux distribution not supported."
+    echo "NOT_SUPPORTED"
     exit 1
   fi
 }

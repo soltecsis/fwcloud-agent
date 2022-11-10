@@ -49,8 +49,8 @@ enable() {
     pkgInstall "crowdsec"
     pkgInstall "crowdsec-firewall-bouncer-iptables"
   else
-    echo "ERROR: Linux distribution not supported."
-    echo "NOT_SUPORTED"
+    echo "Error: Linux distribution not supported."
+    echo "NOT_SUPPORTED"
     exit 1
   fi
 }
