@@ -25,22 +25,54 @@ init
 
 ################################################################
 enable() {
-  if [ $DIST = "Ubuntu" -o $DIST = "Debian" ]; then
-    echo "(*) Adding the NtopNG repository."
+  if [ $DIST = "Ubuntu" ]; then
     pkgInstall "software-properties-common"
     pkgInstall "wget"
+    
+    echo "(*) Adding Universe repository."
     add-apt-repository universe
-    wget https://packages.ntop.org/apt-stable/`echo $RELEASE | cut -c1-5`/all/apt-ntop-stable.deb
-    if [ "$?" != "0" ]; then
-      echo "Error: Adding NtopNG repository"
-      exit 1
-    fi
-    apt install ./apt-ntop-stable.deb
 
     echo
-    echo "(*) Installing NtopNG packages."
+    echo "(*) Downloading Ntop package."
+    wget https://packages.ntop.org/apt-stable/`echo $RELEASE | cut -c1-5`/all/apt-ntop-stable.deb
+    if [ "$?" != "0" ]; then
+      echo "Error: Downloading Ntop package"
+      exit 1
+    fi
+
+    echo "(*) Installing Ntop package."
+    apt-get install ./apt-ntop-stable.deb
+
+    echo
+    echo "(*) Updating packages lists."
     apt-get clean all
     apt-get update
+    
+    echo
+    pkgInstall "pfring-dkms"
+    pkgInstall "nprobe"
+    pkgInstall "ntopng"
+    pkgInstall "n2disk"
+    pkgInstall "cento"
+    pkgInstall "pfring-drivers-zc-dkms"
+  elif [ $DIST = "Debian" ]; then
+    echo "(*) Downloading Ntop package."
+    wget https://packages.ntop.org/apt-stable/$RELEASE/all/apt-ntop-stable.deb
+    if [ "$?" != "0" ]; then
+      echo "Error: Downloading Ntop package"
+      exit 1
+    fi
+
+    echo
+    echo "(*) Installing Ntop package."
+    apt-get install ./apt-ntop-stable.deb
+
+    echo
+    echo "(*) Updating packages lists."
+    apt-get clean all
+    apt-get update
+    
+    echo
     pkgInstall "pfring-dkms"
     pkgInstall "nprobe"
     pkgInstall "ntopng"
@@ -49,6 +81,21 @@ enable() {
     pkgInstall "pfring-drivers-zc-dkms"
   elif [ $DIST = "CentOS" -o $DIST = "Rocky" ]; then
     echo "(*) Adding the NtopNG repository."
+    curl https://packages.ntop.org/centos-stable/ntop.repo > /etc/yum.repos.d/ntop.repo
+
+    echo
+    echo "(*) Updating packages lists."
+    yum clean all
+    yum update
+
+    echo
+    pkgInstall "epel-release"
+    pkgInstall "pfring-dkms"
+    pkgInstall "nprobe"
+    pkgInstall "ntopng"
+    pkgInstall "n2disk"
+    pkgInstall "cento"
+    pkgInstall "pfring-drivers-zc-dkms"
 
     echo "(*) Installing NtopNG packages."
   else

@@ -49,8 +49,8 @@ discoverLinuxDist() {
   fi
 
   case $OS in
-    'Ubuntu '*) DIST="Ubuntu";;
-    'Debian '*) DIST="Debian";;
+    'Ubuntu '*) DIST="Ubuntu"; RELEASE=`echo "$OS" | awk -F" " '{print $2}'`;;
+    'Debian '*) DIST="Debian"; RELEASE=`echo "$OS" | awk -F" " '{print $4}' | awk '{print substr($0, 2, length($0) - 2)}'`;;
     'Red Hat Enterprise '*) DIST="RedHat";;
     'CentOS '*) DIST="CentOS";;
     'Fedora '*) DIST="Fedora";;
@@ -59,8 +59,6 @@ discoverLinuxDist() {
     'Rocky '*) DIST="Rocky";;
     *) DIST="";;
   esac
-
-  RELEASE=`echo "$OS" | awk -F" " '{print $2}'`
 }
 ################################################################
 

@@ -91,9 +91,6 @@ enable() {
   pkgInstall "pkg-config"
 
   echo "(*) Install ClamAV eCAP Adapter."
-  # from now on every error is fatal
-  set -e
-
   # download the sources
   wget https://www.e-cap.org/archive/ecap_clamav_adapter-2.0.0.tar.gz
 
@@ -162,6 +159,7 @@ enable() {
 
   echo
   echo "(*) Install Admin UI for Web Safety."
+  echo
   # install pip3 and other python modules, ldap/sasl (we need it for python ldap module)
   pkgInstall "python3-pip"
   pkgInstall "python3-dev"
@@ -200,6 +198,7 @@ enable() {
   pip3 install python-ldap
 
   # install apache and mod_wsgi and some other useful programs
+  echo
   pkgInstall "apache2"
   pkgInstall "libapache2-mod-wsgi-py3"
   pkgInstall "htop"
@@ -253,7 +252,7 @@ disable() {
   pkgRemove "websafety"
   rm -Rf /opt/websafety
   rm -Rf /opt/websafety-ui
-  userdel websafety
+  # userdel websafety
 }
 ################################################################
 
