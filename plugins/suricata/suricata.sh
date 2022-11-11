@@ -31,13 +31,18 @@ enable() {
     exit 1
   fi
 
-  echo "(*) Adding the Suricata repository."
-  add-apt-repository ppa:oisf/suricata-stable --yes
-  if [ "$?" != "0" ]; then
-    echo "Error: Adding Suricata repository"
-    exit 1
+  if [ $DIST = "Ubuntu" ]; then
+    echo "(*) Adding the Suricata repository."
+    add-apt-repository ppa:oisf/suricata-stable --yes
+    if [ "$?" != "0" ]; then
+      echo "Error: Adding Suricata repository"
+      exit 1
+    fi
+    echo
   fi
-  apt-get update
+
+  echo "(*) Updating packages lists."
+  apt-get update  
 
   echo
   pkgInstall "suricata"
@@ -71,7 +76,6 @@ enable() {
   suricata-update enable-source et/open
   suricata-update enable-source tgreen/hunting
   suricata-update enable-source sslbl/ja3-fingerprints
-  suricata-update enable-source ptresearch/attackdetection
 
   echo
   echo "(*) Updating rulesets."

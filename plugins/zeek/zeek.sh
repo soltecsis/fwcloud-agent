@@ -32,9 +32,17 @@ enable() {
   fi
 
   echo "(*) Adding the Zeek repository."
-  MAJMIN=`echo $RELEASE | cut -c1-5`
-  echo "deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_${MAJMIN}/ /" | sudo tee /etc/apt/sources.list.d/security:zeek.list
-  curl -fsSL "https://download.opensuse.org/repositories/security:zeek/xUbuntu_${MAJMIN}/Release.key" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/security_zeek.gpg > /dev/null
+  if [ $DIST = "Ubuntu" ]; then
+    MAJMIN=`echo $RELEASE | cut -c1-5`
+    echo "deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_${MAJMIN}/ /" | sudo tee /etc/apt/sources.list.d/security:zeek.list
+    curl -fsSL "https://download.opensuse.org/repositories/security:zeek/xUbuntu_${MAJMIN}/Release.key" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/security_zeek.gpg > /dev/null
+  else # Debian
+    echo "deb http://download.opensuse.org/repositories/security:/zeek/Debian_${DIST_NUMBER}/ /" > /etc/apt/sources.list.d/zeek.list
+    curl -fsSL https://download.opensuse.org/repositories/security:zeek/Debian_${DIST_NUMBER}/Release.key | gpg --dearmor > /etc/apt/trusted.gpg.d/security_zeek.gpg
+  fi
+
+  echo
+  echo "(*) Updating packages lists."
   apt-get update
 
   echo
