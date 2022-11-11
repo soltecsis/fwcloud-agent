@@ -44,7 +44,7 @@ enable() {
   CFG_FILE="/etc/filebeat/filebeat.yml"
   sed -i 's/^  #protocol: \"https\"$/  protocol: \"https\"\n  ssl.verification_mode: none/g' "$CFG_FILE"
   TEST=`grep setup.ilm.overwrite "$CFG_FILE"`
-  if [ -z "$TEST" ]; then
+  if [ -z "$TEST" ]; then
     echo "" >> "$CFG_FILE"
     echo "setup.ilm.overwrite: true" >> "$CFG_FILE"
   fi
