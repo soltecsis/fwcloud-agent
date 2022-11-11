@@ -34,40 +34,55 @@ notSupported() {
 ################################################################
 enable() {
   MAJ=`echo $RELEASE | cut -c1-2`
-  if [ $DIST != "Ubuntu" ]; then
+  if [ $DIST != "Ubuntu" -a $DIST != "Debian" ]; then
     notSupported
   elif [ $DIST = "Ubuntu" -a $MAJ != "20" ]; then
+    notSupported
+  elif [ $DIST = "Debian" -a $RELEASE != "bullseye" ]; then
     notSupported
   fi
 
   # https://docs.diladele.com/administrator_guide_stable/install/ubuntu20/index.html
+  # https://docs.diladele.com/administrator_guide_stable/install/debian11/index.html
   
   echo "(*) Cloning Web Safety Proxy GitHUB repository."
   cd /tmp
   rm -rf websafety
   git clone https://github.com/diladele/websafety.git
-  cd websafety/core.ubuntu20
+  if [ "$DIST" = "Ubuntu" ]; then
+    cd websafety/core.ubuntu20
+  else # Debian
+    cd websafety/core.debian11
+  fi
 
-  echo
-  echo "(*) Enabling the Universe repository."
-  # some packages are in universe, so enable it
-  add-apt-repository universe
+  if [ "$DIST" = "Ubuntu" ]; then
+    echo
+    echo "(*) Enabling the Universe repository."
+    # some packages are in universe, so enable it
+    add-apt-repository universe
 
-  echo
-  echo "(*) Adding the Diladele repository."
-  echo -n "Importing Diladele GPG key ... "
-  # add diladele apt key
-  wget -qO - https://packages.diladele.com/diladele_pub.asc | APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE="1" apt-key add -
-  # add new repo
-  echo "deb https://squid55.diladele.com/ubuntu/ focal main" > /etc/apt/sources.list.d/squid55.diladele.com.list
-  apt-get update
+    echo
+    echo "(*) Adding the Diladele repository."
+    echo -n "Importing Diladele GPG key ... "
+    # add diladele apt key
+    wget -qO - https://packages.diladele.com/diladele_pub.asc | APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE="1" apt-key add -
+    # add new repo
+    echo "deb https://squid55.diladele.com/ubuntu/ focal main" > /etc/apt/sources.list.d/squid55.diladele.com.list
+    apt-get update
 
-  echo
-  pkgInstall "squid-common" 
-  pkgInstall "squid-openssl" 
-  pkgInstall "squidclient" 
-  pkgInstall "libecap3" 
-  pkgInstall "libecap3-dev" 
+    echo
+    pkgInstall "squid-common" 
+    pkgInstall "squid-openssl" 
+    pkgInstall "squidclient" 
+    pkgInstall "libecap3" 
+    pkgInstall "libecap3-dev" 
+  else # Debian
+    echo
+    pkgInstall "squid-openssl" 
+    pkgInstall "squidclient" 
+    pkgInstall "sudo" 
+  fi
+
 
   echo "(*) Squid setup."
   # change the number of default file descriptors
@@ -90,6 +105,9 @@ enable() {
   pkgInstall "libclamav-dev"
   pkgInstall "g++"
   pkgInstall "make"
+  pkgInstall "patch"
+  pkgInstall "libecap3"
+  pkgInstall "libecap3-dev"
   pkgInstall "pkg-config"
 
   echo "(*) Install ClamAV eCAP Adapter."
