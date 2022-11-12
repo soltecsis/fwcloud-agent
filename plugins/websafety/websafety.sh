@@ -25,7 +25,8 @@ init
 
 ################################################################
 notSupported() {
-  echo "Error: Your Linux distribution ($DIST $RELEASE) is not supported. Only Ubuntu 20 is supported for this plugin."
+  echo "Error: Your Linux distribution ($DIST $RELEASE) is not supported."
+  echo "Error: Only Ubuntu 20 and Debian 11 are supported for this plugin."
   echo "NOT_SUPPORTED"
   exit 1
 }
