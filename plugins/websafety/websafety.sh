@@ -260,8 +260,30 @@ enable() {
   a2dissite 000-default
   a2ensite websafety
 
+
+  # Generate self signed certificates for Web Safety UI.
+  NAME="websafety-ui"
+  buildSelfSignedCerts "${NAME}"
+  mv fwcloud-${NAME}.key /opt/websafety-ui/etc/admin_ui.key
+  mv fwcloud-${NAME}.crt /opt/websafety-ui/etc/admin_ui.crt
+
+  # Disable HTTP port. Access will be allowed only by means of HTTPS.
+  CFG_FILE="/etc/apache2/ports.conf"
+  WSUI_PORT="8095"
+  sed -i 's/Listen 80/#Listen 80/g' "$CFG_FILE"
+  # Change Web Safety UI port.
+  sed -i 's/Listen 443/#Listen 443/g' "$CFG_FILE"
+  sed -i 's/<IfModule ssl_module>/<IfModule ssl_module>\n\tListen '$WSUI_PORT'/g' "$CFG_FILE"
+  sed -i 's/<IfModule mod_gnutls.c>/<IfModule mod_gnutls.c>\n\tListen '$WSUI_PORT'/g' "$CFG_FILE"
+  CFG_FILE="/etc/apache2/sites-enabled/websafety.conf"
+  sed -i 's/<VirtualHost \*\:443>/<VirtualHost \*\:'$WSUI_PORT'>/g' "$CFG_FILE"
+
+
   # finally restart all daemons
   service apache2 restart
+
+  # Remove GitHub cloned repository.
+  rm -rf /tmp/websafety
 
   echo
 }

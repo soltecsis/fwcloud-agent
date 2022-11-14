@@ -157,11 +157,29 @@ enable() {
   # so UI will be running on port 8000, it is already set so in 
   # /etc/apache2/sites-available/dnssafety-ui.conf but we also need to set
   # apache to listen on port 8000 instead of port 80 (which is taken by dsdnsd)
-  sed -i 's/Listen 80/Listen 8000/g' /etc/apache2/ports.conf
+  #sed -i 's/Listen 80/Listen 8000/g' /etc/apache2/ports.conf
 
   # now integrate with apache
   a2dissite 000-default
   a2ensite dnssafety-ui
+
+  # Generate self signed certificates for DNS Safety UI.
+  NAME="dnssafety-ui"
+  buildSelfSignedCerts "${NAME}"
+  mv fwcloud-${NAME}.key /opt/dnssafety-ui/etc/admin_ui.key
+  mv fwcloud-${NAME}.crt /opt/dnssafety-ui/etc/admin_ui.crt
+
+  # Disable HTTP port. Access will be allowed only by means of HTTPS.
+  CFG_FILE="/etc/apache2/ports.conf"
+  DSUI_PORT="8096"
+  sed -i 's/Listen 80/#Listen 80/g' "$CFG_FILE"
+  # Change Web Safety UI port.
+  sed -i 's/Listen 443/#Listen 443/g' "$CFG_FILE"
+  sed -i 's/<IfModule ssl_module>/<IfModule ssl_module>\n\tListen '$WSUI_PORT'/g' "$CFG_FILE"
+  sed -i 's/<IfModule mod_gnutls.c>/<IfModule mod_gnutls.c>\n\tListen '$DSUI_PORT'/g' "$CFG_FILE"
+  CFG_FILE="/etc/apache2/sites-enabled/dnssafety.conf"
+  sed -i 's/<VirtualHost \*\:8000>/<VirtualHost \*\:'$DSUI_PORT'>/g' "$CFG_FILE"
+
 
   # and restart all daemons
   service apache2 restart
@@ -171,6 +189,9 @@ enable() {
     # change cloud config to preserve hostname, otherwise our UI cannot set it
     sed -i 's/preserve_hostname: false/preserve_hostname: true/g' /etc/cloud/cloud.cfg
   fi
+
+  # Remove GitHub cloned repository.
+  rm -rf /tmp/dnssafety
 
   echo
 }

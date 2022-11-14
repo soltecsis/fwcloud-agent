@@ -207,7 +207,7 @@ EOF
 ################################################################
 
 ################################################################
-buildSelfSignedApacheCerts() {
+buildSelfSignedCerts() {
   passGen 32
   CN="fwcloud-${1}-${PASSGEN}"
   generateOpensslConfig "$CN"
