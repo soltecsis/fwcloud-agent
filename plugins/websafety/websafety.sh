@@ -285,6 +285,14 @@ enable() {
   # Remove GitHub cloned repository.
   rm -rf /tmp/websafety
 
+
+  echo
+  echo "(*) Web Safety Proxy access data."
+  echo "Protocol: https"
+  echo "TCP port: $WSUI_PORT"
+  echo "Username: admin"
+  echo "Password: Passw0rd"
+
   echo
 }
 ################################################################

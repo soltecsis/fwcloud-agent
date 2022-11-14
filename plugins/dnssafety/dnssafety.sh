@@ -194,6 +194,13 @@ enable() {
   rm -rf /tmp/dnssafety
 
   echo
+  echo "(*) DNS Safety access data."
+  echo "Protocol: https"
+  echo "TCP port: $DSUI_PORT"
+  echo "Username: admin"
+  echo "Password: Passw0rd"
+
+  echo
 }
 ################################################################
 
