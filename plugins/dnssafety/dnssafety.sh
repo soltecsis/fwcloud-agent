@@ -178,7 +178,9 @@ enable() {
   sed -i 's/<IfModule ssl_module>/<IfModule ssl_module>\n\tListen '$DSUI_PORT'/g' "$CFG_FILE"
   sed -i 's/<IfModule mod_gnutls.c>/<IfModule mod_gnutls.c>\n\tListen '$DSUI_PORT'/g' "$CFG_FILE"
   CFG_FILE="/etc/apache2/sites-enabled/dnssafety-ui.conf"
-  sed -i 's/<VirtualHost \*\:8000>/<VirtualHost \*\:'$DSUI_PORT'>\n\n    # enable HTTPS\n    SSLEngine on\n\n    # tell apache what keys to use\n    SSLCertificateFile \"\/opt\/dnssafety-ui\/etc\/admin_ui.crt\"\n    SSLCertificateKeyFile "\/opt\/dnssafety-ui\/etc\/admin_ui.key\">/g' "$CFG_FILE"
+  sed -i 's/<VirtualHost \*\:8000>/<VirtualHost \*\:'$DSUI_PORT'>\n\n    # enable HTTPS\n    SSLEngine on\n\n    # tell apache what keys to use\n    SSLCertificateFile \"\/opt\/dnssafety-ui\/etc\/admin_ui.crt\"\n    SSLCertificateKeyFile "\/opt\/dnssafety-ui\/etc\/admin_ui.key\"/g' "$CFG_FILE"
+
+  a2enmod ssl
 
 
   # and restart all daemons
@@ -197,7 +199,7 @@ enable() {
   echo "(*) DNS Safety access data."
   echo "Protocol: https"
   echo "TCP port: $DSUI_PORT"
-  echo "Username: admin"
+  echo "Username: root"
   echo "Password: Passw0rd"
 
   echo
