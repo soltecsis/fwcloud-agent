@@ -46,6 +46,7 @@ enable() {
   echo "(*) Updating packages lists."
   apt-get update 
 
+  echo
   pkgInstall "wget" 
 
   echo
@@ -77,7 +78,7 @@ enable() {
 
 
   echo
-  echo "(*) Install Admin UI for Dns Safety."
+  echo "(*) Install Admin UI for DNS Safety."
   echo
   pkgInstall "python3-pip"
   pkgInstall "python3-dev"
@@ -111,6 +112,7 @@ enable() {
   pip3 install python-ldap
 
   # install apache and mod_wsgi and some other useful programs
+  echo
   pkgInstall "apache2"
   pkgInstall "libapache2-mod-wsgi-py3"
   pkgInstall "htop"
@@ -176,10 +178,10 @@ enable() {
 
 ################################################################
 disable() {
-  pkgRemove "websafety-ui"
-  pkgRemove "websafety"
-  rm -Rf /opt/websafety
-  rm -Rf /opt/websafety-ui
+  pkgRemove "dnsfety-ui"
+  pkgRemove "dnssafety"
+  rm -Rf /opt/dnssafety
+  rm -Rf /opt/dnssafety-ui
   # userdel websafety
 }
 ################################################################

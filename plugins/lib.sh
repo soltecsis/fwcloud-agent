@@ -186,3 +186,46 @@ waitForTcpPort() {
   done
 }
 ################################################################
+
+################################################################
+generateOpensslConfig() {
+  cat > openssl.cnf << EOF
+[ req ]
+distinguished_name = req_distinguished_name
+attributes = req_attributes
+prompt = no
+[ req_distinguished_name ]
+O=SOLTECSIS - FWCloud.net
+CN=${1}
+[ req_attributes ]
+[ cert_ext ]
+subjectKeyIdentifier=hash
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth,serverAuth
+EOF
+}
+################################################################
+
+################################################################
+buildSelfSignedApacheCerts() {
+  passGen 32
+  CN="fwcloud-${1}-${PASSGEN}"
+  generateOpensslConfig "$CN"
+
+  # Private key.
+  openssl genrsa -out fwcloud-${1}.key 2048
+
+  # CSR.
+  openssl req -config ./openssl.cnf -new -key fwcloud-${1}.key -nodes -out fwcloud-${1}.csr
+
+  # Certificate.
+  # WARNING: If we indicate more than 825 days for the certificate expiration date
+  # we will not be able to access from Google Chrome web browser.
+  openssl x509 -extfile ./openssl.cnf -extensions cert_ext -req \
+    -days 825 \
+    -signkey fwcloud-${1}.key -in fwcloud-${1}.csr -out fwcloud-${1}.crt
+   
+  rm openssl.cnf
+  rm "fwcloud-${1}.csr"
+}
+################################################################
