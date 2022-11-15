@@ -150,6 +150,14 @@ enable() {
   # download
   wget http://packages.diladele.com/dnssafety-ui/$MAJOR.$MINOR/$ARCH/release/$OSNAME/dnssafety-ui-$MAJOR.${MINOR}_$ARCH.deb
 
+
+  # The DNS Safety UI package has this files that are part of the Web Safety package.
+  FL="/etc/logrotate.d/websafety /etc/systemd/system/wsgsbd.service /etc/systemd/system/wsicapd.service /etc/systemd/system/wssyncd.service /etc/systemd/system/wsytgd.service"
+  for F in $FL; do
+    mv -f "$F" "${F}.TMP"
+  done
+
+
   # install
   dpkg --install --force-overwrite dnssafety-ui-$MAJOR.${MINOR}_$ARCH.deb
   if [ "$?" != "0" ]; then
@@ -157,6 +165,13 @@ enable() {
     echo "Error: Installing package."
     exit 1
   fi 
+
+
+  # Restore the Web Safety files.
+  for F in $FL; do
+    mv -f "${F}.TMP" "$F"
+  done
+
 
   # first relabel folder
   chown -R daemon:daemon /opt/dnssafety-ui
