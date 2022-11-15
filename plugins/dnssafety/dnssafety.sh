@@ -154,7 +154,9 @@ enable() {
   # The DNS Safety UI package has this files that are part of the Web Safety package.
   FL="/etc/logrotate.d/websafety /etc/systemd/system/wsgsbd.service /etc/systemd/system/wsicapd.service /etc/systemd/system/wssyncd.service /etc/systemd/system/wsytgd.service"
   for F in $FL; do
-    mv -f "$F" "${F}.TMP"
+    if [ -f "$f" ]; then
+      mv -f "$F" "${F}.FWCLOUD.TMP"
+    fi
   done
 
 
@@ -169,7 +171,9 @@ enable() {
 
   # Restore the Web Safety files.
   for F in $FL; do
-    mv -f "${F}.TMP" "$F"
+    if [ -f "${F}.FWCLOUD.TMP" ]; then
+      mv -f "${F}.FWCLOUD.TMP" "$F"
+    fi
   done
 
 
