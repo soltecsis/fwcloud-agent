@@ -207,7 +207,7 @@ enable() {
   sed -i 's/Listen 80$/#Listen 80/g' "$CFG_FILE"
   # Change DNS Safety UI port and enable HTTPS.
   sed -i 's/Listen 443$/#Listen 443/g' "$CFG_FILE"
-  TEST=`grep grep "Listen ${DSUI_PORT}" $CFG_FILE`
+  TEST=`grep "Listen ${DSUI_PORT}" $CFG_FILE`
   if [ -z "$TEST" ]; then
     sed -i 's/<IfModule ssl_module>/<IfModule ssl_module>\n\tListen '$DSUI_PORT'/g' "$CFG_FILE"
     sed -i 's/<IfModule mod_gnutls.c>/<IfModule mod_gnutls.c>\n\tListen '$DSUI_PORT'/g' "$CFG_FILE"
