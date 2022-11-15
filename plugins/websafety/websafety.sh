@@ -282,8 +282,11 @@ enable() {
   sed -i 's/Listen 80$/#Listen 80/g' "$CFG_FILE"
   # Change Web Safety UI port.
   sed -i 's/Listen 443$/#Listen 443/g' "$CFG_FILE"
-  sed -i 's/<IfModule ssl_module>/<IfModule ssl_module>\n\tListen '$WSUI_PORT'/g' "$CFG_FILE"
-  sed -i 's/<IfModule mod_gnutls.c>/<IfModule mod_gnutls.c>\n\tListen '$WSUI_PORT'/g' "$CFG_FILE"
+  TEST=`grep grep "Listen $WSUI_PORT}" $CFG_FILE`
+  if [ -z "$TEST" ]; then
+    sed -i 's/<IfModule ssl_module>/<IfModule ssl_module>\n\tListen '$WSUI_PORT'/g' "$CFG_FILE"
+    sed -i 's/<IfModule mod_gnutls.c>/<IfModule mod_gnutls.c>\n\tListen '$WSUI_PORT'/g' "$CFG_FILE"
+  fi
   CFG_FILE="/etc/apache2/sites-enabled/websafety.conf"
   sed -i 's/<VirtualHost \*\:443>/<VirtualHost \*\:'$WSUI_PORT'>/g' "$CFG_FILE"
 
