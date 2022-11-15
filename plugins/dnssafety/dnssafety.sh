@@ -63,10 +63,18 @@ enable() {
   fi
 
   # download
+  TMP_DIR="/tmp/dnssafety"
+  mkdir "$TMP_DIR"
+  cd "$TMP_DIR"
   wget http://packages.diladele.com/dnssafety-core/$MAJOR.$MINOR/$ARCH/release/debian11/dnssafety-$MAJOR.${MINOR}_$ARCH.deb
 
   # install
   dpkg --install dnssafety-$MAJOR.${MINOR}_$ARCH.deb
+  if [ "$?" != "0" ]; then
+    rm -rf "$TMP_DIR"
+    echo "Error: Installing package."
+    exit 1
+  fi 
 
   # relabel folder
   chown -R daemon:daemon /opt/dnssafety
@@ -143,7 +151,12 @@ enable() {
   wget http://packages.diladele.com/dnssafety-ui/$MAJOR.$MINOR/$ARCH/release/$OSNAME/dnssafety-ui-$MAJOR.${MINOR}_$ARCH.deb
 
   # install
-  dpkg --install dnssafety-ui-$MAJOR.${MINOR}_$ARCH.deb
+  dpkg --install --force-overwrite dnssafety-ui-$MAJOR.${MINOR}_$ARCH.deb
+  if [ "$?" != "0" ]; then
+    rm -rf "$TMP_DIR"
+    echo "Error: Installing package."
+    exit 1
+  fi 
 
   # first relabel folder
   chown -R daemon:daemon /opt/dnssafety-ui
@@ -192,8 +205,8 @@ enable() {
     sed -i 's/preserve_hostname: false/preserve_hostname: true/g' /etc/cloud/cloud.cfg
   fi
 
-  # Remove GitHub cloned repository.
-  rm -rf /tmp/dnssafety
+  # Remove the DNS Safety temporary directory.
+  rm -rf "$TMP_DIR"
 
   echo
   echo "(*) DNS Safety access data."

@@ -143,6 +143,11 @@ enable() {
 
   # install
   dpkg --install websafety-$MAJOR.${MINOR}_$ARCH.deb
+  if [ "$?" != "0" ]; then
+    echo "Error: Installing package."
+    exit 1
+  fi 
+
 
   # for the authenticated portal to work we need to show our own deny info for 511 requests
   # due to the bug in squid it thinks the path start in templates not on /
@@ -245,6 +250,10 @@ enable() {
 
   # install
   dpkg --install websafety-ui-$MAJOR.${MINOR}_$ARCH.deb
+  if [ "$?" != "0" ]; then
+    echo "Error: Installing package."
+    exit 1
+  fi 
 
   # sync ui and actual files in disk (note UI does not manage network by default)
   sudo -u proxy python3 /opt/websafety-ui/var/console/generate.py --core
