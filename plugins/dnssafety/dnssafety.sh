@@ -106,7 +106,7 @@ enable() {
   # so we fix them by removing obsolete ldap modules and reinstalling the correct one
   pip3 uninstall ldap
   pip3 uninstall ldap3
-  pip3 uninstall python-ldap
+  #pip3 uninstall python-ldap
 
   # ok this one is fine
   pip3 install python-ldap
