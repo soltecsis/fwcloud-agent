@@ -19,9 +19,13 @@
     "web"
   ],
   "cSpell.words": [
+    "crowdsec",
+    "geoip",
     "httpdate",
+    "ntopng",
     "popen",
     "rustup",
+    "suricata",
     "websockets"
   ]
 }

@@ -1,6 +1,6 @@
 [package]
 name = "fwcloud-agent"
-version = "1.1.8"
+version = "1.2.0"
 license = "GNU AFFERO GENERAL PUBLIC LICENSE"
 description = "FWCloud Agent for firewalls management"
 readme = "README.md"
@@ -33,6 +33,18 @@ assets = [
     ["plugins/lib.sh", "opt/fwcloud/agent/plugins/lib.sh", "700"],
     ["plugins/geoip/geoip.sh", "opt/fwcloud/agent/plugins/geoip/geoip.sh", "700"],
     ["plugins/openvpn/openvpn.sh", "opt/fwcloud/agent/plugins/openvpn/openvpn.sh", "700"],
+    ["plugins/crowdsec/crowdsec.sh", "opt/fwcloud/agent/plugins/crowdsec/crowdsec.sh", "700"],
+    ["plugins/ntopng/ntopng.sh", "opt/fwcloud/agent/plugins/ntopng/ntopng.sh", "700"],
+    ["plugins/suricata/suricata.sh", "opt/fwcloud/agent/plugins/suricata/suricata.sh", "700"],
+    ["plugins/zeek/zeek.sh", "opt/fwcloud/agent/plugins/zeek/zeek.sh", "700"],
+    ["plugins/zeek/zeek.service", "opt/fwcloud/agent/plugins/zeek/zeek.service", "644"],
+    ["plugins/elasticsearch/elasticsearch.sh", "opt/fwcloud/agent/plugins/elasticsearch/elasticsearch.sh", "700"],
+    ["plugins/kibana/kibana.sh", "opt/fwcloud/agent/plugins/kibana/kibana.sh", "700"],
+    ["plugins/logstash/logstash.sh", "opt/fwcloud/agent/plugins/logstash/logstash.sh", "700"],
+    ["plugins/filebeat/filebeat.sh", "opt/fwcloud/agent/plugins/filebeat/filebeat.sh", "700"],
+    ["plugins/keepalived/keepalived.sh", "opt/fwcloud/agent/plugins/keepalived/keepalived.sh", "700"],
+    ["plugins/websafety/websafety.sh", "opt/fwcloud/agent/plugins/websafety/websafety.sh", "700"],
+    ["plugins/dnssafety/dnssafety.sh", "opt/fwcloud/agent/plugins/dnssafety/dnssafety.sh", "700"],
     [".deb/fwcloud-agent.service", "lib/systemd/system/", "644"],
     [".deb/fwcloud-agent", "etc/logrotate.d/", "644"],
     [".deb/fwcloud-agent.1", "usr/share/man/man1/", "644"],

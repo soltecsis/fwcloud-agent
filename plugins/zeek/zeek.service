@@ -1,0 +1,11 @@
+[Unit]
+Description=zeek network analysis engine
+
+[Service]
+Type=forking
+PIDFIle=/opt/zeek/spool/zeek/.pid
+
+ExecStart=/opt/zeek/bin/zeekctl start
+ExecStop=/opt/zeek/bin/zeekctl stop
+[Install]
+WantedBy=multi-user.target

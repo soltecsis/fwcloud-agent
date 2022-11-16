@@ -25,8 +25,8 @@
 init() {
   discoverLinuxDist
   if [ -z "$DIST" ]; then
-    echo "ERROR: Linux distribution not supported."
-    echo "NOT_SUPORTED"
+    echo "Error: Linux distribution not supported."
+    echo "NOT_SUPPORTED"
     exit 1
   fi
 
@@ -47,9 +47,17 @@ discoverLinuxDist() {
       fi
     fi
   fi
+
   case $OS in
-    'Ubuntu '*) DIST="Ubuntu";;
-    'Debian '*) DIST="Debian";;
+    'Ubuntu '*) 
+      DIST="Ubuntu" 
+      RELEASE=`echo "$OS" | awk -F" " '{print $2}'`
+      ;;
+    'Debian '*) 
+      DIST="Debian"
+      RELEASE=`echo "$OS" | awk -F" " '{print $4}' | awk '{print substr($0, 2, length($0) - 2)}'`
+      DIST_NUMBER=`echo "$OS" | awk -F" " '{print $3}'`
+      ;;
     'Red Hat Enterprise '*) DIST="RedHat";;
     'CentOS '*) DIST="CentOS";;
     'Fedora '*) DIST="Fedora";;
@@ -153,3 +161,71 @@ pkgRemove() {
 }
 ################################################################
 
+################################################################
+passGen() {
+  PASSGEN=`cat /dev/urandom | tr -dc a-zA-Z0-9 | fold -w ${1} | head -n 1`
+}
+################################################################
+
+################################################################
+waitForTcpPort() {
+  PORT=$1
+  SERVICE="$2"
+  N_TRY=$3
+
+  echo "Waiting for ${SERVICE} servive in TCP port ${PORT} a maximum of ${N_TRY} seconds"
+  while [ $N_TRY -gt 0 ]; do
+    echo "$N_TRY seconds left"
+    OUT=`lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep "\:${PORT}"`
+    if [ "$OUT" ]; then
+      echo "$SERVICE service started"
+      break
+    fi
+    N_TRY=`expr $N_TRY - 1`
+    sleep 1
+  done
+}
+################################################################
+
+################################################################
+generateOpensslConfig() {
+  cat > openssl.cnf << EOF
+[ req ]
+distinguished_name = req_distinguished_name
+attributes = req_attributes
+prompt = no
+[ req_distinguished_name ]
+O=SOLTECSIS - FWCloud.net
+CN=${1}
+[ req_attributes ]
+[ cert_ext ]
+subjectKeyIdentifier=hash
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth,serverAuth
+EOF
+}
+################################################################
+
+################################################################
+buildSelfSignedCerts() {
+  passGen 32
+  CN="fwcloud-${1}-${PASSGEN}"
+  generateOpensslConfig "$CN"
+
+  # Private key.
+  openssl genrsa -out fwcloud-${1}.key 2048
+
+  # CSR.
+  openssl req -config ./openssl.cnf -new -key fwcloud-${1}.key -nodes -out fwcloud-${1}.csr
+
+  # Certificate.
+  # WARNING: If we indicate more than 825 days for the certificate expiration date
+  # we will not be able to access from Google Chrome web browser.
+  openssl x509 -extfile ./openssl.cnf -extensions cert_ext -req \
+    -days 825 \
+    -signkey fwcloud-${1}.key -in fwcloud-${1}.csr -out fwcloud-${1}.crt
+   
+  rm openssl.cnf
+  rm "fwcloud-${1}.csr"
+}
+################################################################
