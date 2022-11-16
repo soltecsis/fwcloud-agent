@@ -322,6 +322,8 @@ disable() {
   TEST=`grep "Listen" "$APACHE_PORTS_FILE" |grep -v "#Listen"`
   if [ -z "$TEST" ]; then
     pkgRemove "apache2"
+  else
+    systemctl restart apache2
   fi
 }
 ################################################################
