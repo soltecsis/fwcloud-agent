@@ -136,7 +136,7 @@ enable() {
 
 
   MAJOR="1.0.0"
-  MINOR="7112"
+  MINOR="7FDC"
   ARCH="amd64"
 
   # see if it is RPI or not?
@@ -154,32 +154,13 @@ enable() {
   # download
   wget http://packages.diladele.com/dnssafety-ui/$MAJOR.$MINOR/$ARCH/release/$OSNAME/dnssafety-ui-$MAJOR.${MINOR}_$ARCH.deb
 
-
-  # The DNS Safety UI package has this files that are part of the Web Safety package.
-  FL="/etc/logrotate.d/websafety /etc/systemd/system/wsgsbd.service /etc/systemd/system/wsicapd.service /etc/systemd/system/wssyncd.service /etc/systemd/system/wsytgd.service"
-  for F in $FL; do
-    if [ -f "$f" ]; then
-      mv -f "$F" "${F}.FWCLOUD.TMP"
-    fi
-  done
-
-
   # install
-  dpkg --install --force-overwrite dnssafety-ui-$MAJOR.${MINOR}_$ARCH.deb
+  dpkg --install dnssafety-ui-$MAJOR.${MINOR}_$ARCH.deb
   if [ "$?" != "0" ]; then
     rm -rf "$TMP_DIR"
     echo "Error: Installing package."
     exit 1
   fi 
-
-
-  # Restore the Web Safety files.
-  for F in $FL; do
-    if [ -f "${F}.FWCLOUD.TMP" ]; then
-      mv -f "${F}.FWCLOUD.TMP" "$F"
-    fi
-  done
-
 
   # first relabel folder
   chown -R daemon:daemon /opt/dnssafety-ui
