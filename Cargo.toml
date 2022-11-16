@@ -1,6 +1,6 @@
 [package]
 name = "fwcloud-agent"
-version = "1.2.0"
+version = "1.2.1"
 license = "GNU AFFERO GENERAL PUBLIC LICENSE"
 description = "FWCloud Agent for firewalls management"
 readme = "README.md"
@@ -71,6 +71,18 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 "../plugins/lib.sh" = { path = "/opt/fwcloud/agent/plugins/lib.sh", mode = "700", username = "root" }
 "../plugins/geoip/geoip.sh" = { path = "/opt/fwcloud/agent/plugins/geoip/geoip.sh", mode = "700", username = "root" }
 "../plugins/openvpn/openvpn.sh" = { path = "/opt/fwcloud/agent/plugins/openvpn/openvpn.sh", mode = "700", username = "root" }
+"../plugins/crowdsec/crowdsec.sh" = { path = "/opt/fwcloud/agent/plugins/crowdsec/crowdsec.sh", mode = "700", username = "root" }
+"../plugins/ntopng/ntopng.sh" = { path = "/opt/fwcloud/agent/plugins/ntopng/ntopng.sh", mode = "700", username = "root" }
+"../plugins/suricata/suricata.sh" = { path = "/opt/fwcloud/agent/plugins/suricata/suricata.sh", mode = "700", username = "root" }
+"../plugins/zeek/zeek.sh" = { path = "/opt/fwcloud/agent/plugins/zeek/zeek.sh", mode = "700", username = "root" }
+"../plugins/zeek/zeek.service" = { path = "/opt/fwcloud/agent/plugins/zeek/zeek.service", mode = "644", username = "root" }
+"../plugins/elasticsearch/elasticsearch.sh" = { path = "/opt/fwcloud/agent/plugins/elasticsearch/elasticsearch.sh", mode = "700", username = "root" }
+"../plugins/kibana/kibana.sh" = { path = "/opt/fwcloud/agent/plugins/kibana/kibana.sh", mode = "700", username = "root" }
+"../plugins/logstash/logstash.sh" = { path = "/opt/fwcloud/agent/plugins/logstash/logstash.sh", mode = "700", username = "root" }
+"../plugins/filebeat/filebeat.sh" = { path = "/opt/fwcloud/agent/plugins/filebeat/filebeat.sh", mode = "700", username = "root" }
+"../plugins/keepalived/keepalived.sh" = { path = "/opt/fwcloud/agent/plugins/keepalived/keepalived.sh", mode = "700", username = "root" }
+"../plugins/websafety/websafety.sh" = { path = "/opt/fwcloud/agent/plugins/websafety/websafety.sh", mode = "700", username = "root" }
+"../plugins/dnssafety/dnssafety.sh" = { path = "/opt/fwcloud/agent/plugins/dnssafety/dnssafety.sh", mode = "700", username = "root" }
 "../.deb/fwcloud-agent.1" = { path = "/usr/share/man/man1/fwcloud-agent.1", mode = "644", username = "root" }
 "../.deb/fwcloud-agent.service" = { path = "/lib/systemd/system/fwcloud-agent.service", mode = "644", username = "root" }
 "../.deb/fwcloud-agent" = { path = "/etc/logrotate.d/fwcloud-agent", mode = "644", username = "root" }
