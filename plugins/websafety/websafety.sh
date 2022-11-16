@@ -146,7 +146,7 @@ enable() {
   wget https://packages.diladele.com/websafety-core/$MAJOR.$MINOR/$ARCH/release/ubuntu20/websafety-$MAJOR.${MINOR}_$ARCH.deb
 
   # install
-  dpkg --install websafety-$MAJOR.${MINOR}_$ARCH.deb
+  dpkg --install --force-overwrite websafety-$MAJOR.${MINOR}_$ARCH.deb
   if [ "$?" != "0" ]; then
     echo "Error: Installing package."
     exit 1
@@ -253,7 +253,7 @@ enable() {
   wget https://packages.diladele.com/websafety-ui/$MAJOR.$MINOR/$ARCH/release/$OSNAME/websafety-ui-$MAJOR.${MINOR}_$ARCH.deb
 
   # install
-  dpkg --install websafety-ui-$MAJOR.${MINOR}_$ARCH.deb
+  dpkg --install --force-overwrite websafety-ui-$MAJOR.${MINOR}_$ARCH.deb
   if [ "$?" != "0" ]; then
     echo "Error: Installing package."
     exit 1
