@@ -158,7 +158,9 @@ enable() {
   mkdir -p /usr/share/squid/errors/templates/opt/websafety/etc/squid
 
   # so we make a link to trick it
-  ln -s /opt/websafety/etc/squid/portal.html /usr/share/squid/errors/templates/opt/websafety/etc/squid/portal.html
+  if [ ! -L "/usr/share/squid/errors/templates/opt/websafety/etc/squid/portal.html" ]; then
+    ln -s /opt/websafety/etc/squid/portal.html /usr/share/squid/errors/templates/opt/websafety/etc/squid/portal.html
+  fi
 
   # web safety runs using the same user as squid
   chown -R proxy:proxy /opt/websafety
