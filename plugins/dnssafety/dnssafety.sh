@@ -23,6 +23,10 @@
 . ./plugins/lib.sh
 init
 
+# TCP port for the DNS Safety user interface.
+DSUI_PORT="8096"
+APACHE_PORTS_FILE="/etc/apache2/ports.conf"
+
 ################################################################
 notSupported() {
   echo "Error: Your Linux distribution ($DIST $RELEASE) is not supported."
@@ -202,18 +206,15 @@ enable() {
   mv fwcloud-${NAME}.crt /opt/dnssafety-ui/etc/admin_ui.crt
 
   # Disable HTTP port. Access will be allowed only by means of HTTPS.
-  CFG_FILE="/etc/apache2/ports.conf"
-  DSUI_PORT="8096"
-  sed -i 's/Listen 80$/#Listen 80/g' "$CFG_FILE"
+  sed -i 's/Listen 80$/#Listen 80/g' "$APACHE_PORTS_FILE"
   # Change DNS Safety UI port and enable HTTPS.
-  sed -i 's/Listen 443$/#Listen 443/g' "$CFG_FILE"
-  TEST=`grep "Listen ${DSUI_PORT}" $CFG_FILE`
+  sed -i 's/^\tListen 443$/#Listen 443/g' "$APACHE_PORTS_FILE"
+  TEST=`grep "Listen ${DSUI_PORT}" $APACHE_PORTS_FILE`
   if [ -z "$TEST" ]; then
-    sed -i 's/<IfModule ssl_module>/<IfModule ssl_module>\n\tListen '$DSUI_PORT'/g' "$CFG_FILE"
-    sed -i 's/<IfModule mod_gnutls.c>/<IfModule mod_gnutls.c>\n\tListen '$DSUI_PORT'/g' "$CFG_FILE"
+    sed -i 's/<IfModule ssl_module>/<IfModule ssl_module>\n\tListen '$DSUI_PORT'/g' "$APACHE_PORTS_FILE"
+    sed -i 's/<IfModule mod_gnutls.c>/<IfModule mod_gnutls.c>\n\tListen '$DSUI_PORT'/g' "$APACHE_PORTS_FILE"
   fi
-  CFG_FILE="/etc/apache2/sites-enabled/dnssafety-ui.conf"
-  sed -i 's/<VirtualHost \*\:8000>/<VirtualHost \*\:'$DSUI_PORT'>\n\n    # enable HTTPS\n    SSLEngine on\n\n    # tell apache what keys to use\n    SSLCertificateFile \"\/opt\/dnssafety-ui\/etc\/admin_ui.crt\"\n    SSLCertificateKeyFile "\/opt\/dnssafety-ui\/etc\/admin_ui.key\"/g' "$CFG_FILE"
+  sed -i 's/<VirtualHost \*\:8000>/<VirtualHost \*\:'$DSUI_PORT'>\n\n    # enable HTTPS\n    SSLEngine on\n\n    # tell apache what keys to use\n    SSLCertificateFile \"\/opt\/dnssafety-ui\/etc\/admin_ui.crt\"\n    SSLCertificateKeyFile "\/opt\/dnssafety-ui\/etc\/admin_ui.key\"/g' "/etc/apache2/sites-enabled/dnssafety-ui.conf"
 
   a2enmod ssl
 
@@ -247,7 +248,14 @@ disable() {
   pkgRemove "dnssafety"
   rm -Rf /opt/dnssafety
   rm -Rf /opt/dnssafety-ui
-  # userdel websafety
+  rm -f /etc/apache2/sites-available/dnssafety-ui.conf
+  rm -f /etc/apache2/sites-enabled/dnssafety-ui.conf
+  sed -i 's/^\tListen '$DSUI_PORT'$//g' "$APACHE_PORTS_FILE"
+
+  TEST=`grep "Listen" "$APACHE_PORTS_FILE" |grep -v "#Listen"`
+  if [ -z "$TEST" ]; then
+    pkgRemove "apache2"
+  fi
 }
 ################################################################
 

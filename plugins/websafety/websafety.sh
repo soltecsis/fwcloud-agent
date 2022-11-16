@@ -23,6 +23,10 @@
 . ./plugins/lib.sh
 init
 
+# TCP port for the Web Safety Proxy user interface.
+WSUI_PORT="8095"
+APACHE_PORTS_FILE="/etc/apache2/ports.conf"
+
 ################################################################
 notSupported() {
   echo "Error: Your Linux distribution ($DIST $RELEASE) is not supported."
@@ -277,18 +281,15 @@ enable() {
   mv fwcloud-${NAME}.crt /opt/websafety-ui/etc/admin_ui.crt
 
   # Disable HTTP port. Access will be allowed only by means of HTTPS.
-  CFG_FILE="/etc/apache2/ports.conf"
-  WSUI_PORT="8095"
-  sed -i 's/Listen 80$/#Listen 80/g' "$CFG_FILE"
+  sed -i 's/Listen 80$/#Listen 80/g' "$APACHE_PORTS_FILE"
   # Change Web Safety UI port.
-  sed -i 's/Listen 443$/#Listen 443/g' "$CFG_FILE"
-  TEST=`grep "Listen $WSUI_PORT}" $CFG_FILE`
+  sed -i 's/^\tListen 443$/#Listen 443/g' "$APACHE_PORTS_FILE"
+  TEST=`grep "Listen $WSUI_PORT}" $APACHE_PORTS_FILE`
   if [ -z "$TEST" ]; then
-    sed -i 's/<IfModule ssl_module>/<IfModule ssl_module>\n\tListen '$WSUI_PORT'/g' "$CFG_FILE"
-    sed -i 's/<IfModule mod_gnutls.c>/<IfModule mod_gnutls.c>\n\tListen '$WSUI_PORT'/g' "$CFG_FILE"
+    sed -i 's/<IfModule ssl_module>/<IfModule ssl_module>\n\tListen '$WSUI_PORT'/g' "$APACHE_PORTS_FILE"
+    sed -i 's/<IfModule mod_gnutls.c>/<IfModule mod_gnutls.c>\n\tListen '$WSUI_PORT'/g' "$APACHE_PORTS_FILE"
   fi
-  CFG_FILE="/etc/apache2/sites-enabled/websafety.conf"
-  sed -i 's/<VirtualHost \*\:443>/<VirtualHost \*\:'$WSUI_PORT'>/g' "$CFG_FILE"
+  sed -i 's/<VirtualHost \*\:443>/<VirtualHost \*\:'$WSUI_PORT'>/g' "/etc/apache2/sites-enabled/websafety.conf"
 
 
   # finally restart all daemons
@@ -315,7 +316,13 @@ disable() {
   pkgRemove "websafety"
   rm -Rf /opt/websafety
   rm -Rf /opt/websafety-ui
-  # userdel websafety
+  rm -f /etc/apache2/sites-enabled/websafety.conf
+  sed -i 's/^\tListen '$WSUI_PORT'$//g' "$APACHE_PORTS_FILE"
+
+  TEST=`grep "Listen" "$APACHE_PORTS_FILE" |grep -v "#Listen"`
+  if [ -z "$TEST" ]; then
+    pkgRemove "apache2"
+  fi
 }
 ################################################################
 
