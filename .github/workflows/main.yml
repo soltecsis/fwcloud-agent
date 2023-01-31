@@ -96,7 +96,8 @@ jobs:
   #         args: '--ignore-tests'
 
   build:
-    needs: [security_audit, test, fmt, clippy, coverage]
+    # needs: [security_audit, test, fmt, clippy, coverage]
+    needs: [security_audit, test, fmt, clippy]
     name: Build
     runs-on: ubuntu-latest
     steps:
