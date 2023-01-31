@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2023 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -123,7 +123,7 @@ impl FilesList {
             return Ok(data);
         }
 
-        let path_tmp = format!("{}.tmp", path);
+        let path_tmp = format!("{path}.tmp");
 
         {
             let fr = File::open(&path)?;
@@ -139,7 +139,7 @@ impl FilesList {
                     data.push(line);
                 } else {
                     // If we arrive here we have more lines in the file that must be preserved.
-                    writeln!(writer, "{}", line)?;
+                    writeln!(writer, "{line}")?;
                 }
             }
         }

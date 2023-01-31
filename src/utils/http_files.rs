@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2023 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -190,7 +190,7 @@ impl HttpFiles {
             let random_file_name = Uuid::new_v4();
             let mut file_data = FileData {
                 src_path: format!("{}/{}.tmp", self.tmp_dir, random_file_name),
-                src_name: format!("{}.tmp", random_file_name),
+                src_name: format!("{random_file_name}.tmp"),
                 dst_path: format!("{}/{}", self.dst_dir, filename),
                 dst_name: filename,
                 size: 0,

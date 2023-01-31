@@ -1,5 +1,5 @@
 /*
-    Copyright 2021 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2023 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -131,6 +131,6 @@ impl ResponseError for FwcError {
         );
 
         error!("{}", self);
-        resp.set_body(BoxBody::new(format!("{{\"message\":\"{}\"}}", self)))
+        resp.set_body(BoxBody::new(format!("{{\"message\":\"{self}\"}}")))
     }
 }

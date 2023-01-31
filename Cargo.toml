@@ -1,6 +1,6 @@
 [package]
 name = "fwcloud-agent"
-version = "1.2.1"
+version = "1.2.2"
 license = "GNU AFFERO GENERAL PUBLIC LICENSE"
 description = "FWCloud Agent for firewalls management"
 readme = "README.md"
@@ -23,7 +23,7 @@ copyright = "SOLTECSIS, SL"
 extended-description = """\
 FWCloud Agent daemon for simplify and improve \
 firewalls management from a FWCloud console."""
-depends = "openssl"
+depends = "openssl iptables"
 conflicts = "firewalld"
 section = "utility"
 priority = "optional"
@@ -56,6 +56,7 @@ package = "fwcloud-agent"
 
 [package.metadata.generate-rpm.requires]
 openssl = "*"
+iptables = "*"
 
 [package.metadata.generate-rpm.conflicts]
 firewalld = "*"
@@ -92,7 +93,7 @@ actix = "0.13.0"
 actix-web-actors = "4.1.0"
 actix-web = { version = "4.1.0", features = ["openssl"] }
 actix-service = "2.0.2"
-actix-multipart = "0.4.0"
+actix-multipart = "0.5.0"
 tokio = { version = "1.20.1", features = ["full"] }
 futures = "0.3.23"
 openssl = { version = "0.10.41", features = ["vendored"] }
@@ -105,7 +106,7 @@ lazy_static = "1.4.0"
 rand = "0.8.5"
 regex = "1.6.0"
 log = "0.4.17"
-env_logger = "0.9.0"
+env_logger = "0.10.0"
 sanitize-filename = "0.4.0"
 uuid = { version = "1.1.2", features = ["serde", "v4"] }
 thread-id = "4.0.0"
@@ -115,6 +116,6 @@ hex = "0.4.3"
 httpdate = "1.0.2"
 
 [dev-dependencies]
-serial_test = "0.9.0"
+serial_test = "1.0.0"
 reqwest = "0.11.11"
-tokio-tungstenite = "0.17.2"
+tokio-tungstenite = "0.18.0"

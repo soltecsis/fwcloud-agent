@@ -1,5 +1,5 @@
 /*
-    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2023 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -127,7 +127,7 @@ async fn websocket_test(
                 .lock()
                 .unwrap()
                 .lines
-                .push(format!("{} seconds left", seconds));
+                .push(format!("{seconds} seconds left"));
             debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
         }
         seconds -= 1;
