@@ -134,18 +134,22 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install required packages
-        run: sudo apt install -y curl rpm libssl-dev pkg-config build-essential
+        run: sudo apt install -y curl rpm libssl-dev pkg-config musl-tools build-essential
       - name: Install rustup
         run: curl https://sh.rustup.rs -sSf | sh -s -- -y && source "$HOME/.cargo/env"
+      - name: Install x86_64-unknown-linux-musl target
+        run: rustup target add x86_64-unknown-linux-musl
       - name: Install cargo-rpm
         run: cargo install cargo-rpm
       - name: Build RPM package
-        run: cargo rpm build -v
+        # run: cargo rpm build -v
+        run: cargo rpm build -v --target=x86_64-unknown-linux-musl
       - name: Upload RPM Artifact
         uses: actions/upload-artifact@v2
         with:
           name: rpm-package
-          path: ./target/release/rpmbuild/RPMS/x86_64/*
+          # path: ./target/release/rpmbuild/RPMS/x86_64/*
+          path: ./target/x86_64-unknown-linux-musl/release/rpmbuild/RPMS/x86_64/*
 
   deb-to-fwcloud:
     needs: [deb-package]

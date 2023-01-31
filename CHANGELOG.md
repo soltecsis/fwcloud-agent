@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2023-01-31
+### Added
+- IPTables package dependency for both `deb` and `rpm` packages.
+
+### Changed
+- GitHub actions `rpm` package generation task for use `--target=x86_64-unknown-linux-musl`. This way the FWCloud-Agent `rpm` package will be compatible with most Linux rpm based distributions.
+
+### Fixed
+- Updated several crates with its latest versions.
+
 
 ## [1.2.1] - 2022-11-16
 ### Fixed
