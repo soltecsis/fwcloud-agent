@@ -85,9 +85,14 @@ enable() {
   echo "  for your Elasticsearch server in the /etc/filebeat/filebeat.yml configuration file."
   echo "- Set up the Kibana host and space.id of the setup.kibana section"
   echo "  for your Kibana server in the /etc/filebeat/filebeat.yml configuration file."
+  echo "- Add tags in order to classify data in the processors seccion. For example:"
+  echo "processors:"
+  echo "  - add_tags:"
+  echo "      tags: [main]"
+  echo "      target: \"headquarter\""
   echo "- Check the Filebeat config file with: filebeat test config"
   echo "- Verify the Filebeat-Elasticsearch communication with: filebeat test output"
-  echo "- Run the command: /usr/share/filebeat/bin/filebeat setup"
+  echo "- Run the command (only necessary once for create the dashboard templates): filebeat setup"
   echo "- Start Filebeat with: systemctl start filebeat"
 
   echo
