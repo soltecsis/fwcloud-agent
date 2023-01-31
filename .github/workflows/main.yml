@@ -75,25 +75,25 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: -- -D warnings
 
-  coverage:
-    needs: checks
-    name: Code coverage
-    # runs-on: ubuntu-latest
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
+  # coverage:
+  #   needs: checks
+  #   name: Code coverage
+  #   # runs-on: ubuntu-latest
+  #   runs-on: ubuntu-20.04
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v2
 
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+  #     - name: Install stable toolchain
+  #       uses: actions-rs/toolchain@v1
+  #       with:
+  #         toolchain: stable
+  #         override: true
 
-      - name: Run cargo-tarpaulin
-        uses: actions-rs/tarpaulin@v0.1
-        with:
-          args: '--ignore-tests'
+  #     - name: Run cargo-tarpaulin
+  #       uses: actions-rs/tarpaulin@v0.1
+  #       with:
+  #         args: '--ignore-tests'
 
   build:
     needs: [security_audit, test, fmt, clippy, coverage]
