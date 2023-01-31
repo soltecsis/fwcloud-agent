@@ -112,7 +112,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install required packages
-        run: sudo apt install -y curl libssl-dev pkg-config gcc musl-tools
+        run: sudo apt install -y curl libssl-dev pkg-config musl-tools build-essential
       - name: Install rustup
         run: curl https://sh.rustup.rs -sSf | sh -s -- -y && source "$HOME/.cargo/env"
       - name: Install x86_64-unknown-linux-musl target
@@ -134,7 +134,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install required packages
-        run: sudo apt install -y curl rpm libssl-dev pkg-config gcc
+        run: sudo apt install -y curl rpm libssl-dev pkg-config build-essential
       - name: Install rustup
         run: curl https://sh.rustup.rs -sSf | sh -s -- -y && source "$HOME/.cargo/env"
       - name: Install cargo-rpm
