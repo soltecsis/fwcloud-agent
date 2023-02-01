@@ -82,6 +82,9 @@ pub enum FwcError {
     #[error("Too many concurrent WebSocket connections")]
     WebSocketTooMany,
 
+    #[error("Command exit status not 0")]
+    CmdExitStatusNotZero,
+
     #[error("{0}")]
     Internal(&'static str),
 
