@@ -24,6 +24,7 @@ use actix_web::{http::header, HttpResponse};
 use log::debug;
 use log::error;
 use std::sync::{Arc, Mutex};
+use std::{thread, time::Duration};
 use subprocess::{Exec, Redirection};
 
 use crate::errors::{FwcError, Result};
@@ -140,6 +141,11 @@ pub fn run_cmd_ws(
         Ok(HttpResponse::Ok().finish())
     } else {
         error!("Error: Command exit status not 0");
+        
+        // A little pause for allow that all the websocket messages arrive to the
+        // user interface before sending the error response to the API.
+        thread::sleep(Duration::from_millis(300));
+
         Err(FwcError::CmdExitStatusNotZero)
     }
 }
