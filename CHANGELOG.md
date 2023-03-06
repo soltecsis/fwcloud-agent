@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - 
 ### Added
+- ISC DHCP plugin.
+- ISC Bind9 plugin.
 - Control script exit status in `run_cmd` and `run_cmd_ws` functions. It the exit status is not 0 then return an Internal server error as response to the API call.
 
 
