@@ -45,6 +45,8 @@ assets = [
     ["plugins/keepalived/keepalived.sh", "opt/fwcloud/agent/plugins/keepalived/keepalived.sh", "700"],
     ["plugins/websafety/websafety.sh", "opt/fwcloud/agent/plugins/websafety/websafety.sh", "700"],
     ["plugins/dnssafety/dnssafety.sh", "opt/fwcloud/agent/plugins/dnssafety/dnssafety.sh", "700"],
+    ["plugins/isc-bind9/isc-bind9.sh", "opt/fwcloud/agent/plugins/isc-bind9/isc-bind9.sh", "700"],
+    ["plugins/isc-dhcp/isc-dhcp.sh", "opt/fwcloud/agent/plugins/isc-dhcp/isc-dhcp.sh", "700"],
     [".deb/fwcloud-agent.service", "lib/systemd/system/", "644"],
     [".deb/fwcloud-agent", "etc/logrotate.d/", "644"],
     [".deb/fwcloud-agent.1", "usr/share/man/man1/", "644"],
@@ -84,6 +86,8 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 "../plugins/keepalived/keepalived.sh" = { path = "/opt/fwcloud/agent/plugins/keepalived/keepalived.sh", mode = "700", username = "root" }
 "../plugins/websafety/websafety.sh" = { path = "/opt/fwcloud/agent/plugins/websafety/websafety.sh", mode = "700", username = "root" }
 "../plugins/dnssafety/dnssafety.sh" = { path = "/opt/fwcloud/agent/plugins/dnssafety/dnssafety.sh", mode = "700", username = "root" }
+"../plugins/isc-bind9/isc-bind9.sh" = { path = "/opt/fwcloud/agent/plugins/isc-bind9/isc-bind9.sh", mode = "700", username = "root" }
+"../plugins/isc-dhcp/isc-dhcp.sh" = { path = "/opt/fwcloud/agent/plugins/isc-dhcp/isc-dhcp.sh", mode = "700", username = "root" }
 "../.deb/fwcloud-agent.1" = { path = "/usr/share/man/man1/fwcloud-agent.1", mode = "644", username = "root" }
 "../.deb/fwcloud-agent.service" = { path = "/lib/systemd/system/fwcloud-agent.service", mode = "644", username = "root" }
 "../.deb/fwcloud-agent" = { path = "/etc/logrotate.d/fwcloud-agent", mode = "644", username = "root" }
