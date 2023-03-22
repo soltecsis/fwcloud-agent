@@ -36,9 +36,9 @@ enable() {
 ################################################################
 disable() {
   if [ $PKGM_CMD = "apt-get" ]; then
-    pkgInstall "isc-dhcp-server"
+    pkgRemove "isc-dhcp-server"
   else
-    pkgInstall "dhcp-server"
+    pkgRemove "dhcp-server"
   fi
 }
 ################################################################
