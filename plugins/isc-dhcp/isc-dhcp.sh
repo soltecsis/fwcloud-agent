@@ -25,13 +25,21 @@ init
 
 ################################################################
 enable() {
-  pkgInstall "isc-dhcp-server"
+  if [ $PKGM_CMD = "apt-get" ]; then
+    pkgInstall "isc-dhcp-server"
+  else
+    pkgInstall "dhcp-server"
+  fi
 }
 ################################################################
 
 ################################################################
 disable() {
-  pkgRemove "isc-dhcp-server"
+  if [ $PKGM_CMD = "apt-get" ]; then
+    pkgInstall "isc-dhcp-server"
+  else
+    pkgInstall "dhcp-server"
+  fi
 }
 ################################################################
 

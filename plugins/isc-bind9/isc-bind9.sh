@@ -25,15 +25,21 @@ init
 
 ################################################################
 enable() {
-  pkgInstall "bind9"
-  pkgInstall "bind9-dnsutils"
+  if [ $PKGM_CMD = "apt-get" ]; then
+    pkgInstall "bind9"
+  else
+    pkgInstall "bind"
+  fi
 }
 ################################################################
 
 ################################################################
 disable() {
-  pkgRemove "bind9-dnsutils"
-  pkgRemove "bind9"
+  if [ $PKGM_CMD = "apt-get" ]; then
+    pkgRemove "bind9"
+  else
+    pkgRemove "bind"
+  fi
 }
 ################################################################
 
