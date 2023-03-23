@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2023-03-23 
+### Added
+- PackageCloud repositories for DEB and RPM any packages.
+- ISC DHCP plugin.
+- ISC Bind9 plugin.
+- Control script exit status in `run_cmd` and `run_cmd_ws` functions. It the exit status is not 0 then return an Internal server error as response to the API call.
+
+
 ## [1.2.3] - 2023-02-01
 ### Fixed
 - Syntax error in packages dependency definition for `deb` packages.

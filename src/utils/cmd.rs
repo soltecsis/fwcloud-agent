@@ -24,6 +24,7 @@ use actix_web::{http::header, HttpResponse};
 use log::debug;
 use log::error;
 use std::sync::{Arc, Mutex};
+use std::{thread, time::Duration};
 use subprocess::{Exec, Redirection};
 
 use crate::errors::{FwcError, Result};
@@ -34,10 +35,15 @@ pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
         .args(args)
         .stdout(Redirection::Pipe)
         .stderr(Redirection::Merge)
-        .capture()?
-        .stdout_str();
+        .capture()?;
 
-    let mut res = HttpResponse::Ok().body(output);
+    if !output.exit_status.success() {
+        // If the process doesn't exits with exit status 0.
+        error!("Error: Command exit status not 0");
+        return Err(FwcError::CmdExitStatusNotZero);
+    }
+
+    let mut res = HttpResponse::Ok().body(output.stdout_str());
     res.headers_mut().insert(
         header::CONTENT_TYPE,
         header::HeaderValue::from_static("text/plain"),
@@ -131,5 +137,15 @@ pub fn run_cmd_ws(
         }
     }
 
-    Ok(HttpResponse::Ok().finish())
+    if popen.wait()?.success() {
+        Ok(HttpResponse::Ok().finish())
+    } else {
+        error!("Error: Command exit status not 0");
+
+        // A little pause for allow that all the websocket messages arrive to the
+        // user interface before sending the error response to the API.
+        thread::sleep(Duration::from_millis(300));
+
+        Err(FwcError::CmdExitStatusNotZero)
+    }
 }
