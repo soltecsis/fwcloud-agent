@@ -78,9 +78,9 @@ impl OpenVPNStCollectorInner {
     /// point of the Unix epoch, which is a reference point for measuring time in many operating systems,
     /// including Unix-like systems. The Unix epoch refers to the point in time when the system's internal
     /// clock was set to zero, typically occurring at midnight on January 1, 1970, Coordinated Universal Time (UTC).
-    /// 
-    /// Since `OpenVPN 2.5` the datetime string format used in the `openvpn-status.log` file has changed. 
-    /// Before to this version the format was like this `Fri Jul 21 14:35:56 2023`, and the new format is 
+    ///
+    /// Since `OpenVPN 2.5` the datetime string format used in the `openvpn-status.log` file has changed.
+    /// Before to this version the format was like this `Fri Jul 21 14:35:56 2023`, and the new format is
     /// like this `2023-07-21 15:02:00`. This functions support both formats.
     fn convert_to_seconds_since_unix_epoch(datetime_str: &str) -> Option<u64> {
         match NaiveDateTime::parse_from_str(datetime_str, FORMAT_STR_NEW) {

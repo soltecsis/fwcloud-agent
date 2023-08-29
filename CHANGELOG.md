@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.3.2] - Unreleased
 ### Fixed
 - Since `OpenVPN 2.5` the datetime string format used in the `openvpn-status.log` file has changed. Before to this version the format was like this `Fri Jul 21 14:35:56 2023`, and the new format is like this `2023-07-21 15:02:00`. We have modified the code for support both formats.
-- Updated several packages to te latest version.
+- Updated Rust packages to te latest version.
+- Replaced the unmaintained `dotenv` crate by the well well-maintained fork called `dotenvy`.
+- All problems reported by the `cargo audit` command.
 
 
 ## [1.3.1] - 2023-03-23 
