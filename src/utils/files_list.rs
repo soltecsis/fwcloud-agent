@@ -508,7 +508,7 @@ mod tests {
         let mut fw = File::create(&fl.path(inx))?;
         let compare = format!("{}\n{}", Uuid::new_v4(), Uuid::new_v4());
         fw.write_all(compare.as_bytes())?;
-        drop(&fw);
+        drop(fw);
 
         let result = fl.dump(inx).unwrap().join("\n");
 

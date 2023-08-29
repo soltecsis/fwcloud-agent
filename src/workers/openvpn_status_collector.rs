@@ -1,5 +1,5 @@
 /*
-    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2023 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -20,9 +20,8 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+use chrono::prelude::*;
 use futures::executor::block_on;
-use httpdate::parse_http_date;
-use std::time::UNIX_EPOCH;
 
 use log::{debug, error, info};
 use std::io::{BufRead, BufReader, Write};
@@ -32,6 +31,9 @@ use std::{fs, fs::File, path::Path, sync::Mutex, thread, time};
 use thread_id;
 
 use crate::config::Config;
+
+const FORMAT_STR_OLD: &str = "%a %b %e %H:%M:%S %Y";
+const FORMAT_STR_NEW: &str = "%Y-%m-%d %H:%M:%S";
 
 struct OpenVPNStFile {
     st_file: String,
@@ -70,6 +72,26 @@ impl OpenVPNStCollectorInner {
         data
     }
 
+    /// This function will convert datetime string that it receives in the amounts os seconds since `UNIX_EPOCH`.
+    ///
+    /// `UNIX_EPOCH` is a constant in the Rust programming language that represents the starting
+    /// point of the Unix epoch, which is a reference point for measuring time in many operating systems,
+    /// including Unix-like systems. The Unix epoch refers to the point in time when the system's internal
+    /// clock was set to zero, typically occurring at midnight on January 1, 1970, Coordinated Universal Time (UTC).
+    /// 
+    /// Since `OpenVPN 2.5` the datetime string format used in the `openvpn-status.log` file has changed. 
+    /// Before to this version the format was like this `Fri Jul 21 14:35:56 2023`, and the new format is 
+    /// like this `2023-07-21 15:02:00`. This functions support both formats.
+    fn convert_to_seconds_since_unix_epoch(datetime_str: &str) -> Option<u64> {
+        match NaiveDateTime::parse_from_str(datetime_str, FORMAT_STR_NEW) {
+            Ok(parsed_datetime) => Some(parsed_datetime.timestamp() as u64),
+            Err(_err) => match NaiveDateTime::parse_from_str(datetime_str, FORMAT_STR_OLD) {
+                Ok(parsed_datetime) => Some(parsed_datetime.timestamp() as u64),
+                Err(_err) => None,
+            },
+        }
+    }
+
     fn collect_status_data(item: &mut OpenVPNStFile, max_size: usize) -> std::io::Result<()> {
         if Path::new(&item.cache_file).is_file()
             && fs::metadata(&item.cache_file)?.len() > max_size as u64
@@ -78,7 +100,7 @@ impl OpenVPNStCollectorInner {
             return Ok(());
         }
 
-        // Copy tye current OpenVPN status data into a temporary file.
+        // Copy the current OpenVPN status data into a temporary file.
         fs::copy(&item.st_file, &item.tmp_file)?;
 
         // Open temporary file for reading and data file for writing.
@@ -102,24 +124,21 @@ impl OpenVPNStCollectorInner {
 
                 // Convert the Connected Since date string to timestamp.
                 let data: Vec<&str> = line.split(',').collect();
-                let connected_since = match parse_http_date(data[4]) {
-                    Ok(date_time) => date_time.duration_since(UNIX_EPOCH).unwrap().as_secs(),
-                    Err(e) => {
-                        error!(
-                            "Bad OpenVPN status file ({}): invalid connected since date ({})",
-                            item.st_file, e
-                        );
-                        break;
+                match OpenVPNStCollectorInner::convert_to_seconds_since_unix_epoch(data[4]) {
+                    Some(connected_since) => {
+                        writeln!(
+                            writer,
+                            "{},{},{}",
+                            current_update,
+                            data[..4].join(","),
+                            connected_since
+                        )?;
                     }
-                };
+                    None => {
+                        error!("Bad datetime string in OpenVPN status file in line {n}");
+                    }
+                }
 
-                writeln!(
-                    writer,
-                    "{},{},{}",
-                    current_update,
-                    data[..4].join(","),
-                    connected_since
-                )?;
                 continue;
             }
 
@@ -139,16 +158,15 @@ impl OpenVPNStCollectorInner {
 
             // Get the update timestamp of the current status file and compare it with the
             // previous one in order to see if we have new data into it.
-            current_update = match parse_http_date(&line[8..]) {
-                Ok(date_time) => date_time.duration_since(UNIX_EPOCH).unwrap().as_secs(),
-                Err(e) => {
-                    error!(
-                        "Bad OpenVPN status file ({}): invalid updated date ({})",
-                        item.st_file, e
-                    );
+            match OpenVPNStCollectorInner::convert_to_seconds_since_unix_epoch(&line[8..]) {
+                Some(ts) => {
+                    current_update = ts;
+                }
+                None => {
+                    error!("Bad datetime string in OpenVPN status file in Updated line");
                     break;
                 }
-            };
+            }
 
             // Skip the first sampling cycle, this way we avoid collect that of an OpenVPN status
             // file that doesn't change in time (for example, because the OpenVPN server is not running).
@@ -539,5 +557,31 @@ mod tests {
 
         remove_collector_files(&collector)?;
         Ok(())
+    }
+
+    #[test]
+    fn should_convert_to_correct_timestamp_with_old_datetime_format() {
+        assert_eq!(
+            OpenVPNStCollectorInner::convert_to_seconds_since_unix_epoch(
+                "Fri Jul 21 14:35:56 2023"
+            ),
+            Some(1689950156)
+        );
+    }
+
+    #[test]
+    fn should_convert_to_correct_timestamp_with_new_datetime_format() {
+        assert_eq!(
+            OpenVPNStCollectorInner::convert_to_seconds_since_unix_epoch("2023-07-21 15:02:00"),
+            Some(1689951720)
+        );
+    }
+
+    #[test]
+    fn should_return_none_with_an_invalid_datetime_string() {
+        assert_eq!(
+            OpenVPNStCollectorInner::convert_to_seconds_since_unix_epoch("Invalid datetime string"),
+            None
+        );
     }
 }
