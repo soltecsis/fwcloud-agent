@@ -102,7 +102,6 @@ tokio = { version = "1.32.0", features = ["full"] }
 futures = "0.3.28"
 openssl = { version = "0.10.57", features = ["vendored"] }
 thiserror = "1.0.47"
-#dotenv = "0.15.0"
 dotenvy = "0.15.7"
 validator = { version = "0.16.1", features = ["derive"] }
 serde = { version = "1.0.188", features = ["derive"] }
