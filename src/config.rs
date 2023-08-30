@@ -101,7 +101,7 @@ pub struct Config {
 
 impl Config {
     pub fn new() -> Result<Self> {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         let mut cfg = Config {
             etc_dir: "./etc",

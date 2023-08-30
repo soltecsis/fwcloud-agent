@@ -1,5 +1,5 @@
 /*
-    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2023 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -130,11 +130,7 @@ pub fn run_cmd_ws(
 
         line_u8 = Vec::new();
         // \r == 13
-        if c == 13 {
-            previous_char_is_cr = true;
-        } else {
-            previous_char_is_cr = false;
-        }
+        previous_char_is_cr = c == 13;
     }
 
     if popen.wait()?.success() {
