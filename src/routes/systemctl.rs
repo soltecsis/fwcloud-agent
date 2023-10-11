@@ -32,7 +32,6 @@ pub struct Systemctl {
         path = "crate::utils::myregex::SYSTEMCTL_COMMANDS",
         message = "Invalid systemctl command"
     ))]
-
     pub command: String,
     #[validate(regex(
         path = "crate::utils::myregex::SYSTEMCTL_SERVICES",
@@ -51,5 +50,8 @@ pub struct Systemctl {
 async fn systemctl(systemctl: web::Json<Systemctl>) -> Result<HttpResponse> {
     systemctl.validate()?; // Validate input.
 
-    run_cmd("systemctl", &[systemctl.command.as_ref(), systemctl.service.as_ref()])
+    run_cmd(
+        "systemctl",
+        &[systemctl.command.as_ref(), systemctl.service.as_ref()],
+    )
 }

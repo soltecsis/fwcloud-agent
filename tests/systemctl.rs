@@ -101,4 +101,3 @@ async fn systemctl_with_invalid_data() {
         assert_eq!(body, error_message);
     }
 }
-
