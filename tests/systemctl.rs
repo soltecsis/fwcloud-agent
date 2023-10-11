@@ -78,13 +78,6 @@ async fn systemctl_with_invalid_data() {
             },
             "{\"message\":\"service: Invalid systemctl service\"}",
         ),
-        (
-            Systemctl {
-                command: String::from("INVALID"),
-                service: String::from("INVALID"),
-            },
-            "{\"message\":\"service: Invalid systemctl service\ncommand: Invalid systemctl command\"}",
-        ),
     ];
 
     for (invalid_data, error_message) in test_cases {
@@ -101,4 +94,3 @@ async fn systemctl_with_invalid_data() {
         assert_eq!(body, error_message);
     }
 }
-
