@@ -4,10 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 
+## Added
+- API call for services management by means of `systemctl`.
+- Allow only a limited set of services to be managed by the `systemctl` API call.
+- Software tests for check the new `systemctl` API call.
+
+
 ## [1.4.0] - 2023-08-30
 ### Fixed
 - Since `OpenVPN 2.5` the datetime string format used in the `openvpn-status.log` file has changed. Before to this version the format was like this `Fri Jul 21 14:35:56 2023`, and the new format is like this `2023-07-21 15:02:00`. We have modified the code for support both formats.
-- Updated Rust packages to te latest version.
+- Updated Rust packages to the latest version.
 - Replaced the unmaintained `dotenv` crate by the well well-maintained fork called `dotenvy`.
 - All problems reported by the `cargo audit` command.
 - Reenable `cargo tarpaulin` in GitHub Actions.
