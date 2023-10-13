@@ -6,9 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - 
 ## Added
+- API call for gather information about the host in which the FWCloud agent is running. With this API call we can obtain information like FWCloud-Agent version, host name, OS, etc. 
 - API call for services management by means of `systemctl`.
 - Allow only a limited set of services to be managed by the `systemctl` API call.
 - Software tests for check the new `systemctl` API call.
+
+## Fixed
+- Updated Rust packages to the latest version.
 
 
 ## [1.4.0] - 2023-08-30
