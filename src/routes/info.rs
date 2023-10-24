@@ -1,5 +1,5 @@
 /*
-    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2023 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -21,12 +21,17 @@
 */
 use actix_web::{get, http::header::ContentType, HttpResponse};
 use serde::Serialize;
+use sysinfo::{System, SystemExt};
 
 use crate::errors::Result;
 
 #[derive(Serialize)]
 struct Info {
     fwc_agent_version: &'static str,
+    host_name: String,
+    system_name: String,
+    os_version: String,
+    kernel_version: String,
 }
 
 /*
@@ -34,8 +39,15 @@ struct Info {
 */
 #[get("/info")]
 async fn info() -> Result<HttpResponse> {
+    let mut sys = System::new();
+    sys.refresh_system();
+
     let info = Info {
         fwc_agent_version: env!("CARGO_PKG_VERSION"),
+        host_name: sys.host_name().unwrap_or("".to_owned()),
+        system_name: sys.name().unwrap_or("".to_owned()),
+        os_version: sys.os_version().unwrap_or("".to_owned()),
+        kernel_version: sys.kernel_version().unwrap_or("".to_owned()),
     };
 
     Ok(HttpResponse::Ok()
