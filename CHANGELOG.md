@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - 
 ## Added
+- New plugin script for the `HAProxy`` service.
 - API call for gather information about the host in which the FWCloud agent is running. With this API call we can obtain information like FWCloud-Agent version, host name, OS, etc. 
 - API call for services management by means of `systemctl`.
 - Allow only a limited set of services to be managed by the `systemctl` API call.
@@ -13,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Fixed
 - Updated Rust packages to the latest version.
+- All problems reported by the `cargo audit` command.
 
 
 ## [1.4.0] - 2023-08-30
