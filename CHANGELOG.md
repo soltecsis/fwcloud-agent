@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - 
 ## Added
+- API call for install configuration files for the DHCP, Keepalived and HAProxy services.
 - New plugin script for the `HAProxy`` service.
 - API call for gather information about the host in which the FWCloud agent is running. With this API call we can obtain information like FWCloud-Agent version, host name, OS, etc. 
 - API call for services management by means of `systemctl`.
@@ -13,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Software tests for check the new `systemctl` API call.
 
 ## Fixed
+- Changes needed for upgrade to the latest `sysinfo` crate.
 - Updated Rust packages to the latest version.
 - All problems reported by the `cargo audit` command.
 

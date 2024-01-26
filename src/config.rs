@@ -1,5 +1,5 @@
 /*
-    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2024 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -35,6 +35,7 @@ use crate::utils::ws::WsData;
 pub struct MyMutex {
     pub openvpn: Arc<tokio::sync::Mutex<u8>>,
     pub fwcloud_script: Arc<tokio::sync::Mutex<u8>>,
+    pub daemon: Arc<tokio::sync::Mutex<u8>>,
     pub plugins: Arc<Mutex<u8>>,
 }
 
@@ -164,6 +165,7 @@ impl Config {
             mutex: MyMutex {
                 openvpn: Arc::new(tokio::sync::Mutex::new(0)),
                 fwcloud_script: Arc::new(tokio::sync::Mutex::new(0)),
+                daemon: Arc::new(tokio::sync::Mutex::new(0)),
                 plugins: Arc::new(Mutex::new(0)),
             },
 

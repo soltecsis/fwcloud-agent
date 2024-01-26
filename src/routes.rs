@@ -28,6 +28,7 @@ mod openvpn;
 mod ping;
 pub mod plugin;
 pub mod systemctl;
+mod daemon;
 mod ws;
 
 use actix_web::web;
@@ -54,6 +55,8 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(plugin::plugin)
             // Systemctl.
             .service(systemctl::systemctl)
+            // Daemon.
+            .service(daemon::config_upload)
             // WebSocket.
             .service(ws::websocket)
             .service(ws::websocket_test),
