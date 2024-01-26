@@ -19,14 +19,14 @@
     You should have received a copy of the GNU General Public License
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
-use actix_web::{post, web, HttpResponse};
 use actix_multipart::Multipart;
+use actix_web::{post, web, HttpResponse};
 use log::debug;
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::utils::http_files::HttpFiles;
 use crate::errors::Result;
+use crate::utils::http_files::HttpFiles;
 
 #[post("/daemon/config/upload")]
 async fn config_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
