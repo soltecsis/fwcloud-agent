@@ -59,6 +59,7 @@ rm -rf %{buildroot}
 /opt/fwcloud/agent/plugins/dnssafety/dnssafety.sh
 /opt/fwcloud/agent/plugins/isc-bind9/isc-bind9.sh
 /opt/fwcloud/agent/plugins/isc-dhcp/isc-dhcp.sh
+/opt/fwcloud/agent/plugins/haproxy/haproxy.sh
 /usr/share/man/man1/fwcloud-agent.1
 /lib/systemd/system/fwcloud-agent.service
 /etc/logrotate.d/fwcloud-agent

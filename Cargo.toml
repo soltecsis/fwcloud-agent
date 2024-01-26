@@ -47,6 +47,7 @@ assets = [
     ["plugins/dnssafety/dnssafety.sh", "opt/fwcloud/agent/plugins/dnssafety/dnssafety.sh", "700"],
     ["plugins/isc-bind9/isc-bind9.sh", "opt/fwcloud/agent/plugins/isc-bind9/isc-bind9.sh", "700"],
     ["plugins/isc-dhcp/isc-dhcp.sh", "opt/fwcloud/agent/plugins/isc-dhcp/isc-dhcp.sh", "700"],
+    ["plugins/haproxy/haproxy.sh", "opt/fwcloud/agent/plugins/haproxy/haproxy.sh", "700"],
     [".deb/fwcloud-agent.service", "lib/systemd/system/", "644"],
     [".deb/fwcloud-agent", "etc/logrotate.d/", "644"],
     [".deb/fwcloud-agent.1", "usr/share/man/man1/", "644"],
@@ -88,37 +89,39 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 "../plugins/dnssafety/dnssafety.sh" = { path = "/opt/fwcloud/agent/plugins/dnssafety/dnssafety.sh", mode = "700", username = "root" }
 "../plugins/isc-bind9/isc-bind9.sh" = { path = "/opt/fwcloud/agent/plugins/isc-bind9/isc-bind9.sh", mode = "700", username = "root" }
 "../plugins/isc-dhcp/isc-dhcp.sh" = { path = "/opt/fwcloud/agent/plugins/isc-dhcp/isc-dhcp.sh", mode = "700", username = "root" }
+"../plugins/haproxy/haproxy.sh" = { path = "/opt/fwcloud/agent/plugins/haproxy/haproxy.sh", mode = "700", username = "root" }
 "../.deb/fwcloud-agent.1" = { path = "/usr/share/man/man1/fwcloud-agent.1", mode = "644", username = "root" }
 "../.deb/fwcloud-agent.service" = { path = "/lib/systemd/system/fwcloud-agent.service", mode = "644", username = "root" }
 "../.deb/fwcloud-agent" = { path = "/etc/logrotate.d/fwcloud-agent", mode = "644", username = "root" }
 
 [dependencies]
-actix = "0.13.0"
+actix = "0.13.1"
 actix-web-actors = "4.2.0"
 actix-web = { version = "4.4.0", features = ["openssl"] }
 actix-service = "2.0.2"
 actix-multipart = "0.6.1"
-tokio = { version = "1.32.0", features = ["full"] }
+tokio = { version = "1.33.0", features = ["full"] }
 futures = "0.3.28"
 openssl = { version = "0.10.57", features = ["vendored"] }
-thiserror = "1.0.47"
+thiserror = "1.0.49"
 dotenvy = "0.15.7"
 validator = { version = "0.16.1", features = ["derive"] }
-serde = { version = "1.0.188", features = ["derive"] }
-serde_json = "1.0.105"
+serde = { version = "1.0.189", features = ["derive"] }
+serde_json = "1.0.107"
 lazy_static = "1.4.0"
 rand = "0.8.5"
-regex = "1.9.4"
+regex = "1.10.0"
 log = "0.4.20"
 env_logger = "0.10.0"
 sanitize-filename = "0.5.0"
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
 thread-id = "4.2.0"
 subprocess = "0.2.9"
-sha2 = "0.10.7"
+sha2 = "0.10.8"
 hex = "0.4.3"
-chrono = { version = "0.4.27", default-features = false }
+chrono = { version = "0.4.31", default-features = false }
+sysinfo = "0.29.10"
 
 [dev-dependencies]
 serial_test = "2.0.0"
-reqwest = "0.11.20"
+reqwest = "0.11.22"

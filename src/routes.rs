@@ -27,6 +27,7 @@ mod iptables_save;
 mod openvpn;
 mod ping;
 pub mod plugin;
+pub mod systemctl;
 mod ws;
 
 use actix_web::web;
@@ -51,6 +52,8 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(iptables_save::data)
             // Plugins.
             .service(plugin::plugin)
+            // Systemctl.
+            .service(systemctl::systemctl)
             // WebSocket.
             .service(ws::websocket)
             .service(ws::websocket_test),

@@ -1,5 +1,5 @@
 /*
-    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2023 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -35,11 +35,6 @@ async fn get_info() {
 
     assert_eq!(res.status().as_u16(), 200);
     let body = res.text().await.unwrap();
-    assert_eq!(
-        body,
-        format!(
-            "{{\"fwc_agent_version\":\"{}\"}}",
-            env!("CARGO_PKG_VERSION")
-        )
-    );
+    let pattern = format!("{{\"fwc_agent_version\":\"{}\"", env!("CARGO_PKG_VERSION"));
+    assert_eq!(body.find(&pattern), Some(0));
 }
