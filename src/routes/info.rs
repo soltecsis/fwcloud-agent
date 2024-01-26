@@ -21,7 +21,7 @@
 */
 use actix_web::{get, http::header::ContentType, HttpResponse};
 use serde::Serialize;
-use sysinfo::{System, SystemExt};
+use sysinfo::System;
 
 use crate::errors::Result;
 
@@ -39,15 +39,12 @@ struct Info {
 */
 #[get("/info")]
 async fn info() -> Result<HttpResponse> {
-    let mut sys = System::new();
-    sys.refresh_system();
-
     let info = Info {
         fwc_agent_version: env!("CARGO_PKG_VERSION"),
-        host_name: sys.host_name().unwrap_or("".to_owned()),
-        system_name: sys.name().unwrap_or("".to_owned()),
-        os_version: sys.os_version().unwrap_or("".to_owned()),
-        kernel_version: sys.kernel_version().unwrap_or("".to_owned()),
+        host_name: System::host_name().unwrap_or("".to_owned()),
+        system_name: System::name().unwrap_or("".to_owned()),
+        os_version: System::os_version().unwrap_or("".to_owned()),
+        kernel_version: System::kernel_version().unwrap_or("".to_owned()),
     };
 
     Ok(HttpResponse::Ok()
