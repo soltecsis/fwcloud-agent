@@ -20,6 +20,7 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+mod daemon;
 mod fwcloud_script;
 mod info;
 mod interfaces;
@@ -28,7 +29,6 @@ mod openvpn;
 mod ping;
 pub mod plugin;
 pub mod systemctl;
-mod daemon;
 mod ws;
 
 use actix_web::web;
