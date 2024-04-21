@@ -107,7 +107,6 @@ impl OpenVPNStCollectorInner {
         let f = File::open(&item.tmp_file)?;
         let reader = BufReader::new(&f);
         let mut writer = fs::OpenOptions::new()
-            .write(true)
             .append(true)
             .create(true)
             .open(&item.cache_file)?;
