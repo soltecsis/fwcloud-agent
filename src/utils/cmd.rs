@@ -37,7 +37,7 @@ pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
         .stderr(Redirection::Merge)
         .capture()?;
 
-    if !output.exit_status.success() {
+    if !output.exit_status.success() && cmd != "systemctl" {
         // If the process doesn't exits with exit status 0.
         error!("Error: Command exit status not 0");
         return Err(FwcError::CmdExitStatusNotZero);
