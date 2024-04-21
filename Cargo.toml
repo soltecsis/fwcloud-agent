@@ -1,6 +1,6 @@
 [package]
 name = "fwcloud-agent"
-version = "2.0.0"
+version = "1.4.0"
 license = "GNU AFFERO GENERAL PUBLIC LICENSE"
 description = "FWCloud Agent for firewalls management"
 readme = "README.md"
@@ -95,33 +95,33 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 "../.deb/fwcloud-agent" = { path = "/etc/logrotate.d/fwcloud-agent", mode = "644", username = "root" }
 
 [dependencies]
-actix = "0.13.3"
-actix-web-actors = "4.3.0"
-actix-web = { version = "4.5.1", features = ["openssl"] }
+actix = "0.13.1"
+actix-web-actors = "4.2.0"
+actix-web = { version = "4.4.1", features = ["openssl"] }
 actix-service = "2.0.2"
 actix-multipart = "0.6.1"
-tokio = { version = "1.37.0", features = ["full"] }
+tokio = { version = "1.35.1", features = ["full"] }
 futures = "0.3.30"
-openssl = { version = "0.10.64", features = ["vendored"] }
-thiserror = "1.0.59"
+openssl = { version = "0.10.63", features = ["vendored"] }
+thiserror = "1.0.56"
 dotenvy = "0.15.7"
-validator = { version = "0.18.1", features = ["derive"] }
-serde = { version = "1.0.198", features = ["derive"] }
-serde_json = "1.0.116"
+validator = { version = "0.16.1", features = ["derive"] }
+serde = { version = "1.0.195", features = ["derive"] }
+serde_json = "1.0.111"
 lazy_static = "1.4.0"
 rand = "0.8.5"
-regex = "1.10.4"
-log = "0.4.21"
-env_logger = "0.11.3"
+regex = "1.10.3"
+log = "0.4.20"
+env_logger = "0.11.0"
 sanitize-filename = "0.5.0"
-uuid = { version = "1.8.0", features = ["serde", "v4"] }
+uuid = { version = "1.7.0", features = ["serde", "v4"] }
 thread-id = "4.2.1"
 subprocess = "0.2.9"
 sha2 = "0.10.8"
 hex = "0.4.3"
-chrono = { version = "0.4.38", default-features = false }
-sysinfo = "0.30.11"
+chrono = { version = "0.4.33", default-features = false }
+sysinfo = "0.30.5"
 
 [dev-dependencies]
 serial_test = "3.0.0"
-reqwest = "0.12.4"
+reqwest = "0.11.23"
