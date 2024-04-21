@@ -84,9 +84,9 @@ impl OpenVPNStCollectorInner {
     /// like this `2023-07-21 15:02:00`. This functions support both formats.
     fn convert_to_seconds_since_unix_epoch(datetime_str: &str) -> Option<u64> {
         match NaiveDateTime::parse_from_str(datetime_str, FORMAT_STR_NEW) {
-            Ok(parsed_datetime) => Some(parsed_datetime.timestamp() as u64),
+            Ok(parsed_datetime) => Some(parsed_datetime.and_utc().timestamp() as u64),
             Err(_err) => match NaiveDateTime::parse_from_str(datetime_str, FORMAT_STR_OLD) {
-                Ok(parsed_datetime) => Some(parsed_datetime.timestamp() as u64),
+                Ok(parsed_datetime) => Some(parsed_datetime.and_utc().timestamp() as u64),
                 Err(_err) => None,
             },
         }
@@ -107,7 +107,6 @@ impl OpenVPNStCollectorInner {
         let f = File::open(&item.tmp_file)?;
         let reader = BufReader::new(&f);
         let mut writer = fs::OpenOptions::new()
-            .write(true)
             .append(true)
             .create(true)
             .open(&item.cache_file)?;
