@@ -68,7 +68,7 @@ pub struct Config {
 
     pub enable_api_key: bool,
 
-    #[validate(regex = "crate::utils::myregex::ALPHA_NUM_2")]
+    #[validate(regex(path = "crate::utils::myregex::ALPHA_NUM_2"))]
     #[validate(length(min = 16, max = 128))]
     pub api_key: String,
 

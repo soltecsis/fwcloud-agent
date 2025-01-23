@@ -20,7 +20,9 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+use std::borrow::Cow;
 use regex::Regex;
+use validator::AsRegex;
 
 lazy_static! {
   pub static ref IPV4: Regex = Regex::new("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})){3}$").unwrap();
@@ -42,4 +44,79 @@ lazy_static! {
 
   pub static ref SYSTEMCTL_COMMANDS: Regex = Regex::new("^(status|start|stop|restart|reload|enable|disable)$").unwrap();
   pub static ref SYSTEMCTL_SERVICES: Regex = Regex::new("^(openvpn|openvpn@[a-zA-Z0-9\\-_]+|isc-dhcp-server|keepalived|haproxy)$").unwrap();
+}
+
+impl AsRegex for IPV4 {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
+}
+
+impl AsRegex for IPV4_LIST {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
+}
+
+impl AsRegex for IPV6 {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
+}
+impl AsRegex for IPV6_LIST {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
+}
+impl AsRegex for ALPHA_NUM {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
+}
+impl AsRegex for ALPHA_NUM_2 {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
+}
+
+impl AsRegex for FILE_PERMISSIONS {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
+}
+
+impl AsRegex for ABSOLUTE_PATH {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
+}
+
+impl AsRegex for ABSOLUTE_PATH_LIST {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
+}
+
+impl AsRegex for PLUGINS_NAMES {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
+}
+
+impl AsRegex for PLUGINS_ACTIONS {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
+}
+
+impl AsRegex for SYSTEMCTL_COMMANDS {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
+}
+
+impl AsRegex for SYSTEMCTL_SERVICES {
+  fn as_regex(&self) -> Cow<'_, regex::Regex> {
+      std::borrow::Cow::Borrowed(&self)
+  }
 }
