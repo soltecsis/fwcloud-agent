@@ -20,8 +20,8 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::borrow::Cow;
 use regex::Regex;
+use std::borrow::Cow;
 use validator::AsRegex;
 
 lazy_static! {
@@ -47,76 +47,76 @@ lazy_static! {
 }
 
 impl AsRegex for IPV4 {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
 
 impl AsRegex for IPV4_LIST {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
 
 impl AsRegex for IPV6 {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
 impl AsRegex for IPV6_LIST {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
 impl AsRegex for ALPHA_NUM {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
 impl AsRegex for ALPHA_NUM_2 {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
 
 impl AsRegex for FILE_PERMISSIONS {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
 
 impl AsRegex for ABSOLUTE_PATH {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
 
 impl AsRegex for ABSOLUTE_PATH_LIST {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
 
 impl AsRegex for PLUGINS_NAMES {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
 
 impl AsRegex for PLUGINS_ACTIONS {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
 
 impl AsRegex for SYSTEMCTL_COMMANDS {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
 
 impl AsRegex for SYSTEMCTL_SERVICES {
-  fn as_regex(&self) -> Cow<'_, regex::Regex> {
-      std::borrow::Cow::Borrowed(&self)
-  }
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
