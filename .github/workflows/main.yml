@@ -92,9 +92,7 @@ jobs:
         run: cargo install cargo-tarpaulin
 
       - name: Run cargo-tarpaulin
-        uses: actions-rs/tarpaulin@v0.1.3
-        with:
-          args: '--ignore-tests --fail-under 20'
+        run: cargo tarpaulin --out Xml --ignore-tests --fail-under 20
 
   build:
     needs: [security_audit, test, fmt, clippy, coverage]
