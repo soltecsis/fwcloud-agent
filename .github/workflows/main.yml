@@ -11,7 +11,7 @@ jobs:
     outputs:
       version: ${{ steps.rustversion.outputs.rustversion }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - run: cargo check
       - run: cargo pkgid
       - run: 'echo "$(cargo pkgid | cut -d# -f2)"'
@@ -23,7 +23,7 @@ jobs:
     name: Security audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v4
       - uses: actions-rs/audit-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -33,7 +33,7 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -48,7 +48,7 @@ jobs:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -64,7 +64,7 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -81,8 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
-
+        uses: actions/checkout@v4
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -90,7 +89,6 @@ jobs:
           override: true
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin
-
       - name: Run cargo-tarpaulin
         run: cargo tarpaulin --out Xml --ignore-tests --fail-under 20
 
@@ -99,7 +97,7 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Build
         run: cargo build
 
@@ -108,7 +106,7 @@ jobs:
     runs-on: ubuntu-latest
     name: DEB package
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Install required packages
         run: sudo apt install -y curl libssl-dev pkg-config musl-tools build-essential
       - name: Install rustup
@@ -120,7 +118,7 @@ jobs:
       - name: Build DEB package
         run: cargo deb --verbose --target=x86_64-unknown-linux-musl
       - name: Upload package
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: deb-package
           path: ./target/x86_64-unknown-linux-musl/debian/*
@@ -130,7 +128,7 @@ jobs:
     runs-on: ubuntu-latest
     name: RPM package
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Install required packages
         run: sudo apt install -y curl rpm libssl-dev pkg-config musl-tools build-essential
       - name: Install rustup
@@ -143,7 +141,7 @@ jobs:
         # run: cargo rpm build -v
         run: cargo rpm build -v --target=x86_64-unknown-linux-musl
       - name: Upload RPM Artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: rpm-package
           # path: ./target/release/rpmbuild/RPMS/x86_64/*
@@ -155,9 +153,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
     name: DEB to FWCloud
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Download packages
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
       - name: List packages
         run: ls -lha ./deb-package/
       - name: Upload DEB package
@@ -178,9 +176,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
     name: RPM to FWCloud
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Download packages
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
       - name: List packages
         run: ls -lha ./rpm-package/
       - name: Upload RPM package
@@ -203,9 +201,9 @@ jobs:
         dist: [any/any, ubuntu/bionic, ubuntu/cosmic, ubuntu/disco, ubuntu/eoan, ubuntu/focal, ubuntu/groovy, ubuntu/hirsute, ubuntu/impish, ubuntu/jammy, debian/jessie, debian/stretch, debian/buster, debian/bullseye, debian/bookworm, debian/trixie, linuxmint/ulyana, linuxmint/ulyssa, linuxmint/uma, linuxmint/una]
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download packages
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
       - name: List packages
         run: ls -lha ./deb-package/
       - name: ${{ matrix.dist }}
@@ -227,9 +225,9 @@ jobs:
         dist: [rpm_any/rpm_any, el/7, el/8, el/9, fedora/30, fedora/31, fedora/32, fedora/33, fedora/34, fedora/35, fedora/36]
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download packages
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
       - name: List packages
         run: ls -lha ./rpm-package/
       - name: ${{ matrix.dist }}
