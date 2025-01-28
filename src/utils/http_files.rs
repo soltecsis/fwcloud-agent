@@ -165,9 +165,15 @@ impl HttpFiles {
         while let Ok(Some(mut field)) = payload.try_next().await {
             let content_type = field.content_disposition();
 
-            let filename = sanitize_filename::sanitize(content_type.expect("filename").get_filename().unwrap_or(""));
+            let filename = sanitize_filename::sanitize(
+                content_type.expect("filename").get_filename().unwrap_or(""),
+            );
             if filename.is_empty() {
-                let name = content_type.expect("filename").get_name().unwrap_or("").to_string();
+                let name = content_type
+                    .expect("filename")
+                    .get_name()
+                    .unwrap_or("")
+                    .to_string();
                 self.extract_field_data(field, name).await?;
                 continue;
             }
