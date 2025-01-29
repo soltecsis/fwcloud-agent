@@ -87,10 +87,7 @@ pub fn run_cmd_ws(
 
         // Remember that with .stderr(Redirection::Merge) we have redirected
         // the stderr output to stdout. Then we will have all the output in stdout.
-        let data = match stdout {
-            Some(data) => data,
-            None => Vec::new(),
-        };
+        let data = stdout.unwrap_or_default();
 
         // Finish when no more input data.
         if data.is_empty() {

@@ -45,6 +45,8 @@ rm -rf %{buildroot}
 /opt/fwcloud/agent/plugins/lib.sh
 /opt/fwcloud/agent/plugins/geoip/geoip.sh
 /opt/fwcloud/agent/plugins/openvpn/openvpn.sh
+/opt/fwcloud/agent/plugins/wireguard/wireguard.sh
+/opt/fwcloud/agent/plugins/ipsec/ipsec.sh
 /opt/fwcloud/agent/plugins/crowdsec/crowdsec.sh
 /opt/fwcloud/agent/plugins/ntopng/ntopng.sh
 /opt/fwcloud/agent/plugins/suricata/suricata.sh

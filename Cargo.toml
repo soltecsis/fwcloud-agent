@@ -1,6 +1,6 @@
 [package]
 name = "fwcloud-agent"
-version = "2.0.1"
+version = "2.1.0"
 license = "GNU AFFERO GENERAL PUBLIC LICENSE"
 description = "FWCloud Agent for firewalls management"
 readme = "README.md"
@@ -33,6 +33,8 @@ assets = [
     ["plugins/lib.sh", "opt/fwcloud/agent/plugins/lib.sh", "700"],
     ["plugins/geoip/geoip.sh", "opt/fwcloud/agent/plugins/geoip/geoip.sh", "700"],
     ["plugins/openvpn/openvpn.sh", "opt/fwcloud/agent/plugins/openvpn/openvpn.sh", "700"],
+    ["plugins/wireguard/wireguard.sh", "opt/fwcloud/agent/plugins/wireguard/wireguard.sh", "700"],
+    ["plugins/ipsec/ipsec.sh", "opt/fwcloud/agent/plugins/ipsec/ipsec.sh", "700"],
     ["plugins/crowdsec/crowdsec.sh", "opt/fwcloud/agent/plugins/crowdsec/crowdsec.sh", "700"],
     ["plugins/ntopng/ntopng.sh", "opt/fwcloud/agent/plugins/ntopng/ntopng.sh", "700"],
     ["plugins/suricata/suricata.sh", "opt/fwcloud/agent/plugins/suricata/suricata.sh", "700"],
@@ -75,6 +77,8 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 "../plugins/lib.sh" = { path = "/opt/fwcloud/agent/plugins/lib.sh", mode = "700", username = "root" }
 "../plugins/geoip/geoip.sh" = { path = "/opt/fwcloud/agent/plugins/geoip/geoip.sh", mode = "700", username = "root" }
 "../plugins/openvpn/openvpn.sh" = { path = "/opt/fwcloud/agent/plugins/openvpn/openvpn.sh", mode = "700", username = "root" }
+"../plugins/wireguard/wireguard.sh" = { path = "/opt/fwcloud/agent/plugins/wireguard/wireguard.sh", mode = "700", username = "root" }
+"../plugins/ipsec/ipsec.sh" = { path = "/opt/fwcloud/agent/plugins/ipsec/ipsec.sh", mode = "700", username = "root" }
 "../plugins/crowdsec/crowdsec.sh" = { path = "/opt/fwcloud/agent/plugins/crowdsec/crowdsec.sh", mode = "700", username = "root" }
 "../plugins/ntopng/ntopng.sh" = { path = "/opt/fwcloud/agent/plugins/ntopng/ntopng.sh", mode = "700", username = "root" }
 "../plugins/suricata/suricata.sh" = { path = "/opt/fwcloud/agent/plugins/suricata/suricata.sh", mode = "700", username = "root" }
@@ -95,33 +99,33 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 "../.deb/fwcloud-agent" = { path = "/etc/logrotate.d/fwcloud-agent", mode = "644", username = "root" }
 
 [dependencies]
-actix = "0.13.3"
-actix-web-actors = "4.3.0"
-actix-web = { version = "4.5.1", features = ["openssl"] }
+actix = "0.13.5"
+actix-web-actors = "4.3.1"
+actix-web = { version = "4.9.0", features = ["openssl"] }
 actix-service = "2.0.2"
-actix-multipart = "0.6.1"
-tokio = { version = "1.37.0", features = ["full"] }
-futures = "0.3.30"
-openssl = { version = "0.10.64", features = ["vendored"] }
-thiserror = "1.0.59"
+actix-multipart = "0.7.2"
+tokio = { version = "1.43.0", features = ["full"] }
+futures = "0.3.31"
+openssl = { version = "0.10.69", features = ["vendored"] }
+thiserror = "2.0.11"
 dotenvy = "0.15.7"
-validator = { version = "0.16.1", features = ["derive"] }
-serde = { version = "1.0.198", features = ["derive"] }
-serde_json = "1.0.116"
-lazy_static = "1.4.0"
+validator = { version = "0.20.0", features = ["derive"] }
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.137"
+lazy_static = "1.5.0"
 rand = "0.8.5"
-regex = "1.10.4"
-log = "0.4.21"
-env_logger = "0.11.3"
-sanitize-filename = "0.5.0"
-uuid = { version = "1.8.0", features = ["serde", "v4"] }
-thread-id = "4.2.1"
+regex = "1.11.1"
+log = "0.4.25"
+env_logger = "0.11.6"
+sanitize-filename = "0.6.0"
+uuid = { version = "1.12.1", features = ["serde", "v4"] }
+thread-id = "5.0.0"
 subprocess = "0.2.9"
 sha2 = "0.10.8"
 hex = "0.4.3"
-chrono = { version = "0.4.38", default-features = false }
-sysinfo = "0.30.11"
+chrono = { version = "0.4.39", default-features = false }
+sysinfo = "0.33.1"
 
 [dev-dependencies]
-serial_test = "3.0.0"
-reqwest = "0.12.4"
+serial_test = "3.2.0"
+reqwest = "0.12.12"

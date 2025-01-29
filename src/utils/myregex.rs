@@ -1,5 +1,5 @@
 /*
-    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2025 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -21,6 +21,8 @@
 */
 
 use regex::Regex;
+use std::borrow::Cow;
+use validator::AsRegex;
 
 lazy_static! {
   pub static ref IPV4: Regex = Regex::new("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})){3}$").unwrap();
@@ -37,9 +39,84 @@ lazy_static! {
   pub static ref ABSOLUTE_PATH: Regex = Regex::new("^/{1}(((/{1}\\.{1})?[a-zA-Z0-9 -_]+/?)+(\\.{1}[a-zA-Z0-9]{2,4})?)$").unwrap();
   pub static ref ABSOLUTE_PATH_LIST: Regex = Regex::new("^((/{1}(((/{1}\\.{1})?[a-zA-Z0-9 -_]+/?)+(\\.{1}[a-zA-Z0-9]{2,4})?))(,?))*$").unwrap();
 
-  pub static ref PLUGINS_NAMES: Regex = Regex::new("^(test|openvpn|geoip|crowdsec|ntopng|suricata|keepalived|zeek|elasticsearch|filebeat|websafety|dnssafety|kibana|logstash|isc-bind9|isc-dhcp|haproxy)$").unwrap();
+  pub static ref PLUGINS_NAMES: Regex = Regex::new("^(test|openvpn|wireguard|ipsec|geoip|crowdsec|ntopng|suricata|keepalived|zeek|elasticsearch|filebeat|websafety|dnssafety|kibana|logstash|isc-bind9|isc-dhcp|haproxy)$").unwrap();
   pub static ref PLUGINS_ACTIONS: Regex = Regex::new("^(enable|disable)$").unwrap();
 
   pub static ref SYSTEMCTL_COMMANDS: Regex = Regex::new("^(status|start|stop|restart|reload|enable|disable)$").unwrap();
-  pub static ref SYSTEMCTL_SERVICES: Regex = Regex::new("^(openvpn|openvpn@[a-zA-Z0-9\\-_]+|isc-dhcp-server|keepalived|haproxy)$").unwrap();
+  pub static ref SYSTEMCTL_SERVICES: Regex = Regex::new("^(openvpn|openvpn@[a-zA-Z0-9\\-_]+|wireguard|wireguard@[a-zA-Z0-9\\-_]+|ipsec|ipsec@[a-zA-Z0-9\\-_]+|isc-dhcp-server|keepalived|haproxy)$").unwrap();
+}
+
+impl AsRegex for IPV4 {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+
+impl AsRegex for IPV4_LIST {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+
+impl AsRegex for IPV6 {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+impl AsRegex for IPV6_LIST {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+impl AsRegex for ALPHA_NUM {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+impl AsRegex for ALPHA_NUM_2 {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+
+impl AsRegex for FILE_PERMISSIONS {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+
+impl AsRegex for ABSOLUTE_PATH {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+
+impl AsRegex for ABSOLUTE_PATH_LIST {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+
+impl AsRegex for PLUGINS_NAMES {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+
+impl AsRegex for PLUGINS_ACTIONS {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+
+impl AsRegex for SYSTEMCTL_COMMANDS {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+
+impl AsRegex for SYSTEMCTL_SERVICES {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
 }
