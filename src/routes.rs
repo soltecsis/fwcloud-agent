@@ -1,5 +1,5 @@
 /*
-    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2025 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -24,11 +24,13 @@ mod daemon;
 mod fwcloud_script;
 mod info;
 mod interfaces;
+mod ipsec;
 mod iptables_save;
 mod openvpn;
 mod ping;
 pub mod plugin;
 pub mod systemctl;
+mod wireguard;
 mod ws;
 
 use actix_web::web;

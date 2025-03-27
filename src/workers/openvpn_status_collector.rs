@@ -1,5 +1,5 @@
 /*
-    Copyright 2023 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2025 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     #[serial]
     fn customized_openvpn_status_files_config() {
-        let n = rand::thread_rng().gen_range(0..5);
+        let n = rand::rng().random_range(0..5);
         let list = status_files_list_factory(n);
         let collector = collector_factory(vec![("OPENVPN_STATUS_FILES", list.join(","))], false);
         assert_eq!(collector.openvpn_status_files.len(), n);
