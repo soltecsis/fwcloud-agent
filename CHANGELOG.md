@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 
+## Added
+- WireGuard API calls for file management.
+- IPSec API calls for file management.
+
+## Fixed
+- Updated Rust packages to the latest version.
+- Changes needed for upgrade to the latest `rand` crate.
+
+
 ## [2.1.0] - 2025-01-29
 ## Added
 - WireGuard plugin.

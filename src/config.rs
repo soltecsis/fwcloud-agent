@@ -1,5 +1,5 @@
 /*
-    Copyright 2024 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2025 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -19,7 +19,8 @@
     You should have received a copy of the GNU General Public License
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
-use rand::{distributions::Alphanumeric, Rng};
+use rand::Rng;
+use rand_distr::Alphanumeric;
 use std::{
     collections::HashMap,
     env, fs,
@@ -34,6 +35,8 @@ use crate::utils::ws::WsData;
 
 pub struct MyMutex {
     pub openvpn: Arc<tokio::sync::Mutex<u8>>,
+    pub wireguard: Arc<tokio::sync::Mutex<u8>>,
+    pub ipsec: Arc<tokio::sync::Mutex<u8>>,
     pub fwcloud_script: Arc<tokio::sync::Mutex<u8>>,
     pub daemon: Arc<tokio::sync::Mutex<u8>>,
     pub plugins: Arc<Mutex<u8>>,
@@ -134,7 +137,7 @@ impl Config {
                 .parse::<bool>()
                 .unwrap_or(true),
             api_key: env::var("API_KEY").unwrap_or_else(|_| {
-                rand::thread_rng()
+                rand::rng()
                     .sample_iter(&Alphanumeric)
                     .take(64)
                     .map(char::from)
@@ -164,6 +167,8 @@ impl Config {
 
             mutex: MyMutex {
                 openvpn: Arc::new(tokio::sync::Mutex::new(0)),
+                wireguard: Arc::new(tokio::sync::Mutex::new(0)),
+                ipsec: Arc::new(tokio::sync::Mutex::new(0)),
                 fwcloud_script: Arc::new(tokio::sync::Mutex::new(0)),
                 daemon: Arc::new(tokio::sync::Mutex::new(0)),
                 plugins: Arc::new(Mutex::new(0)),

@@ -1,5 +1,5 @@
 /*
-    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2025 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -26,6 +26,8 @@ mod info;
 mod interfaces;
 mod iptables_save;
 mod openvpn;
+mod wireguard;
+mod ipsec;
 mod ping;
 pub mod plugin;
 pub mod systemctl;
