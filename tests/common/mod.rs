@@ -1,5 +1,5 @@
 /*
-    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2025 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -20,7 +20,8 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use rand::{distributions::Alphanumeric, Rng};
+use rand::Rng;
+use rand_distr::Alphanumeric;
 
 use fwcloud_agent::config::Config;
 
@@ -64,7 +65,7 @@ pub fn spawn_app(custom: Option<TestCfgOpt>) -> String {
 }
 
 pub fn random_api_key(size: usize) -> String {
-    rand::thread_rng()
+    rand::rng()
         .sample_iter(&Alphanumeric)
         .take(size)
         .map(char::from)

@@ -1,5 +1,5 @@
 /*
-    Copyright 2023 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2025 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -80,7 +80,7 @@ pub fn run_cmd_ws(
         let (stdout, _stderr) = match communicator.read() {
             Ok(data) => data,
             Err(e) => {
-                error!("Subprocess communication error: {}", e.to_string());
+                error!("Subprocess communication error: {}", e);
                 break;
             }
         };

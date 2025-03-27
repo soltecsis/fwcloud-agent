@@ -1,5 +1,5 @@
 /*
-    Copyright 2023 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2025 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn head_remove_empty_result_if_file_not_exists() {
         let fl = files_list_factory(5);
-        let inx = rand::thread_rng().gen_range(0..5);
+        let inx = rand::rng().random_range(0..5);
         let empty: Vec<String> = vec![];
         assert_eq!(fl.head_remove(inx, 100).unwrap(), empty);
     }
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn head_remove_returns_full_file_and_empties_file() -> Result<()> {
         let fl = files_list_factory(5);
-        let inx = rand::thread_rng().gen_range(0..5);
+        let inx = rand::rng().random_range(0..5);
 
         create_files(&fl)?;
 
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn head_remove_line_by_line() -> Result<()> {
         let fl = files_list_factory(5);
-        let inx = rand::thread_rng().gen_range(0..5);
+        let inx = rand::rng().random_range(0..5);
 
         create_files(&fl)?;
 
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn head_remove_two_lines_max() -> Result<()> {
         let fl = files_list_factory(5);
-        let inx = rand::thread_rng().gen_range(0..5);
+        let inx = rand::rng().random_range(0..5);
 
         create_files(&fl)?;
 
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn len_for_some_files() {
-        let n = rand::thread_rng().gen_range(1..6);
+        let n = rand::rng().random_range(1..6);
         let fl = files_list_factory(n);
         assert_eq!(fl.len(), n);
     }
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn right_file_name() {
         let fl = files_list_factory(5);
-        let inx = rand::thread_rng().gen_range(0..5);
+        let inx = rand::rng().random_range(0..5);
         assert_eq!(fl.name(inx), fl.files[inx]);
     }
 
@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn rename_file() {
         let mut fl = files_list_factory(5);
-        let inx = rand::thread_rng().gen_range(0..5);
+        let inx = rand::rng().random_range(0..5);
         let new_file_name = "new_file_name";
 
         fl.rename(inx, new_file_name);
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn remove_all_files() -> Result<()> {
-        let n = rand::thread_rng().gen_range(1..6);
+        let n = rand::rng().random_range(1..6);
         let fl = files_list_factory(n);
 
         create_files(&fl)?;
@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn get_files_in_dir_gets_all_files() -> Result<()> {
-        let n = rand::thread_rng().gen_range(1..6);
+        let n = rand::rng().random_range(1..6);
         let mut fl1 = files_list_factory(n);
 
         create_files(&fl1)?;
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn dumps_the_file_content() -> Result<()> {
         let fl = files_list_factory(5);
-        let inx = rand::thread_rng().gen_range(0..5);
+        let inx = rand::rng().random_range(0..5);
 
         create_files(&fl)?;
 

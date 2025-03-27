@@ -24,13 +24,13 @@ mod daemon;
 mod fwcloud_script;
 mod info;
 mod interfaces;
+mod ipsec;
 mod iptables_save;
 mod openvpn;
-mod wireguard;
-mod ipsec;
 mod ping;
 pub mod plugin;
 pub mod systemctl;
+mod wireguard;
 mod ws;
 
 use actix_web::web;

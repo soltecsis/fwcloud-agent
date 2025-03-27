@@ -50,7 +50,10 @@ async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result
             .files_upload(payload)
             .await?;
 
-        debug!("Releasing WireGuard mutex (thread id: {})", thread_id::get());
+        debug!(
+            "Releasing WireGuard mutex (thread id: {})",
+            thread_id::get()
+        );
     }
 
     Ok(HttpResponse::Ok().finish())
@@ -70,7 +73,10 @@ async fn files_remove(
 
         files_list.remove()?;
 
-        debug!("Releasing WireGuard mutex (thread id: {})", thread_id::get());
+        debug!(
+            "Releasing WireGuard mutex (thread id: {})",
+            thread_id::get()
+        );
     } // Mutex scope end.
 
     Ok(HttpResponse::Ok().finish())
