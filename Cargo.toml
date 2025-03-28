@@ -1,6 +1,6 @@
 [package]
 name = "fwcloud-agent"
-version = "2.1.1"
+version = "2.1.2"
 license = "GNU AFFERO GENERAL PUBLIC LICENSE"
 description = "FWCloud Agent for firewalls management"
 readme = "README.md"

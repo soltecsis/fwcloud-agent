@@ -49,6 +49,12 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(openvpn::get_status)
             .service(openvpn::update_status)
             .service(openvpn::get_status_rt)
+            // WireGuard.
+            .service(wireguard::files_upload)
+            .service(wireguard::files_remove)
+            // IPSec.
+            .service(ipsec::files_upload)
+            .service(ipsec::files_remove)
             // Interfaces.
             .service(interfaces::info)
             // IPTables save.
