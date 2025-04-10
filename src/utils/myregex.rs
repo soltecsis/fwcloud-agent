@@ -43,7 +43,7 @@ lazy_static! {
   pub static ref PLUGINS_ACTIONS: Regex = Regex::new("^(enable|disable)$").unwrap();
 
   pub static ref SYSTEMCTL_COMMANDS: Regex = Regex::new("^(status|start|stop|restart|reload|enable|disable)$").unwrap();
-  pub static ref SYSTEMCTL_SERVICES: Regex = Regex::new("^(openvpn|openvpn@[a-zA-Z0-9\\-_]+|wireguard|wireguard@[a-zA-Z0-9\\-_]+|ipsec|ipsec@[a-zA-Z0-9\\-_]+|isc-dhcp-server|keepalived|haproxy)$").unwrap();
+  pub static ref SYSTEMCTL_SERVICES: Regex = Regex::new("^(openvpn|openvpn@[a-zA-Z0-9\\-_]+|wg-quick|wg-quick@[a-zA-Z0-9\\-_]+|ipsec|ipsec@[a-zA-Z0-9\\-_]+|isc-dhcp-server|keepalived|haproxy)$").unwrap();
 }
 
 impl AsRegex for IPV4 {
