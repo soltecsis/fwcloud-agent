@@ -7,7 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.1.4] - 2025-08-22
 ## Fixed
 - Error in IPSec files remove route.
-- Change in `systemctl` services regular expression.
+- Systemctl services regular expression.
+- Updated Rust packages to the latest version.
 
 
 ## [2.1.3] - 2025-02-28
