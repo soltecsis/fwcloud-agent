@@ -56,7 +56,7 @@ async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result
     Ok(HttpResponse::Ok().finish())
 }
 
-#[delete("/IPSec/files/remove")]
+#[delete("/ipsec/files/remove")]
 async fn files_remove(
     files_list: web::Json<FilesList>,
     cfg: web::Data<Arc<Config>>,
