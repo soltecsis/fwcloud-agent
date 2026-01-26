@@ -1,5 +1,5 @@
 /*
-    Copyright 2025 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2026 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -39,7 +39,7 @@ lazy_static! {
   pub static ref ABSOLUTE_PATH: Regex = Regex::new("^/{1}(((/{1}\\.{1})?[a-zA-Z0-9 -_]+/?)+(\\.{1}[a-zA-Z0-9]{2,4})?)$").unwrap();
   pub static ref ABSOLUTE_PATH_LIST: Regex = Regex::new("^((/{1}(((/{1}\\.{1})?[a-zA-Z0-9 -_]+/?)+(\\.{1}[a-zA-Z0-9]{2,4})?))(,?))*$").unwrap();
 
-  pub static ref PLUGINS_NAMES: Regex = Regex::new("^(test|openvpn|wireguard|ipsec|geoip|crowdsec|ntopng|suricata|keepalived|zeek|elasticsearch|filebeat|websafety|dnssafety|kibana|logstash|isc-bind9|isc-dhcp|haproxy)$").unwrap();
+  pub static ref PLUGINS_NAMES: Regex = Regex::new("^(test|openvpn|wireguard|ipsec|geoip|crowdsec|ntopng|suricata|keepalived|zeek|elasticsearch|filebeat|websafety|dnssafety|kibana|logstash|isc-bind9|isc-dhcp|haproxy|irqbalance)$").unwrap();
   pub static ref PLUGINS_ACTIONS: Regex = Regex::new("^(enable|disable)$").unwrap();
 
   pub static ref SYSTEMCTL_COMMANDS: Regex = Regex::new("^(status|start|stop|restart|reload|enable|disable)$").unwrap();
