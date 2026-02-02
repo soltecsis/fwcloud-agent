@@ -46,13 +46,13 @@ enable() {
 
 ################################################################
 disable() {
-  ################# PREGUNTAR SI QUITAR ESTO O NO #################
-  echo "2FA DISABLE NOT IMPLEMENTED"
-  # if [ $DIST = "RedHat" -o $DIST = "Rocky" ]; then
-  #   pkgRemove "google-authenticator"
-  # else
-  #   pkgRemove "libpam-google-authenticator"
-  # fi
+  if [ -f /etc/pam.d/openvpn ]; then
+    rm -f /etc/pam.d/openvpn
+  fi
+
+  if [ -f /etc/openvpn/2fa_users.txt ]; then
+    rm -f /etc/openvpn/2fa_users.txt
+  fi
 }
 ################################################################
 
