@@ -33,7 +33,7 @@ enable() {
   fi
 
   if [ ! -f /etc/pam.d/openvpn ]; then
-    cp ./plugins/openvpn/pam-openvpn /etc/pam.d/openvpn
+    cp ./plugins/openvpn-2fa/pam-openvpn /etc/pam.d/openvpn
   fi
 
   if [ ! -f /etc/openvpn/2fa_users.txt ]; then
