@@ -80,7 +80,7 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 "../plugins/lib.sh" = { path = "/opt/fwcloud/agent/plugins/lib.sh", mode = "700", username = "root" }
 "../plugins/geoip/geoip.sh" = { path = "/opt/fwcloud/agent/plugins/geoip/geoip.sh", mode = "700", username = "root" }
 "../plugins/openvpn/openvpn.sh" = { path = "/opt/fwcloud/agent/plugins/openvpn/openvpn.sh", mode = "700", username = "root" }
-"../plugins/openvpn/openvpn-2fa.sh" = { path = "/opt/fwcloud/agent/plugins/openvpn/openvpn-2fa.sh", mode = "700", username = "root" }
+"../plugins/openvpn/openvpn-2fa.sh" = { path = "/opt/fwcloud/agent/plugins/openvpn-2fa/openvpn-2fa.sh", mode = "700", username = "root" }
 "../plugins/openvpn/pam-openvpn" = { path = "/opt/fwcloud/agent/plugins/openvpn/pam-openvpn", mode = "600", username = "root" }
 "../plugins/wireguard/wireguard.sh" = { path = "/opt/fwcloud/agent/plugins/wireguard/wireguard.sh", mode = "700", username = "root" }
 "../plugins/ipsec/ipsec.sh" = { path = "/opt/fwcloud/agent/plugins/ipsec/ipsec.sh", mode = "700", username = "root" }
