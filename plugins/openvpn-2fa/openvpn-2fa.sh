@@ -53,6 +53,12 @@ disable() {
   if [ -f /etc/openvpn/2fa_users.txt ]; then
     rm -f /etc/openvpn/2fa_users.txt
   fi
+
+  if [ $DIST = "RedHat" -o $DIST = "Rocky" ]; then
+    pkgRemove "google-authenticator"
+  else
+    pkgRemove "libpam-google-authenticator"
+  fi
 }
 ################################################################
 
