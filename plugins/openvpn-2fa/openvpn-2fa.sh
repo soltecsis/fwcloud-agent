@@ -48,10 +48,12 @@ enable() {
 disable() {
   if [ -f /etc/pam.d/openvpn ]; then
     rm -f /etc/pam.d/openvpn
+    echo "Deleting /etc/pam.d/openvpn"
   fi
 
   if [ -f /etc/openvpn/2fa_users.txt ]; then
     rm -f /etc/openvpn/2fa_users.txt
+    echo "Deleting /etc/openvpn/2fa_users.txt"
   fi
 
   if [ $DIST = "RedHat" -o $DIST = "Rocky" ]; then
