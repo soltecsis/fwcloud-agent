@@ -32,15 +32,16 @@ enable() {
     pkgInstall "libpam-google-authenticator"
   fi
 
-  if [ ! -f /etc/pam.d/openvpn ]; then
-    cp ./plugins/openvpn-2fa/pam-openvpn /etc/pam.d/openvpn
-  fi
+  cp ./plugins/openvpn-2fa/pam-openvpn /etc/pam.d/openvpn
 
   if [ ! -f /etc/openvpn/2fa_users.txt ]; then
     mkdir -p /etc/openvpn
     touch /etc/openvpn/2fa_users.txt
     chmod 600 /etc/openvpn/2fa_users.txt
   fi
+
+  mkdir -p /etc/openvpn/google-authenticator
+  chmod 700 /etc/openvpn/google-authenticator
 }
 ################################################################
 
@@ -54,6 +55,11 @@ disable() {
   if [ -f /etc/openvpn/2fa_users.txt ]; then
     rm -f /etc/openvpn/2fa_users.txt
     echo "Deleting /etc/openvpn/2fa_users.txt"
+  fi
+
+  if [ -d /etc/openvpn/google-authenticator ]; then
+    rm -rf /etc/openvpn/google-authenticator
+    echo "Deleting /etc/openvpn/google-authenticator"
   fi
 
   if [ $DIST = "RedHat" -o $DIST = "Rocky" ]; then
