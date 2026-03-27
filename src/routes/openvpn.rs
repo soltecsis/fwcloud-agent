@@ -79,7 +79,7 @@ async fn files_remove(
 
 #[put("/openvpn/files/read")]
 async fn files_read(
-    mut files_list: web::Json<FilesList>,
+    files_list: web::Json<FilesList>,
     cfg: web::Data<Arc<Config>>,
 ) -> Result<HttpResponse> {
     debug!("Locking OpenVPN mutex (thread id: {})", thread_id::get());
