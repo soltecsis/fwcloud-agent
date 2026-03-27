@@ -49,6 +49,7 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(openvpn::get_status)
             .service(openvpn::update_status)
             .service(openvpn::get_status_rt)
+            .service(openvpn::files_read)
             // WireGuard.
             .service(wireguard::files_upload)
             .service(wireguard::files_remove)
