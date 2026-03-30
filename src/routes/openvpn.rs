@@ -77,6 +77,38 @@ async fn files_remove(
     Ok(HttpResponse::Ok().finish())
 }
 
+#[put("/openvpn/files/read")]
+async fn files_read(
+    files_list: web::Json<FilesList>,
+    cfg: web::Data<Arc<Config>>,
+) -> Result<HttpResponse> {
+    debug!("Locking OpenVPN mutex (thread id: {})", thread_id::get());
+    let mutex = Arc::clone(&cfg.mutex.openvpn);
+    let _mutex_data = mutex.lock().await;
+    debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
+
+    if !files_list.dir_exists() {
+        return Err(FwcError::DirNotFound);
+    }
+
+    if files_list.len() != 1 {
+        return Err(FwcError::OnlyOneFileExpected);
+    }
+
+    let data = files_list.dump(0)?;
+    let body = data.join("\n");
+
+    debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
+
+    let mut resp = HttpResponse::Ok().body(body);
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("text/plain"),
+    );
+
+    Ok(resp)
+}
+
 #[put("/openvpn/files/sha256")]
 async fn files_sha256(
     mut files_list: web::Json<FilesList>,
