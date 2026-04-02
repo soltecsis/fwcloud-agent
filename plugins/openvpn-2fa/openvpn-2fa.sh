@@ -24,6 +24,56 @@
 init
 
 ################################################################
+find_openvpn_auth_pam_plugin() {
+  for plugin_path in \
+    /usr/lib/openvpn/openvpn-plugin-auth-pam.so \
+    /usr/lib/openvpn/plugins/openvpn-plugin-auth-pam.so \
+    /usr/lib64/openvpn/openvpn-plugin-auth-pam.so \
+    /usr/lib64/openvpn/plugins/openvpn-plugin-auth-pam.so
+  do
+    if [ -f "$plugin_path" ]; then
+      echo "$plugin_path"
+      return 0
+    fi
+  done
+
+  if [ "$DIST" = "Debian" -o "$DIST" = "Ubuntu" ]; then
+    plugin_path=`dpkg -L openvpn 2>/dev/null | grep 'openvpn-plugin-auth-pam\.so$' | head -n 1`
+    if [ -n "$plugin_path" ]; then
+      echo "$plugin_path"
+      return 0
+    fi
+  elif [ "$DIST" = "RedHat" -o "$DIST" = "CentOS" -o "$DIST" = "Fedora" -o "$DIST" = "Rocky" ]; then
+    plugin_path=`rpm -ql openvpn 2>/dev/null | grep 'openvpn-plugin-auth-pam\.so$' | head -n 1`
+    if [ -n "$plugin_path" ]; then
+      echo "$plugin_path"
+      return 0
+    fi
+  fi
+
+  plugin_path=`find /usr/lib /usr/lib64 -name 'openvpn-plugin-auth-pam.so' 2>/dev/null | head -n 1`
+  if [ -n "$plugin_path" ]; then
+    echo "$plugin_path"
+    return 0
+  fi
+
+  return 1
+}
+################################################################
+
+################################################################
+info() {
+  PLUGIN_PATH=`find_openvpn_auth_pam_plugin`
+  if [ -z "$PLUGIN_PATH" ]; then
+    echo "Error: Unable to locate openvpn-plugin-auth-pam.so."
+    exit 1
+  fi
+
+  echo "PAM_PLUGIN_PATH=$PLUGIN_PATH"
+}
+################################################################
+
+################################################################
 enable() {
   if [ $DIST = "RedHat" -o $DIST = "Rocky" ]; then
     pkgInstall "epel-release"
@@ -74,9 +124,15 @@ disable() {
 if [ "$1" = "enable" ]; then
   enable
   echo "ENABLED"
-else
+elif [ "$1" = "info" ]; then
+  info
+  echo "INFO"
+elif [ "$1" = "disable" ]; then
   disable
   echo "DISABLED"
+else
+  echo "Error: Invalid action '$1'."
+  exit 1
 fi
 
 exit 0

@@ -40,7 +40,7 @@ lazy_static! {
   pub static ref ABSOLUTE_PATH_LIST: Regex = Regex::new("^((/{1}(((/{1}\\.{1})?[a-zA-Z0-9 -_]+/?)+(\\.{1}[a-zA-Z0-9]{2,4})?))(,?))*$").unwrap();
 
   pub static ref PLUGINS_NAMES: Regex = Regex::new("^(test|openvpn|openvpn-2fa|wireguard|ipsec|geoip|crowdsec|ntopng|suricata|keepalived|zeek|elasticsearch|filebeat|websafety|dnssafety|kibana|logstash|isc-bind9|isc-dhcp|haproxy|irqbalance)$").unwrap();
-  pub static ref PLUGINS_ACTIONS: Regex = Regex::new("^(enable|disable)$").unwrap();
+  pub static ref PLUGINS_ACTIONS: Regex = Regex::new("^(enable|disable|info)$").unwrap();
 
   pub static ref SYSTEMCTL_COMMANDS: Regex = Regex::new("^(status|start|stop|restart|reload|enable|disable)$").unwrap();
   pub static ref SYSTEMCTL_SERVICES: Regex = Regex::new("^(openvpn|openvpn@[a-zA-Z0-9\\-_]+|wg-quick|wg-quick@[a-zA-Z0-9\\-_]+|strongswan|strongswan-starter|isc-dhcp-server|keepalived|haproxy)$").unwrap();
