@@ -23,53 +23,19 @@
 . ./plugins/lib.sh
 init
 
-################################################################
-find_openvpn_auth_pam_plugin() {
-  for plugin_path in \
-    /usr/lib/openvpn/openvpn-plugin-auth-pam.so \
-    /usr/lib/openvpn/plugins/openvpn-plugin-auth-pam.so \
-    /usr/lib64/openvpn/openvpn-plugin-auth-pam.so \
-    /usr/lib64/openvpn/plugins/openvpn-plugin-auth-pam.so
-  do
-    if [ -f "$plugin_path" ]; then
-      echo "$plugin_path"
-      return 0
-    fi
-  done
-
-  if [ "$DIST" = "Debian" -o "$DIST" = "Ubuntu" ]; then
-    plugin_path=`dpkg -L openvpn 2>/dev/null | grep 'openvpn-plugin-auth-pam\.so$' | head -n 1`
-    if [ -n "$plugin_path" ]; then
-      echo "$plugin_path"
-      return 0
-    fi
-  elif [ "$DIST" = "RedHat" -o "$DIST" = "CentOS" -o "$DIST" = "Fedora" -o "$DIST" = "Rocky" ]; then
-    plugin_path=`rpm -ql openvpn 2>/dev/null | grep 'openvpn-plugin-auth-pam\.so$' | head -n 1`
-    if [ -n "$plugin_path" ]; then
-      echo "$plugin_path"
-      return 0
-    fi
-  fi
-
-  plugin_path=`find /usr/lib /usr/lib64 -name 'openvpn-plugin-auth-pam.so' 2>/dev/null | head -n 1`
-  if [ -n "$plugin_path" ]; then
-    echo "$plugin_path"
-    return 0
-  fi
-
-  return 1
-}
-################################################################
+OPENVPN_DIR="/etc/openvpn"
+OPENVPN_BIN_DIR="${OPENVPN_DIR}/bin"
+OPENVPN_2FA_SCRIPT="check_2fa.sh"
+OPENVPN_2FA_SCRIPT_PATH="${OPENVPN_BIN_DIR}/${OPENVPN_2FA_SCRIPT}"
 
 ################################################################
 info() {
-  PLUGIN_PATH=`find_openvpn_auth_pam_plugin`
-  if [ -z "$PLUGIN_PATH" ]; then
-    echo "Error: Unable to locate openvpn-plugin-auth-pam.so."
+  if [ ! -f "./plugins/openvpn-2fa/${OPENVPN_2FA_SCRIPT}" ]; then
+    echo "Error: Unable to locate ${OPENVPN_2FA_SCRIPT}."
     exit 1
   fi
 
-  echo "PAM_PLUGIN_PATH=$PLUGIN_PATH"
+  echo "CHECK_2FA_SCRIPT=./plugins/openvpn-2fa/${OPENVPN_2FA_SCRIPT}"
 }
 ################################################################
 
@@ -77,45 +43,37 @@ info() {
 enable() {
   if [ $DIST = "RedHat" -o $DIST = "Rocky" ]; then
     pkgInstall "epel-release"
-    pkgInstall "google-authenticator"
+    pkgInstall "oathtool"
   else
-    pkgInstall "libpam-google-authenticator"
+    pkgInstall "oathtool"
   fi
 
-  cp ./plugins/openvpn-2fa/pam-openvpn /etc/pam.d/openvpn
-
-  if [ ! -f /etc/openvpn/2fa_users.txt ]; then
-    mkdir -p /etc/openvpn
-    touch /etc/openvpn/2fa_users.txt
-    chmod 600 /etc/openvpn/2fa_users.txt
-  fi
-
-  mkdir -p /etc/openvpn/google-authenticator
-  chmod 700 /etc/openvpn/google-authenticator
+  mkdir -p "$OPENVPN_DIR"
+  mkdir -p "$OPENVPN_BIN_DIR"
+  mkdir -p "${OPENVPN_DIR}/google-authenticator"
+  cp "./plugins/openvpn-2fa/${OPENVPN_2FA_SCRIPT}" "$OPENVPN_2FA_SCRIPT_PATH"
+  chmod 755 "$OPENVPN_BIN_DIR"
+  chmod 700 "$OPENVPN_2FA_SCRIPT_PATH"
+  chmod 700 "${OPENVPN_DIR}/google-authenticator"
 }
 ################################################################
 
 ################################################################
 disable() {
-  if [ -f /etc/pam.d/openvpn ]; then
-    rm -f /etc/pam.d/openvpn
-    echo "Deleting /etc/pam.d/openvpn"
+  if [ -f "$OPENVPN_2FA_SCRIPT_PATH" ]; then
+    rm -f "$OPENVPN_2FA_SCRIPT_PATH"
+    echo "Deleting $OPENVPN_2FA_SCRIPT_PATH"
   fi
 
-  if [ -f /etc/openvpn/2fa_users.txt ]; then
-    rm -f /etc/openvpn/2fa_users.txt
-    echo "Deleting /etc/openvpn/2fa_users.txt"
-  fi
-
-  if [ -d /etc/openvpn/google-authenticator ]; then
-    rm -rf /etc/openvpn/google-authenticator
-    echo "Deleting /etc/openvpn/google-authenticator"
+  if [ -d "${OPENVPN_DIR}/google-authenticator" ]; then
+    rm -rf "${OPENVPN_DIR}/google-authenticator"
+    echo "Deleting ${OPENVPN_DIR}/google-authenticator"
   fi
 
   if [ $DIST = "RedHat" -o $DIST = "Rocky" ]; then
-    pkgRemove "google-authenticator"
+    pkgRemove "oathtool"
   else
-    pkgRemove "libpam-google-authenticator"
+    pkgRemove "oathtool"
   fi
 }
 ################################################################
