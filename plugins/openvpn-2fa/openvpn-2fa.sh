@@ -28,18 +28,6 @@ OPENVPN_BIN_DIR="${OPENVPN_DIR}/bin"
 OPENVPN_2FA_SCRIPT="check_2fa.sh"
 OPENVPN_2FA_SCRIPT_PATH="${OPENVPN_BIN_DIR}/${OPENVPN_2FA_SCRIPT}"
 
-################################################################
-info() {
-  if [ ! -f "./plugins/openvpn-2fa/${OPENVPN_2FA_SCRIPT}" ]; then
-    echo "Error: Unable to locate ${OPENVPN_2FA_SCRIPT}."
-    exit 1
-  fi
-
-  echo "CHECK_2FA_SCRIPT=./plugins/openvpn-2fa/${OPENVPN_2FA_SCRIPT}"
-}
-################################################################
-
-################################################################
 enable() {
   if [ $DIST = "RedHat" -o $DIST = "Rocky" ]; then
     pkgInstall "epel-release"
@@ -82,9 +70,6 @@ disable() {
 if [ "$1" = "enable" ]; then
   enable
   echo "ENABLED"
-elif [ "$1" = "info" ]; then
-  info
-  echo "INFO"
 elif [ "$1" = "disable" ]; then
   disable
   echo "DISABLED"
