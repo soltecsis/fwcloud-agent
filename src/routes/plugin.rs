@@ -44,7 +44,7 @@ pub struct Plugin {
     ))]
     pub action: String,
 
-    pub ws_id: Option<Uuid>, // Optional parameter
+    pub ws_id: Option<Uuid>,       // Optional parameter
     pub server_cn: Option<String>, // Optional parameter
 }
 
