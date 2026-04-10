@@ -47,7 +47,7 @@ rm -rf %{buildroot}
 /opt/fwcloud/agent/plugins/openvpn/openvpn.sh
 /opt/fwcloud/agent/plugins/irqbalance/irqbalance.sh
 /opt/fwcloud/agent/plugins/openvpn-2fa/openvpn-2fa.sh
-/opt/fwcloud/agent/plugins/openvpn-2fa/pam-openvpn
+/opt/fwcloud/agent/plugins/openvpn-2fa/check_2fa.sh
 /opt/fwcloud/agent/plugins/wireguard/wireguard.sh
 /opt/fwcloud/agent/plugins/ipsec/ipsec.sh
 /opt/fwcloud/agent/plugins/crowdsec/crowdsec.sh
