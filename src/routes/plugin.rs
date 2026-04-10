@@ -45,6 +45,7 @@ pub struct Plugin {
     pub action: String,
 
     pub ws_id: Option<Uuid>, // Optional parameter
+    pub server_cn: Option<String>, // Optional parameter
 }
 
 /*
@@ -59,7 +60,10 @@ async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Resul
 
     let cmd = "sh";
     let argv0 = format!("{}/{}/{}.sh", cfg.plugins_dir, plugin.name, plugin.name);
-    let args = [argv0.as_str(), plugin.action.as_str()];
+    let mut args = vec![argv0.as_str(), plugin.action.as_str()];
+    if let Some(server_cn) = plugin.server_cn.as_deref() {
+        args.push(server_cn);
+    }
     let res: HttpResponse;
 
     // Mutex scope start.
