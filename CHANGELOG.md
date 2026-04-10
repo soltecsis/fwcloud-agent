@@ -8,10 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ## Added
 - `irqbalance` plugin with enable and disable functionality.
-- `openvpn-2fa` plugin for OpenVPN two-factor authentication using PAM, including the PAM configuration file, generated packages integration, files organization, disable functionality, `google-authenticator` directory management and unauthorized users denial configuration.
+- `openvpn-2fa` plugin for OpenVPN two-factor authentication using script-based TOTP verification. It deploys `check_2fa.sh`, installs `oathtool`, prepares `/etc/openvpn/bin` and `/etc/openvpn/google-authenticator`, sets the permissions required for script execution and TOTP files access, and cleans these resources when disabled.
 - OpenVPN API call for read configuration files.
 
 ## Fixed
+- Updated the `fwcloud-agent` systemd unit to start after the network is operative by using `After=network-online.target` and `Wants=network-online.target`.
 - Updated Rust packages to the latest version.
 
 
