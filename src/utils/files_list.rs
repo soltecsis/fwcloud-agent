@@ -189,7 +189,7 @@ impl FilesList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::Rng;
+    use rand::RngExt;
     use sha2::Sha256;
     use std::fs::OpenOptions;
     use uuid::Uuid;
