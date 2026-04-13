@@ -19,7 +19,7 @@
     You should have received a copy of the GNU General Public License
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
-use rand::Rng;
+use rand::RngExt;
 use rand_distr::Alphanumeric;
 use std::{
     collections::HashMap,
@@ -138,7 +138,7 @@ impl Config {
                 .unwrap_or(true),
             api_key: env::var("API_KEY").unwrap_or_else(|_| {
                 rand::rng()
-                    .sample_iter(&Alphanumeric)
+                    .sample_iter(Alphanumeric)
                     .take(64)
                     .map(char::from)
                     .collect()

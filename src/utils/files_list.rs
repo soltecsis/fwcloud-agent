@@ -23,7 +23,7 @@
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::{self, prelude::*, BufReader, BufWriter};
+use std::io::{prelude::*, BufReader, BufWriter};
 use std::path::Path;
 
 use crate::errors::{FwcError, Result};
@@ -87,10 +87,17 @@ impl FilesList {
                         sha256.update(line + "\n");
                     }
                 } else {
-                    io::copy(&mut file_stream, &mut sha256)?;
+                    let mut buffer = [0_u8; 8192];
+                    loop {
+                        let read = file_stream.read(&mut buffer)?;
+                        if read == 0 {
+                            break;
+                        }
+                        sha256.update(&buffer[..read]);
+                    }
                 }
 
-                let hast = hex::encode(sha256.finalize().as_slice());
+                let hast = hex::encode(sha256.finalize());
                 let line = format!("{},{}\n", self.name(inx), hast);
                 csv.push_str(&line);
             }
@@ -229,7 +236,14 @@ mod tests {
         for inx in 0..fl.len() {
             let mut file = File::open(&fl.path(inx))?;
             let mut sha256 = Sha256::new();
-            io::copy(&mut file, &mut sha256)?;
+            let mut buffer = [0_u8; 8192];
+            loop {
+                let read = file.read(&mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                sha256.update(&buffer[..read]);
+            }
             let line = format!("{},{}\n", &fl.name(inx), hex::encode(sha256.finalize()));
             cvs.push_str(&line);
         }
