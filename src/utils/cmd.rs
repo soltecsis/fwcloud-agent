@@ -58,13 +58,12 @@ pub fn run_cmd_ws(
     ws_data: &Arc<Mutex<WsData>>,
     finish_ws: bool,
 ) -> Result<HttpResponse> {
-    let popen = Exec::cmd(cmd)
+    let mut job = match Exec::cmd(cmd)
         .args(args)
         .stdout(Redirection::Pipe)
         .stderr(Redirection::Merge) // Redirect stderr too stdout.
-        .popen();
-
-    let mut popen = match popen {
+        .start()
+    {
         Ok(data) => data,
         Err(e) => {
             error!("Error: {}", e);
@@ -72,7 +71,7 @@ pub fn run_cmd_ws(
         }
     };
 
-    let mut communicator = popen.communicate_start(Option::None).limit_size(1); // IMPORTANT: Read the output byte by byte.
+    let mut communicator = job.communicate()?.limit_size(1); // IMPORTANT: Read the output byte by byte.
 
     let mut previous_char_is_cr = false;
     let mut line_u8: Vec<u8> = Vec::new();
@@ -87,7 +86,7 @@ pub fn run_cmd_ws(
 
         // Remember that with .stderr(Redirection::Merge) we have redirected
         // the stderr output to stdout. Then we will have all the output in stdout.
-        let data = stdout.unwrap_or_default();
+        let data = stdout;
 
         // Finish when no more input data.
         if data.is_empty() {
@@ -130,7 +129,7 @@ pub fn run_cmd_ws(
         previous_char_is_cr = c == 13;
     }
 
-    if popen.wait()?.success() {
+    if job.wait()?.success() {
         Ok(HttpResponse::Ok().finish())
     } else {
         error!("Error: Command exit status not 0");
