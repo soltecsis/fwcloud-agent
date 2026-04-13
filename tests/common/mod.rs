@@ -20,7 +20,7 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use rand::Rng;
+use rand::RngExt;
 use rand_distr::Alphanumeric;
 
 use fwcloud_agent::config::Config;
@@ -66,7 +66,7 @@ pub fn spawn_app(custom: Option<TestCfgOpt>) -> String {
 
 pub fn random_api_key(size: usize) -> String {
     rand::rng()
-        .sample_iter(&Alphanumeric)
+        .sample_iter(Alphanumeric)
         .take(size)
         .map(char::from)
         .collect()

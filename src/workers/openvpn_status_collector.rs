@@ -285,7 +285,7 @@ impl OpenVPNStCollector {
 mod tests {
     use super::*;
     use crate::errors::Result;
-    use rand::Rng;
+    use rand::RngExt;
     use serial_test::serial;
     use std::env;
     use uuid::Uuid;
