@@ -101,9 +101,6 @@ pub enum FwcError {
     ActixWebError(#[from] actix_web::Error),
 
     #[error(transparent)]
-    PopenError(#[from] subprocess::PopenError),
-
-    #[error(transparent)]
     SendError(#[from] std::sync::mpsc::SendError<u8>),
 }
 

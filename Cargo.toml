@@ -1,6 +1,6 @@
 [package]
 name = "fwcloud-agent"
-version = "2.1.4"
+version = "2.2.0"
 license = "GNU AFFERO GENERAL PUBLIC LICENSE"
 description = "FWCloud Agent for firewalls management"
 readme = "README.md"
@@ -33,6 +33,8 @@ assets = [
     ["plugins/lib.sh", "opt/fwcloud/agent/plugins/lib.sh", "700"],
     ["plugins/geoip/geoip.sh", "opt/fwcloud/agent/plugins/geoip/geoip.sh", "700"],
     ["plugins/openvpn/openvpn.sh", "opt/fwcloud/agent/plugins/openvpn/openvpn.sh", "700"],
+    ["plugins/openvpn-2fa/openvpn-2fa.sh", "opt/fwcloud/agent/plugins/openvpn-2fa/openvpn-2fa.sh", "700"],
+    ["plugins/openvpn-2fa/check_2fa.sh", "opt/fwcloud/agent/plugins/openvpn-2fa/check_2fa.sh", "700"],
     ["plugins/wireguard/wireguard.sh", "opt/fwcloud/agent/plugins/wireguard/wireguard.sh", "700"],
     ["plugins/ipsec/ipsec.sh", "opt/fwcloud/agent/plugins/ipsec/ipsec.sh", "700"],
     ["plugins/crowdsec/crowdsec.sh", "opt/fwcloud/agent/plugins/crowdsec/crowdsec.sh", "700"],
@@ -53,6 +55,7 @@ assets = [
     [".deb/fwcloud-agent.service", "lib/systemd/system/", "644"],
     [".deb/fwcloud-agent", "etc/logrotate.d/", "644"],
     [".deb/fwcloud-agent.1", "usr/share/man/man1/", "644"],
+    ["plugins/irqbalance/irqbalance.sh", "opt/fwcloud/agent/plugins/irqbalance/irqbalance.sh", "700"],
 ]
 maintainer-scripts = ".deb/maintainer-scripts"
 
@@ -77,6 +80,8 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 "../plugins/lib.sh" = { path = "/opt/fwcloud/agent/plugins/lib.sh", mode = "700", username = "root" }
 "../plugins/geoip/geoip.sh" = { path = "/opt/fwcloud/agent/plugins/geoip/geoip.sh", mode = "700", username = "root" }
 "../plugins/openvpn/openvpn.sh" = { path = "/opt/fwcloud/agent/plugins/openvpn/openvpn.sh", mode = "700", username = "root" }
+"../plugins/openvpn-2fa/openvpn-2fa.sh" = { path = "/opt/fwcloud/agent/plugins/openvpn-2fa/openvpn-2fa.sh", mode = "700", username = "root" }
+"../plugins/openvpn-2fa/check_2fa.sh" = { path = "/opt/fwcloud/agent/plugins/openvpn-2fa/check_2fa.sh", mode = "700", username = "root" }
 "../plugins/wireguard/wireguard.sh" = { path = "/opt/fwcloud/agent/plugins/wireguard/wireguard.sh", mode = "700", username = "root" }
 "../plugins/ipsec/ipsec.sh" = { path = "/opt/fwcloud/agent/plugins/ipsec/ipsec.sh", mode = "700", username = "root" }
 "../plugins/crowdsec/crowdsec.sh" = { path = "/opt/fwcloud/agent/plugins/crowdsec/crowdsec.sh", mode = "700", username = "root" }
@@ -97,36 +102,37 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 "../.deb/fwcloud-agent.1" = { path = "/usr/share/man/man1/fwcloud-agent.1", mode = "644", username = "root" }
 "../.deb/fwcloud-agent.service" = { path = "/lib/systemd/system/fwcloud-agent.service", mode = "644", username = "root" }
 "../.deb/fwcloud-agent" = { path = "/etc/logrotate.d/fwcloud-agent", mode = "644", username = "root" }
+"../plugins/irqbalance/irqbalance.sh" = { path = "/opt/fwcloud/agent/plugins/irqbalance/irqbalance.sh", mode = "700", username = "root" }
 
 [dependencies]
 actix = "0.13.5"
-actix-web-actors = "4.3.1"
-actix-web = { version = "4.11.0", features = ["openssl"] }
+actix-web-actors = "4.3.1+deprecated"
+actix-web = { version = "4.13.0", features = ["openssl"] }
 actix-service = "2.0.3"
 actix-multipart = "0.7.2"
-tokio = { version = "1.47.1", features = ["full"] }
-futures = "0.3.31"
-openssl = { version = "0.10.73", features = ["vendored"] }
-thiserror = "2.0.16"
+tokio = { version = "1.51.1", features = ["full"] }
+futures = "0.3.32"
+openssl = { version = "0.10.77", features = ["vendored"] }
+thiserror = "2.0.18"
 dotenvy = "0.15.7"
 validator = { version = "0.20.0", features = ["derive"] }
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.143"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
 lazy_static = "1.5.0"
-rand = "0.9.2"
-rand_distr = "0.5.1" 
-regex = "1.11.1"
-log = "0.4.27"
-env_logger = "0.11.8"
+rand = "0.10.1"
+rand_distr = "0.6.0" 
+regex = "1.12.3"
+log = "0.4.29"
+env_logger = "0.11.10"
 sanitize-filename = "0.6.0"
-uuid = { version = "1.18.0", features = ["serde", "v4"] }
-thread-id = "5.0.0"
-subprocess = "0.2.9"
-sha2 = "0.10.9"
+uuid = { version = "1.23.0", features = ["serde", "v4"] }
+thread-id = "5.1.0"
+subprocess = "1.0.3"
+sha2 = "0.11.0"
 hex = "0.4.3"
-chrono = { version = "0.4.41", default-features = false }
-sysinfo = "0.37.0"
+chrono = { version = "0.4.44", default-features = false }
+sysinfo = "0.38.4"
 
 [dev-dependencies]
-serial_test = "3.2.0"
-reqwest = "0.12.23"
+serial_test = "3.4.0"
+reqwest = "0.13.2"

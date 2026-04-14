@@ -1,5 +1,7 @@
 [Unit]
 Description=fwcloud-agent
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 ExecStart=/bin/bash -ce "exec /opt/fwcloud/agent/fwcloud-agent >> /opt/fwcloud/agent/log/fwcloud-agent.log 2>&1"

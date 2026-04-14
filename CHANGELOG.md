@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [2.2.0] - 2026-04-14
+## Added
+- `irqbalance` plugin with enable and disable functionality.
+- `openvpn-2fa` plugin for OpenVPN two-factor authentication using script-based TOTP verification. It deploys `check_2fa.sh`, installs `oathtool`, prepares `/etc/openvpn/bin` and `/etc/openvpn/google-authenticator`, sets the permissions required for script execution and TOTP files access, and cleans these resources when disabled.
+- OpenVPN API call for read configuration files.
+
+## Fixed
+- Updated the `fwcloud-agent` systemd unit to start after the network is operative by using `After=network-online.target` and `Wants=network-online.target`.
+- Updated Rust packages to the latest version.
+
+
 ## [2.1.4] - 2025-08-22
 ## Fixed
 - Error in IPSec files remove route.
