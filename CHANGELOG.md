@@ -5,7 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [Unreleased]
+## [2.2.0] - 2026-04-14
 ## Added
 - `irqbalance` plugin with enable and disable functionality.
 - `openvpn-2fa` plugin for OpenVPN two-factor authentication using script-based TOTP verification. It deploys `check_2fa.sh`, installs `oathtool`, prepares `/etc/openvpn/bin` and `/etc/openvpn/google-authenticator`, sets the permissions required for script execution and TOTP files access, and cleans these resources when disabled.
