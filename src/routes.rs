@@ -42,6 +42,7 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(info::info)
             // FWCloud script.
             .service(fwcloud_script::upload_and_run)
+            .service(fwcloud_script::upload_and_install_only)
             // OpenVPN.
             .service(openvpn::files_upload)
             .service(openvpn::files_remove)

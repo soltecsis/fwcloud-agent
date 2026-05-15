@@ -96,38 +96,9 @@ impl HttpFiles {
         payload: Multipart,
         cfg: &web::Data<Arc<Config>>,
     ) -> Result<HttpResponse> {
-        self.expected_files = 1;
-        self.extract_multipart_data(payload).await?;
-        self.check_data()?;
+        self.prepare_fwcloud_script(payload).await?;
 
-        if self.files[0].dst_name != "fwcloud.sh" {
-            return Err(FwcError::NotExpectedFileName);
-        }
-
-        self.move_tmp_files()?;
-
-        // Install de FWCloud script.
-        let mut res: HttpResponse;
-        if self.ws_id != Uuid::nil() {
-            let ws_data: Arc<Mutex<WsData>>;
-            {
-                debug!("Locking ws map mutex (thread id: {})", thread_id::get());
-                let ws_map = cfg.ws_map.lock().unwrap();
-                ws_data = ws_map
-                    .get(&self.ws_id)
-                    .ok_or(FwcError::WebSocketIdNotFound)?
-                    .clone();
-                debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
-            }
-            res = run_cmd_ws(
-                "sh",
-                &[&self.files[0].dst_path[..], "install"],
-                &ws_data,
-                false,
-            )?;
-        } else {
-            res = run_cmd("sh", &[&self.files[0].dst_path[..], "install"])?;
-        }
+        let mut res: HttpResponse = self.run_uploaded_fwcloud_script_install(cfg)?;
 
         // Load policy.
         for file in cfg.fwcloud_script_paths.iter() {
@@ -155,6 +126,65 @@ impl HttpFiles {
                 }
                 break;
             }
+        }
+
+        Ok(res)
+    }
+
+    pub async fn fwcloud_script_install_only(
+        &mut self,
+        payload: Multipart,
+        cfg: &web::Data<Arc<Config>>,
+    ) -> Result<HttpResponse> {
+        self.prepare_fwcloud_script(payload).await?;
+        self.run_uploaded_fwcloud_script_install(cfg)
+    }
+
+    async fn prepare_fwcloud_script(&mut self, payload: Multipart) -> Result<()> {
+        self.expected_files = 1;
+        self.extract_multipart_data(payload).await?;
+        self.check_data()?;
+
+        if self.files[0].dst_name != "fwcloud.sh" {
+            return Err(FwcError::NotExpectedFileName);
+        }
+
+        self.move_tmp_files()?;
+        Ok(())
+    }
+
+    fn run_uploaded_fwcloud_script_install(
+        &mut self,
+        cfg: &web::Data<Arc<Config>>,
+    ) -> Result<HttpResponse> {
+        // Install de FWCloud script.
+        let res: HttpResponse;
+        if self.ws_id != Uuid::nil() {
+            let ws_data: Arc<Mutex<WsData>>;
+            {
+                debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+                let ws_map = cfg.ws_map.lock().unwrap();
+                ws_data = ws_map
+                    .get(&self.ws_id)
+                    .ok_or(FwcError::WebSocketIdNotFound)?
+                    .clone();
+                debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+            }
+            res = run_cmd_ws(
+                "sh",
+                &[&self.files[0].dst_path[..], "install"],
+                &ws_data,
+                false,
+            )?;
+        } else {
+            res = run_cmd("sh", &[&self.files[0].dst_path[..], "install"])?;
+        }
+
+        if self.ws_id != Uuid::nil() {
+            debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+            let mut ws_map = cfg.ws_map.lock().unwrap();
+            ws_map.remove(&self.ws_id);
+            debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
         }
 
         Ok(res)
