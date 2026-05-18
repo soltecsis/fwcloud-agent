@@ -50,27 +50,3 @@ async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Resu
 
     Ok(res)
 }
-
-#[post("/fwcloud_script/install-only")]
-async fn upload_and_install_only(
-    payload: Multipart,
-    cfg: web::Data<Arc<Config>>,
-) -> Result<HttpResponse> {
-    let res: HttpResponse;
-
-    // Mutex scope start.
-    {
-        debug!("Locking script mutex (thread id: {})", thread_id::get());
-        let mutex = Arc::clone(&cfg.mutex.fwcloud_script);
-        let _mutex_data = mutex.lock().await;
-        debug!("Script mutex locked (thread id: {})", thread_id::get());
-
-        res = HttpFiles::new(cfg.tmp_dir, false)
-            .fwcloud_script_install_only(payload, &cfg)
-            .await?;
-
-        debug!("Releasing script mutex (thread id: {})", thread_id::get());
-    } // End of mutex scope.
-
-    Ok(res)
-}
