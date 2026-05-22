@@ -28,6 +28,7 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::utils::files_list::FilesList;
 use crate::utils::http_files::HttpFiles;
+use crate::utils::openvpn_dir::{OpenVPNDir, OpenVPNDirConfig};
 
 use crate::errors::{FwcError, Result};
 use crate::workers::WorkersChannels;
@@ -53,6 +54,46 @@ async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result
 
         debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
     }
+
+    Ok(HttpResponse::Ok().finish())
+}
+
+#[put("/openvpn/dirs/ensure")]
+async fn dir_ensure(
+    openvpn_dir: web::Json<OpenVPNDirConfig>,
+    cfg: web::Data<Arc<Config>>,
+) -> Result<HttpResponse> {
+    // Mutex scope start.
+    {
+        debug!("Locking OpenVPN mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.openvpn);
+        let _mutex_data = mutex.lock().await;
+        debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
+
+        openvpn_dir.create()?;
+
+        debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
+    } // Mutex scope end.
+
+    Ok(HttpResponse::Ok().finish())
+}
+
+#[delete("/openvpn/dirs/remove-empty")]
+async fn dir_remove_empty(
+    openvpn_dir: web::Json<OpenVPNDir>,
+    cfg: web::Data<Arc<Config>>,
+) -> Result<HttpResponse> {
+    // Mutex scope start.
+    {
+        debug!("Locking OpenVPN mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.openvpn);
+        let _mutex_data = mutex.lock().await;
+        debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
+
+        openvpn_dir.remove_if_empty()?;
+
+        debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
+    } // Mutex scope end.
 
     Ok(HttpResponse::Ok().finish())
 }
