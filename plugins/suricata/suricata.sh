@@ -20,8 +20,8 @@
 #   You should have received a copy of the GNU General Public License
 #   along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 
-NETIF="$1"
-OINKCODE="$2"
+NETIF="$2"
+OINKCODE="$3"
 
 . ./plugins/lib.sh
 init
@@ -66,6 +66,7 @@ enable() {
   if [ -z "$NETIF" ]; then
     NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
   fi
+  echo "AF_PACKET network interface: $NETIF"
   sed -i 's/interface: eth0$/interface: '$NETIF'/g' "$CFG_FILE"
 
   echo 
