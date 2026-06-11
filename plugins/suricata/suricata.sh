@@ -67,11 +67,6 @@ enable() {
     NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
   fi
   sed -i 's/interface: eth0$/interface: '$NETIF'/g' "$CFG_FILE"
-  # For avoid error messages like this one:
-  # [ERRCODE: SC_ERR_CONF_YAML_ERROR(242)] - App-Layer protocol sip enable status not set, so enabling by default. This behavior will change in Suricata 7, so please update your config. See ticket #4744 for more details.
-  sed -z -i 's/    sip\:\n      \#enabled\: no/    sip\:\n      enabled\: no/g' "$CFG_FILE"
-  sed -z -i 's/    rdp\:\n      \#enabled\: yes/    rdp\:\n      enabled\: no/g' "$CFG_FILE"
-  sed -z -i 's/    mqtt\:\n      \# enabled\: no/    mqtt\:\n      enabled\: no/g' "$CFG_FILE"
 
   echo 
   echo "(*) Updating rules sources index."
