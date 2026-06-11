@@ -20,7 +20,7 @@
 #   You should have received a copy of the GNU General Public License
 #   along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 
-NIC="$1"
+NETIF="$1"
 OINKCODE="$2"
 
 . ./plugins/lib.sh
@@ -63,7 +63,9 @@ enable() {
   echo "(*) Setting up Suricata service."
   CFG_FILE="/etc/suricata/suricata.yaml"
   sed -i 's/community-id: false$/community-id: true/g' "$CFG_FILE"
-  NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
+  if [ -z "$NETIF" ]; then
+    NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
+  fi
   sed -i 's/interface: eth0$/interface: '$NETIF'/g' "$CFG_FILE"
   # For avoid error messages like this one:
   # [ERRCODE: SC_ERR_CONF_YAML_ERROR(242)] - App-Layer protocol sip enable status not set, so enabling by default. This behavior will change in Suricata 7, so please update your config. See ticket #4744 for more details.
