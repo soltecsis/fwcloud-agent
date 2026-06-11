@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#   Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+#   Copyright 2026 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
 #   https://soltecsis.com
 #   info@soltecsis.com
 #
@@ -20,6 +20,9 @@
 #   You should have received a copy of the GNU General Public License
 #   along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 
+NIC="$1"
+OINKCODE="$2"
+
 . ./plugins/lib.sh
 init
 
@@ -30,6 +33,9 @@ enable() {
     echo "NOT_SUPPORTED"
     exit 1
   fi
+
+  echo
+  pkgInstall "software-properties-common"
 
   if [ $DIST = "Ubuntu" ]; then
     echo "(*) Adding the Suricata repository."
@@ -47,6 +53,9 @@ enable() {
   echo
   pkgInstall "suricata"
 
+  echo
+  pkgInstall "jq"
+
   echo "(*) Enabling Suricata service."
   systemctl enable suricata
 
@@ -61,8 +70,6 @@ enable() {
   sed -z -i 's/    sip\:\n      \#enabled\: no/    sip\:\n      enabled\: no/g' "$CFG_FILE"
   sed -z -i 's/    rdp\:\n      \#enabled\: yes/    rdp\:\n      enabled\: no/g' "$CFG_FILE"
   sed -z -i 's/    mqtt\:\n      \# enabled\: no/    mqtt\:\n      enabled\: no/g' "$CFG_FILE"
-  # Replace network interface in /etc/default/suricata
-  sed -i 's/^IFACE=eth0$/IFACE='$NETIF'/g' /etc/default/suricata
 
   echo 
   echo "(*) Updating rules sources index."
@@ -70,12 +77,18 @@ enable() {
 
   echo 
   echo "(*) Enabling free rules sources."
+  if [ "$OINKCODE" ]; then
+    # Proofpoint ET Pro rules.
+    suricata-update disable-source et/open
+    suricata-update enable-source et/pro secret-code="$OINKCODE"
+  else
+    suricata-update enable-source et/open
+  fi
   suricata-update enable-source oisf/trafficid
   suricata-update enable-source etnetera/aggressive
-  suricata-update enable-source sslbl/ssl-fp-blacklist
-  suricata-update enable-source et/open
   suricata-update enable-source tgreen/hunting
-  suricata-update enable-source sslbl/ja3-fingerprints
+  suricata-update enable-source abuse.ch/sslbl-ja3
+  suricata-update enable-source abuse.ch/sslbl-blacklist
 
   echo
   echo "(*) Updating rulesets."
@@ -83,7 +96,7 @@ enable() {
 
   echo 
   echo "(*) Starting Suricata."
-  systemctl start suricata.service
+  systemctl start suricata
 
   echo
 }
