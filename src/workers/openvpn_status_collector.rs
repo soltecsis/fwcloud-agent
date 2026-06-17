@@ -24,6 +24,7 @@ use chrono::prelude::*;
 use futures::executor::block_on;
 
 use log::{debug, error, info};
+use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
@@ -34,6 +35,53 @@ use crate::config::Config;
 
 const FORMAT_STR_OLD: &str = "%a %b %e %H:%M:%S %Y";
 const FORMAT_STR_NEW: &str = "%Y-%m-%d %H:%M:%S";
+const API_CONFIG_FILE: &str = "openvpn_status_sampling.json";
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct OpenVPNStatusSamplingConfig {
+    pub enabled: bool,
+    pub status_files: Vec<String>,
+}
+
+impl OpenVPNStatusSamplingConfig {
+    pub fn path(etc_dir: &str) -> String {
+        format!("{etc_dir}/{API_CONFIG_FILE}")
+    }
+
+    pub fn load(etc_dir: &str) -> Option<Self> {
+        let path = Self::path(etc_dir);
+
+        if !Path::new(&path).is_file() {
+            return None;
+        }
+
+        match fs::read_to_string(path).and_then(|data| {
+            serde_json::from_str(&data).map_err(|err| std::io::Error::other(err.to_string()))
+        }) {
+            Ok(config) => Some(config),
+            Err(err) => {
+                error!("Loading OpenVPN status sampling API config ({err})");
+                None
+            }
+        }
+    }
+
+    pub fn save(&self, etc_dir: &str) -> std::io::Result<()> {
+        fs::write(
+            Self::path(etc_dir),
+            serde_json::to_string_pretty(self)
+                .map_err(|err| std::io::Error::other(err.to_string()))?,
+        )
+    }
+
+    fn effective_status_files(&self) -> Vec<String> {
+        if self.enabled {
+            self.status_files.clone()
+        } else {
+            vec![]
+        }
+    }
+}
 
 struct OpenVPNStFile {
     st_file: String,
@@ -42,11 +90,24 @@ struct OpenVPNStFile {
     last_update: u64,
 }
 
+impl OpenVPNStFile {
+    fn new(file: &str, tmp_dir: &str, data_dir: &str) -> Self {
+        OpenVPNStFile {
+            st_file: String::from(file),
+            tmp_file: format!("{}/{}.tmp", tmp_dir, file.replace('/', "_")),
+            cache_file: format!("{}/{}.data", data_dir, file.replace('/', "_")),
+            last_update: 0,
+        }
+    }
+}
+
 struct OpenVPNStCollectorInner {
     openvpn_status_files: Vec<OpenVPNStFile>,
     max_size: usize,
     sampling_interval: u64,
 }
+
+#[derive(Clone)]
 pub struct OpenVPNStCollector {
     inner: Arc<Mutex<OpenVPNStCollectorInner>>,
 }
@@ -59,14 +120,15 @@ impl OpenVPNStCollectorInner {
             sampling_interval: cfg.openvpn_status_sampling_interval,
         };
 
+        let status_files = match OpenVPNStatusSamplingConfig::load(cfg.etc_dir) {
+            Some(config) => config.effective_status_files(),
+            None => cfg.openvpn_status_files.clone(),
+        };
+
         // Create the list of OpenVPN status files.
-        for file in cfg.openvpn_status_files.iter() {
-            data.openvpn_status_files.push(OpenVPNStFile {
-                st_file: String::from(file),
-                tmp_file: format!("{}/{}.tmp", cfg.tmp_dir, file.replace('/', "_")),
-                cache_file: format!("{}/{}.data", cfg.data_dir, file.replace('/', "_")),
-                last_update: 0,
-            });
+        for file in status_files.iter() {
+            data.openvpn_status_files
+                .push(OpenVPNStFile::new(file, cfg.tmp_dir, cfg.data_dir));
         }
 
         data
@@ -219,6 +281,13 @@ impl OpenVPNStCollectorInner {
     pub fn len(&self) -> usize {
         self.openvpn_status_files.len()
     }
+
+    pub fn replace_status_files(&mut self, status_files: &[String], tmp_dir: &str, data_dir: &str) {
+        self.openvpn_status_files = status_files
+            .iter()
+            .map(|file| OpenVPNStFile::new(file, tmp_dir, data_dir))
+            .collect();
+    }
 }
 
 impl OpenVPNStCollector {
@@ -226,6 +295,13 @@ impl OpenVPNStCollector {
         OpenVPNStCollector {
             inner: Arc::new(Mutex::new(OpenVPNStCollectorInner::new(cfg))),
         }
+    }
+
+    pub fn replace_status_files(&self, status_files: &[String], tmp_dir: &str, data_dir: &str) {
+        self.inner
+            .lock()
+            .unwrap()
+            .replace_status_files(status_files, tmp_dir, data_dir);
     }
 
     pub fn start(&self, cfg: Arc<Config>) -> Sender<u8> {

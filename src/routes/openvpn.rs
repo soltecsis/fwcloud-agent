@@ -33,6 +33,9 @@ use crate::utils::http_files::HttpFiles;
 use crate::utils::openvpn_dir::{OpenVPNDir, OpenVPNDirConfig};
 
 use crate::errors::{FwcError, Result};
+use crate::workers::openvpn_status_collector::{
+    OpenVPNStCollector, OpenVPNStatusSamplingConfig as PersistedOpenVPNStatusSamplingConfig,
+};
 use crate::workers::WorkersChannels;
 use thread_id;
 
@@ -50,15 +53,19 @@ struct OpenVPNStatusSamplingConfigResponse {
 }
 
 impl OpenVPNStatusSamplingConfig {
-    fn validate(&self) -> Result<()> {
+    fn normalized_status_files(&self) -> Result<Vec<String>> {
         if self.enabled && self.status_files.is_empty() {
             return Err(FwcError::BadRequest(String::from(
                 "OpenVPN status sampling requires at least one status file when enabled",
             )));
         }
 
+        let mut status_files: Vec<String> = vec![];
+
         for status_file in self.status_files.iter() {
-            if status_file.trim().is_empty() {
+            let status_file = status_file.trim();
+
+            if status_file.is_empty() {
                 return Err(FwcError::BadRequest(String::from(
                     "OpenVPN status file path cannot be empty",
                 )));
@@ -69,9 +76,13 @@ impl OpenVPNStatusSamplingConfig {
                     "OpenVPN status file path must be absolute: {status_file}"
                 )));
             }
+
+            if !status_files.contains(&String::from(status_file)) {
+                status_files.push(String::from(status_file));
+            }
         }
 
-        Ok(())
+        Ok(status_files)
     }
 }
 
@@ -287,14 +298,36 @@ async fn update_status(workers_channels: web::Data<WorkersChannels>) -> Result<H
 #[put("/openvpn/status/sampling")]
 async fn status_sampling_update(
     config: web::Json<OpenVPNStatusSamplingConfig>,
+    cfg: web::Data<Arc<Config>>,
+    collector: web::Data<OpenVPNStCollector>,
 ) -> Result<HttpResponse> {
-    config.validate()?;
+    let status_files = if config.enabled {
+        config.normalized_status_files()?
+    } else {
+        vec![]
+    };
+
+    {
+        debug!("Locking OpenVPN mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.openvpn);
+        let _mutex_data = mutex.lock().await;
+        debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
+
+        collector.replace_status_files(&status_files, cfg.tmp_dir, cfg.data_dir);
+        PersistedOpenVPNStatusSamplingConfig {
+            enabled: config.enabled,
+            status_files: status_files.clone(),
+        }
+        .save(cfg.etc_dir)?;
+
+        debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
+    }
 
     Ok(
         HttpResponse::Ok().json(OpenVPNStatusSamplingConfigResponse {
             accepted: true,
             enabled: config.enabled,
-            status_files: config.status_files.clone(),
+            status_files,
         }),
     )
 }
