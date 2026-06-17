@@ -23,6 +23,8 @@
 use actix_multipart::Multipart;
 use actix_web::{delete, http::header, post, put, web, HttpResponse};
 use log::debug;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::config::Config;
@@ -33,6 +35,45 @@ use crate::utils::openvpn_dir::{OpenVPNDir, OpenVPNDirConfig};
 use crate::errors::{FwcError, Result};
 use crate::workers::WorkersChannels;
 use thread_id;
+
+#[derive(Deserialize)]
+struct OpenVPNStatusSamplingConfig {
+    enabled: bool,
+    status_files: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct OpenVPNStatusSamplingConfigResponse {
+    accepted: bool,
+    enabled: bool,
+    status_files: Vec<String>,
+}
+
+impl OpenVPNStatusSamplingConfig {
+    fn validate(&self) -> Result<()> {
+        if self.enabled && self.status_files.is_empty() {
+            return Err(FwcError::BadRequest(String::from(
+                "OpenVPN status sampling requires at least one status file when enabled",
+            )));
+        }
+
+        for status_file in self.status_files.iter() {
+            if status_file.trim().is_empty() {
+                return Err(FwcError::BadRequest(String::from(
+                    "OpenVPN status file path cannot be empty",
+                )));
+            }
+
+            if !Path::new(status_file).is_absolute() {
+                return Err(FwcError::BadRequest(format!(
+                    "OpenVPN status file path must be absolute: {status_file}"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+}
 
 //use std::{thread, time};
 
@@ -241,6 +282,21 @@ async fn get_status(
 async fn update_status(workers_channels: web::Data<WorkersChannels>) -> Result<HttpResponse> {
     workers_channels.openvpn_st_collector.send(1)?;
     Ok(HttpResponse::Ok().finish())
+}
+
+#[put("/openvpn/status/sampling")]
+async fn status_sampling_update(
+    config: web::Json<OpenVPNStatusSamplingConfig>,
+) -> Result<HttpResponse> {
+    config.validate()?;
+
+    Ok(
+        HttpResponse::Ok().json(OpenVPNStatusSamplingConfigResponse {
+            accepted: true,
+            enabled: config.enabled,
+            status_files: config.status_files.clone(),
+        }),
+    )
 }
 
 #[put("/openvpn/get/status/rt")]
