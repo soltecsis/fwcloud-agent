@@ -288,6 +288,13 @@ impl OpenVPNStCollectorInner {
             .map(|file| OpenVPNStFile::new(file, tmp_dir, data_dir))
             .collect();
     }
+
+    pub fn status_files(&self) -> Vec<String> {
+        self.openvpn_status_files
+            .iter()
+            .map(|file| file.st_file.clone())
+            .collect()
+    }
 }
 
 impl OpenVPNStCollector {
@@ -302,6 +309,10 @@ impl OpenVPNStCollector {
             .lock()
             .unwrap()
             .replace_status_files(status_files, tmp_dir, data_dir);
+    }
+
+    pub fn status_files(&self) -> Vec<String> {
+        self.inner.lock().unwrap().status_files()
     }
 
     pub fn start(&self, cfg: Arc<Config>) -> Sender<u8> {

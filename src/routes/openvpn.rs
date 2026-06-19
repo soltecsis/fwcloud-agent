@@ -21,7 +21,7 @@
 */
 
 use actix_multipart::Multipart;
-use actix_web::{delete, http::header, post, put, web, HttpResponse};
+use actix_web::{delete, get, http::header, post, put, web, HttpResponse};
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -327,6 +327,19 @@ async fn status_sampling_update(
         HttpResponse::Ok().json(OpenVPNStatusSamplingConfigResponse {
             accepted: true,
             enabled: config.enabled,
+            status_files,
+        }),
+    )
+}
+
+#[get("/openvpn/status/sampling")]
+async fn status_sampling_show(collector: web::Data<OpenVPNStCollector>) -> Result<HttpResponse> {
+    let status_files = collector.status_files();
+
+    Ok(
+        HttpResponse::Ok().json(OpenVPNStatusSamplingConfigResponse {
+            accepted: true,
+            enabled: !status_files.is_empty(),
             status_files,
         }),
     )

@@ -147,3 +147,36 @@ async fn openvpn_status_sampling_disable_clears_paths() {
     assert_eq!(body["status_files"].as_array().unwrap().len(), 0);
     remove_api_config_file();
 }
+
+#[tokio::test]
+#[serial]
+async fn openvpn_status_sampling_show_returns_applied_config() {
+    remove_api_config_file();
+    let base_url = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/status/sampling", base_url);
+
+    let res = reqwest::Client::new()
+        .put(&url)
+        .header("Content-Type", "application/json")
+        .body(
+            serde_json::json!({
+                "enabled": true,
+                "status_files": ["/run/openvpn/server.status"]
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 200);
+
+    let res = reqwest::Client::new().get(url).send().await.unwrap();
+    assert_eq!(res.status().as_u16(), 200);
+
+    let body: serde_json::Value = serde_json::from_str(&res.text().await.unwrap()).unwrap();
+    assert_eq!(body["accepted"], true);
+    assert_eq!(body["enabled"], true);
+    assert_eq!(body["status_files"][0], "/run/openvpn/server.status");
+
+    remove_api_config_file();
+}
