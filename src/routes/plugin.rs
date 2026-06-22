@@ -44,8 +44,21 @@ pub struct Plugin {
     ))]
     pub action: String,
 
-    pub ws_id: Option<Uuid>,       // Optional parameter
-    pub server_cn: Option<String>, // Optional parameter
+    pub ws_id: Option<Uuid>,                // Optional parameter
+    pub server_cn: Option<String>,          // Optional parameter
+    pub plugin_params: Option<Vec<String>>, // Optional parameter
+}
+
+fn validate_plugin_params(plugin_params: &Option<Vec<String>>) -> Result<()> {
+    if let Some(params) = plugin_params {
+        for param in params {
+            if param.is_empty() || param.len() > 256 || param.chars().any(char::is_control) {
+                return Err(FwcError::BadRequest("Invalid plugin parameter".to_string()));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /*
@@ -57,12 +70,18 @@ pub struct Plugin {
 #[post("/plugin")]
 async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
     plugin.validate()?; // Validate input.
+    validate_plugin_params(&plugin.plugin_params)?;
 
     let cmd = "sh";
     let argv0 = format!("{}/{}/{}.sh", cfg.plugins_dir, plugin.name, plugin.name);
     let mut args = vec![argv0.as_str(), plugin.action.as_str()];
     if let Some(server_cn) = plugin.server_cn.as_deref() {
         args.push(server_cn);
+    }
+    if let Some(plugin_params) = plugin.plugin_params.as_deref() {
+        for param in plugin_params {
+            args.push(param);
+        }
     }
     let res: HttpResponse;
 
