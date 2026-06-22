@@ -50,6 +50,9 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(openvpn::files_sha256)
             .service(openvpn::get_status)
             .service(openvpn::update_status)
+            .service(openvpn::status_sampling_update)
+            .service(openvpn::status_sampling_show)
+            .service(openvpn::status_sampling_env_show)
             .service(openvpn::get_status_rt)
             .service(openvpn::files_read)
             // WireGuard.

@@ -55,13 +55,15 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
     let cfg_main_thread = cfg.clone();
 
     // Start workers threads.
+    let openvpn_st_collector = OpenVPNStCollector::new(&cfg);
     let workers_channels = WorkersChannels {
-        openvpn_st_collector: OpenVPNStCollector::new(&cfg).start(cfg.clone()),
+        openvpn_st_collector: openvpn_st_collector.start(cfg.clone()),
     };
 
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(cfg.clone()))
+            .app_data(web::Data::new(openvpn_st_collector.clone()))
             .app_data(web::Data::new(workers_channels.clone()))
             .wrap(middleware::Logger::default())
             .wrap(auth::Authorize)
