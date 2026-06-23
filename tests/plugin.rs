@@ -67,6 +67,7 @@ async fn plugin_with_invalid_data() {
                 action: String::from("INVALID"),
                 ws_id: Option::None,
                 server_cn: Option::None,
+                plugin_params: Option::None,
             },
             "{\"message\":\"action: Invalid plugin action\"}",
         ),
@@ -76,6 +77,7 @@ async fn plugin_with_invalid_data() {
                 action: String::from("enable"),
                 ws_id: Option::None,
                 server_cn: Option::None,
+                plugin_params: Option::None,
             },
             "{\"message\":\"name: Invalid plugin name\"}",
         ),
@@ -85,8 +87,19 @@ async fn plugin_with_invalid_data() {
                 action: String::from("enable"),
                 ws_id: Option::Some(Uuid::new_v4()),
                 server_cn: Option::None,
+                plugin_params: Option::None,
             },
             "{\"message\":\"WebSocket id not found\"}",
+        ),
+        (
+            Plugin {
+                name: String::from("test"),
+                action: String::from("enable"),
+                ws_id: Option::None,
+                server_cn: Option::None,
+                plugin_params: Option::Some(vec![String::new()]),
+            },
+            "{\"message\":\"Invalid plugin parameter\"}",
         ),
     ];
 
@@ -119,6 +132,7 @@ async fn test_plugin_enable_and_disable() {
                 action: String::from("enable"),
                 ws_id: Option::None,
                 server_cn: Option::None,
+                plugin_params: Option::None,
             },
             "ENABLED\n",
         ),
@@ -128,8 +142,19 @@ async fn test_plugin_enable_and_disable() {
                 action: String::from("disable"),
                 ws_id: Option::None,
                 server_cn: Option::None,
+                plugin_params: Option::None,
             },
             "DISABLED\n",
+        ),
+        (
+            Plugin {
+                name: String::from("test"),
+                action: String::from("enable"),
+                ws_id: Option::None,
+                server_cn: Option::None,
+                plugin_params: Option::Some(vec![String::from("ens18"), String::from("OINKCODE")]),
+            },
+            "ENABLED\n",
         ),
     ];
 
