@@ -101,6 +101,50 @@ async fn plugin_with_invalid_data() {
             },
             "{\"message\":\"Invalid plugin parameter\"}",
         ),
+        (
+            Plugin {
+                name: String::from("suricata"),
+                action: String::from("enable"),
+                ws_id: Option::None,
+                server_cn: Option::None,
+                plugin_params: Option::None,
+            },
+            "{\"message\":\"Suricata activation requires one interface and an optional OINKCODE\"}",
+        ),
+        (
+            Plugin {
+                name: String::from("suricata"),
+                action: String::from("enable"),
+                ws_id: Option::None,
+                server_cn: Option::None,
+                plugin_params: Option::Some(vec![String::from("ens18;reboot")]),
+            },
+            "{\"message\":\"Suricata network interface is not valid\"}",
+        ),
+        (
+            Plugin {
+                name: String::from("suricata"),
+                action: String::from("enable"),
+                ws_id: Option::None,
+                server_cn: Option::None,
+                plugin_params: Option::Some(vec![String::from("ens18"), String::from("ABC-123")]),
+            },
+            "{\"message\":\"Suricata OINKCODE must contain only letters and numbers\"}",
+        ),
+        (
+            Plugin {
+                name: String::from("suricata"),
+                action: String::from("enable"),
+                ws_id: Option::None,
+                server_cn: Option::None,
+                plugin_params: Option::Some(vec![
+                    String::from("ens18"),
+                    String::from("ABC123"),
+                    String::from("extra"),
+                ]),
+            },
+            "{\"message\":\"Suricata activation requires one interface and an optional OINKCODE\"}",
+        ),
     ];
 
     for (invalid_data, error_message) in test_cases {

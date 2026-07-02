@@ -26,6 +26,7 @@ use validator::Validate;
 use crate::config::Config;
 use crate::errors::{FwcError, Result};
 use crate::utils::cmd::{run_cmd, run_cmd_ws};
+use crate::utils::myregex::{ALPHA_NUM, NETWORK_INTERFACE_NAME};
 use crate::utils::ws::WsData;
 
 //use std::{thread, time};
@@ -61,6 +62,38 @@ fn validate_plugin_params(plugin_params: &Option<Vec<String>>) -> Result<()> {
     Ok(())
 }
 
+fn validate_suricata_plugin_params(plugin_data: &Plugin) -> Result<()> {
+    if plugin_data.name != "suricata" || plugin_data.action != "enable" {
+        return Ok(());
+    }
+
+    let params = plugin_data.plugin_params.as_deref().ok_or_else(|| {
+        FwcError::BadRequest(
+            "Suricata activation requires one interface and an optional OINKCODE".to_string(),
+        )
+    })?;
+
+    if params.is_empty() || params.len() > 2 {
+        return Err(FwcError::BadRequest(
+            "Suricata activation requires one interface and an optional OINKCODE".to_string(),
+        ));
+    }
+
+    if !NETWORK_INTERFACE_NAME.is_match(&params[0]) {
+        return Err(FwcError::BadRequest(
+            "Suricata network interface is not valid".to_string(),
+        ));
+    }
+
+    if params.len() == 2 && !ALPHA_NUM.is_match(&params[1]) {
+        return Err(FwcError::BadRequest(
+            "Suricata OINKCODE must contain only letters and numbers".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 /*
   curl -k -i -X POST -H 'X-API-Key: **************************' \
     -H "Content-Type: application/json" \
@@ -71,6 +104,7 @@ fn validate_plugin_params(plugin_params: &Option<Vec<String>>) -> Result<()> {
 async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
     plugin.validate()?; // Validate input.
     validate_plugin_params(&plugin.plugin_params)?;
+    validate_suricata_plugin_params(&plugin)?;
 
     let cmd = "sh";
     let argv0 = format!("{}/{}/{}.sh", cfg.plugins_dir, plugin.name, plugin.name);
