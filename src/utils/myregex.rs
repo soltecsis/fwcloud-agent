@@ -33,6 +33,7 @@ lazy_static! {
 
   pub static ref ALPHA_NUM: Regex = Regex::new("^[a-zA-Z0-9]*$").unwrap();
   pub static ref ALPHA_NUM_2: Regex = Regex::new("^[a-zA-Z0-9\\-_]*$").unwrap();
+  pub static ref NETWORK_INTERFACE_NAME: Regex = Regex::new("^[a-zA-Z0-9_.:-]{1,64}$").unwrap();
 
   pub static ref FILE_PERMISSIONS: Regex = Regex::new("^[0-7]{3}$").unwrap();
   pub static ref LINUX_USER_GROUP: Regex = Regex::new("^[a-zA-Z_]([a-zA-Z0-9_-]{0,31}|[a-zA-Z0-9_-]{0,30}\\$)$").unwrap();
@@ -75,6 +76,11 @@ impl AsRegex for ALPHA_NUM {
     }
 }
 impl AsRegex for ALPHA_NUM_2 {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+impl AsRegex for NETWORK_INTERFACE_NAME {
     fn as_regex(&self) -> Cow<'_, regex::Regex> {
         std::borrow::Cow::Borrowed(self)
     }
