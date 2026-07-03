@@ -19,12 +19,14 @@
     You should have received a copy of the GNU General Public License
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
+use log::info;
 use rand::RngExt;
 use rand_distr::Alphanumeric;
 use std::{
     collections::HashMap,
     env, fs,
     net::TcpListener,
+    path::Path,
     sync::{Arc, Mutex},
 };
 use uuid::Uuid;
@@ -105,7 +107,10 @@ pub struct Config {
 
 impl Config {
     pub fn new() -> Result<Self> {
-        dotenvy::dotenv().ok();
+        let env_file = dotenvy::dotenv().ok();
+        if let Some(path) = env_file {
+            Self::remove_deprecated_openvpn_status_files(&path)?;
+        }
 
         let mut cfg = Config {
             etc_dir: "./etc",
@@ -214,6 +219,47 @@ impl Config {
         Ok(cfg)
     }
 
+    fn remove_deprecated_openvpn_status_files(path: &Path) -> std::io::Result<()> {
+        let data = fs::read_to_string(path)?;
+        let mut lines: Vec<&str> = data.lines().collect();
+        let has_trailing_newline = data.ends_with('\n');
+        let mut removed = false;
+
+        let mut inx = 0;
+        while inx < lines.len() {
+            let line = lines[inx].trim_start();
+            let key = line
+                .strip_prefix("export ")
+                .unwrap_or(line)
+                .split_once('=')
+                .map(|(key, _)| key.trim());
+
+            if key == Some("OPENVPN_STATUS_FILES") {
+                lines.remove(inx);
+                if inx > 0 && lines[inx - 1].trim_start().starts_with('#') {
+                    lines.remove(inx - 1);
+                    inx -= 1;
+                }
+                removed = true;
+                continue;
+            }
+
+            inx += 1;
+        }
+
+        if removed {
+            let mut updated = lines.join("\n");
+            if has_trailing_newline {
+                updated.push('\n');
+            }
+            fs::write(path, updated)?;
+            env::remove_var("OPENVPN_STATUS_FILES");
+            info!("OPENVPN_STATUS_FILES has been removed from .env because it is deprecated");
+        }
+
+        Ok(())
+    }
+
     pub fn bind_to(&mut self) -> TcpListener {
         let addr = format!("{}:{}", self.bind_ip, self.bind_port);
         let listener = TcpListener::bind(addr)
@@ -225,5 +271,41 @@ impl Config {
         }
 
         listener
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+    use uuid::Uuid;
+
+    #[test]
+    #[serial]
+    fn removes_deprecated_openvpn_status_files_from_env_file() -> std::io::Result<()> {
+        let path = format!("./tests/playground/tmp/.env_{}", Uuid::new_v4());
+        fs::write(
+            &path,
+            [
+                "API_KEY=\"test\"",
+                "# Comma separated list of full paths of OpenVPN server status files",
+                "OPENVPN_STATUS_FILES=\"/run/openvpn/server.status\"",
+                "OPENVPN_STATUS_SAMPLING_INTERVAL=30",
+                "",
+            ]
+            .join("\n"),
+        )?;
+
+        env::set_var("OPENVPN_STATUS_FILES", "/run/openvpn/server.status");
+        Config::remove_deprecated_openvpn_status_files(Path::new(&path))?;
+
+        let data = fs::read_to_string(&path)?;
+        assert!(!data.contains("OPENVPN_STATUS_FILES"));
+        assert!(!data.contains("Comma separated list of full paths"));
+        assert!(data.contains("OPENVPN_STATUS_SAMPLING_INTERVAL=30"));
+        assert!(env::var("OPENVPN_STATUS_FILES").is_err());
+
+        fs::remove_file(path)?;
+        Ok(())
     }
 }

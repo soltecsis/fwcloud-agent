@@ -37,7 +37,10 @@ use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use std::net::TcpListener;
 use std::sync::Arc;
 
-use crate::workers::{openvpn_status_collector::OpenVPNStCollector, WorkersChannels};
+use crate::workers::{
+    openvpn_status_collector::{OpenVPNStCollector, OpenVPNStatusSamplingConfig},
+    WorkersChannels,
+};
 use config::Config;
 
 pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Error> {
@@ -50,6 +53,8 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
         env!("CARGO_PKG_VERSION")
     );
     info!("Listening on: {}:{}", config.bind_ip, config.bind_port);
+
+    OpenVPNStatusSamplingConfig::load_or_create(config.etc_dir)?;
 
     let cfg = Arc::new(config);
     let cfg_main_thread = cfg.clone();
