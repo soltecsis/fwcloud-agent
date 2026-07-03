@@ -356,17 +356,6 @@ async fn status_sampling_show(cfg: web::Data<Arc<Config>>) -> Result<HttpRespons
     )
 }
 
-#[get("/openvpn/status/sampling/env")]
-async fn status_sampling_env_show(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
-    Ok(
-        HttpResponse::Ok().json(OpenVPNStatusSamplingConfigResponse {
-            accepted: true,
-            enabled: !cfg.openvpn_status_files.is_empty(),
-            status_files: cfg.openvpn_status_files.clone(),
-        }),
-    )
-}
-
 #[put("/openvpn/get/status/rt")]
 async fn get_status_rt(files_list: web::Json<FilesList>) -> Result<HttpResponse> {
     // Only one OpenVPN status file must be indicated in the request.
