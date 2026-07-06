@@ -333,25 +333,25 @@ async fn status_sampling_update(
 }
 
 #[get("/openvpn/status/sampling")]
-async fn status_sampling_show(collector: web::Data<OpenVPNStCollector>) -> Result<HttpResponse> {
-    let status_files = collector.status_files();
+async fn status_sampling_show(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+    let persisted_config: PersistedOpenVPNStatusSamplingConfig;
+
+    {
+        debug!("Locking OpenVPN mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.openvpn);
+        let _mutex_data = mutex.lock().await;
+        debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
+
+        persisted_config = PersistedOpenVPNStatusSamplingConfig::load_or_create(cfg.etc_dir)?;
+
+        debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
+    }
 
     Ok(
         HttpResponse::Ok().json(OpenVPNStatusSamplingConfigResponse {
             accepted: true,
-            enabled: !status_files.is_empty(),
-            status_files,
-        }),
-    )
-}
-
-#[get("/openvpn/status/sampling/env")]
-async fn status_sampling_env_show(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
-    Ok(
-        HttpResponse::Ok().json(OpenVPNStatusSamplingConfigResponse {
-            accepted: true,
-            enabled: !cfg.openvpn_status_files.is_empty(),
-            status_files: cfg.openvpn_status_files.clone(),
+            enabled: persisted_config.enabled,
+            status_files: persisted_config.status_files,
         }),
     )
 }
