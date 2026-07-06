@@ -227,7 +227,11 @@ impl Config {
 
         let mut inx = 0;
         while inx < lines.len() {
-            let line = lines[inx].trim_start();
+            let line = lines[inx]
+                .trim_start()
+                .strip_prefix('#')
+                .map(str::trim_start)
+                .unwrap_or_else(|| lines[inx].trim_start());
             let key = line
                 .strip_prefix("export ")
                 .unwrap_or(line)
@@ -236,9 +240,14 @@ impl Config {
 
             if key == Some("OPENVPN_STATUS_FILES") {
                 lines.remove(inx);
-                if inx > 0 && lines[inx - 1].trim_start().starts_with('#') {
+                let mut removed_comments = 0;
+                while inx > 0
+                    && removed_comments < 2
+                    && lines[inx - 1].trim_start().starts_with('#')
+                {
                     lines.remove(inx - 1);
                     inx -= 1;
+                    removed_comments += 1;
                 }
                 removed = true;
                 continue;
@@ -288,6 +297,7 @@ mod tests {
             &path,
             [
                 "API_KEY=\"test\"",
+                "# Deprecated OpenVPN status files",
                 "# Comma separated list of full paths of OpenVPN server status files",
                 "OPENVPN_STATUS_FILES=\"/run/openvpn/server.status\"",
                 "OPENVPN_STATUS_SAMPLING_INTERVAL=30",
@@ -301,6 +311,38 @@ mod tests {
 
         let data = fs::read_to_string(&path)?;
         assert!(!data.contains("OPENVPN_STATUS_FILES"));
+        assert!(!data.contains("Deprecated OpenVPN status files"));
+        assert!(!data.contains("Comma separated list of full paths"));
+        assert!(data.contains("OPENVPN_STATUS_SAMPLING_INTERVAL=30"));
+        assert!(env::var("OPENVPN_STATUS_FILES").is_err());
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn removes_commented_deprecated_openvpn_status_files_from_env_file() -> std::io::Result<()> {
+        let path = format!("./tests/playground/tmp/.env_{}", Uuid::new_v4());
+        fs::write(
+            &path,
+            [
+                "API_KEY=\"test\"",
+                "# Deprecated OpenVPN status files",
+                "# Comma separated list of full paths of OpenVPN server status files",
+                "# OPENVPN_STATUS_FILES=\"/run/openvpn/server.status\"",
+                "OPENVPN_STATUS_SAMPLING_INTERVAL=30",
+                "",
+            ]
+            .join("\n"),
+        )?;
+
+        env::set_var("OPENVPN_STATUS_FILES", "/run/openvpn/server.status");
+        Config::remove_deprecated_openvpn_status_files(Path::new(&path))?;
+
+        let data = fs::read_to_string(&path)?;
+        assert!(!data.contains("OPENVPN_STATUS_FILES"));
+        assert!(!data.contains("Deprecated OpenVPN status files"));
         assert!(!data.contains("Comma separated list of full paths"));
         assert!(data.contains("OPENVPN_STATUS_SAMPLING_INTERVAL=30"));
         assert!(env::var("OPENVPN_STATUS_FILES").is_err());
