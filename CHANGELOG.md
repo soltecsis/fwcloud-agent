@@ -5,6 +5,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+## Added
+- OpenVPN API calls for client configuration directory management, including directory creation with owner, group and permissions, and removal of empty directories.
+- OpenVPN API calls for managing status sampling configuration, with persisted enable state and status file list.
+- Support for loading OpenVPN status sampling configuration at startup from the API-managed configuration file.
+- Support for generic plugin script parameters in the plugin API.
+- Suricata plugin parameters for selecting the network interface and optionally configuring an OINKCODE.
+- Validation for generic plugin parameters and Suricata-specific activation parameters.
+
+## Changed
+- Persist OpenVPN status sampling configuration outside `.env` instead of using the deprecated `OPENVPN_STATUS_FILES` environment variable.
+- Updated the Suricata plugin setup to install required packages, support ET Pro rules when an OINKCODE is provided, and use the current Suricata rule source names.
+
+## Fixed
+- Remove deprecated `OPENVPN_STATUS_FILES` entries, including commented entries, from `.env` during configuration load.
+- Allow `openvpn-server@<server>` services in the `systemctl` API validation.
+- Updated Rust packages to the latest version.
+
+
 ## [2.2.0] - 2026-04-14
 ## Added
 - `irqbalance` plugin with enable and disable functionality.
