@@ -106,7 +106,7 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 
 [dependencies]
 actix = "0.13.5"
-actix-web-actors = "4.3.1+deprecated"
+actix-web-actors = "4.3.1"
 actix-web = { version = "4.14.0", features = ["openssl"] }
 actix-service = "2.0.3"
 actix-multipart = "0.8.0"
@@ -119,15 +119,15 @@ validator = { version = "0.20.0", features = ["derive"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 lazy_static = "1.5.0"
-rand = "0.10.1"
+rand = "0.10.2"
 rand_distr = "0.6.0" 
 regex = "1.12.4"
 log = "0.4.33"
-env_logger = "0.11.10"
+env_logger = "0.11.11"
 sanitize-filename = "0.6.0"
-uuid = { version = "1.23.3", features = ["serde", "v4"] }
+uuid = { version = "1.23.4", features = ["serde", "v4"] }
 thread-id = "5.1.0"
-subprocess = "1.1.0"
+subprocess = "1.2.0"
 sha2 = "0.11.0"
 hex = "0.4.3"
 chrono = { version = "0.4.45", default-features = false }
