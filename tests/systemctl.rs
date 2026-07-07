@@ -24,6 +24,7 @@ mod common;
 use reqwest::header::CONTENT_TYPE;
 
 use fwcloud_agent::routes::systemctl::Systemctl;
+use validator::Validate;
 
 // `tokio::test` is the testing equivalent of `tokio::main`.
 // It also spares you from having to specify the `#[test]` attribute.
@@ -93,4 +94,25 @@ async fn systemctl_with_invalid_data() {
         let body = res.text().await.unwrap();
         assert_eq!(body, error_message);
     }
+}
+
+#[test]
+fn systemctl_openvpn_service_validation() {
+    let valid_services = vec!["openvpn@firewall1", "openvpn-server@firewall1"];
+
+    for service in valid_services {
+        let data = Systemctl {
+            command: String::from("status"),
+            service: String::from(service),
+        };
+
+        assert!(data.validate().is_ok());
+    }
+
+    let invalid_data = Systemctl {
+        command: String::from("status"),
+        service: String::from("openvpn-server"),
+    };
+
+    assert!(invalid_data.validate().is_err());
 }

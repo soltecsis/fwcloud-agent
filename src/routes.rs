@@ -43,11 +43,15 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             // FWCloud script.
             .service(fwcloud_script::upload_and_run)
             // OpenVPN.
+            .service(openvpn::dir_ensure)
+            .service(openvpn::dir_remove_empty)
             .service(openvpn::files_upload)
             .service(openvpn::files_remove)
             .service(openvpn::files_sha256)
             .service(openvpn::get_status)
             .service(openvpn::update_status)
+            .service(openvpn::status_sampling_update)
+            .service(openvpn::status_sampling_show)
             .service(openvpn::get_status_rt)
             .service(openvpn::files_read)
             // WireGuard.

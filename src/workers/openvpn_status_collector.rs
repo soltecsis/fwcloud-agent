@@ -24,6 +24,7 @@ use chrono::prelude::*;
 use futures::executor::block_on;
 
 use log::{debug, error, info};
+use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
@@ -34,6 +35,67 @@ use crate::config::Config;
 
 const FORMAT_STR_OLD: &str = "%a %b %e %H:%M:%S %Y";
 const FORMAT_STR_NEW: &str = "%Y-%m-%d %H:%M:%S";
+const API_CONFIG_FILE: &str = "openvpn_status_sampling.json";
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct OpenVPNStatusSamplingConfig {
+    pub enabled: bool,
+    pub status_files: Vec<String>,
+}
+
+impl OpenVPNStatusSamplingConfig {
+    pub fn empty() -> Self {
+        OpenVPNStatusSamplingConfig {
+            enabled: false,
+            status_files: vec![],
+        }
+    }
+
+    pub fn path(etc_dir: &str) -> String {
+        format!("{etc_dir}/{API_CONFIG_FILE}")
+    }
+
+    pub fn load(etc_dir: &str) -> std::io::Result<Option<Self>> {
+        let path = Self::path(etc_dir);
+
+        if !Path::new(&path).is_file() {
+            return Ok(None);
+        }
+
+        fs::read_to_string(path)
+            .and_then(|data| {
+                serde_json::from_str(&data).map_err(|err| std::io::Error::other(err.to_string()))
+            })
+            .map(Some)
+    }
+
+    pub fn load_or_create(etc_dir: &str) -> std::io::Result<Self> {
+        match Self::load(etc_dir)? {
+            Some(config) => Ok(config),
+            None => {
+                let config = Self::empty();
+                config.save(etc_dir)?;
+                Ok(config)
+            }
+        }
+    }
+
+    pub fn save(&self, etc_dir: &str) -> std::io::Result<()> {
+        fs::write(
+            Self::path(etc_dir),
+            serde_json::to_string_pretty(self)
+                .map_err(|err| std::io::Error::other(err.to_string()))?,
+        )
+    }
+
+    fn effective_status_files(&self) -> Vec<String> {
+        if self.enabled {
+            self.status_files.clone()
+        } else {
+            vec![]
+        }
+    }
+}
 
 struct OpenVPNStFile {
     st_file: String,
@@ -42,11 +104,24 @@ struct OpenVPNStFile {
     last_update: u64,
 }
 
+impl OpenVPNStFile {
+    fn new(file: &str, tmp_dir: &str, data_dir: &str) -> Self {
+        OpenVPNStFile {
+            st_file: String::from(file),
+            tmp_file: format!("{}/{}.tmp", tmp_dir, file.replace('/', "_")),
+            cache_file: format!("{}/{}.data", data_dir, file.replace('/', "_")),
+            last_update: 0,
+        }
+    }
+}
+
 struct OpenVPNStCollectorInner {
     openvpn_status_files: Vec<OpenVPNStFile>,
     max_size: usize,
     sampling_interval: u64,
 }
+
+#[derive(Clone)]
 pub struct OpenVPNStCollector {
     inner: Arc<Mutex<OpenVPNStCollectorInner>>,
 }
@@ -59,14 +134,18 @@ impl OpenVPNStCollectorInner {
             sampling_interval: cfg.openvpn_status_sampling_interval,
         };
 
+        let status_files = match OpenVPNStatusSamplingConfig::load_or_create(cfg.etc_dir) {
+            Ok(config) => config.effective_status_files(),
+            Err(err) => {
+                error!("Loading OpenVPN status sampling API config ({err})");
+                vec![]
+            }
+        };
+
         // Create the list of OpenVPN status files.
-        for file in cfg.openvpn_status_files.iter() {
-            data.openvpn_status_files.push(OpenVPNStFile {
-                st_file: String::from(file),
-                tmp_file: format!("{}/{}.tmp", cfg.tmp_dir, file.replace('/', "_")),
-                cache_file: format!("{}/{}.data", cfg.data_dir, file.replace('/', "_")),
-                last_update: 0,
-            });
+        for file in status_files.iter() {
+            data.openvpn_status_files
+                .push(OpenVPNStFile::new(file, cfg.tmp_dir, cfg.data_dir));
         }
 
         data
@@ -194,10 +273,9 @@ impl OpenVPNStCollectorInner {
             match OpenVPNStCollectorInner::collect_status_data(item, self.max_size) {
                 Ok(_) => (),
                 Err(e) => {
-                    /* If the default openvpn status log file doesn't exists then only display error
-                    at the debug level. This simplifies the setup because we can leave the default value
-                    for OPENVPN_STATUS_FILES and not full the logs with repetitive messages when the default file
-                    doesn't exists. */
+                    /* If the legacy default openvpn status log file doesn't exist then only display error
+                    at the debug level to avoid repetitive messages for deployments that still have that
+                    file configured. */
                     if item.st_file == "/etc/openvpn/openvpn-status.log"
                         && e.to_string() == "No such file or directory (os error 2)"
                     {
@@ -219,6 +297,13 @@ impl OpenVPNStCollectorInner {
     pub fn len(&self) -> usize {
         self.openvpn_status_files.len()
     }
+
+    pub fn replace_status_files(&mut self, status_files: &[String], tmp_dir: &str, data_dir: &str) {
+        self.openvpn_status_files = status_files
+            .iter()
+            .map(|file| OpenVPNStFile::new(file, tmp_dir, data_dir))
+            .collect();
+    }
 }
 
 impl OpenVPNStCollector {
@@ -226,6 +311,13 @@ impl OpenVPNStCollector {
         OpenVPNStCollector {
             inner: Arc::new(Mutex::new(OpenVPNStCollectorInner::new(cfg))),
         }
+    }
+
+    pub fn replace_status_files(&self, status_files: &[String], tmp_dir: &str, data_dir: &str) {
+        self.inner
+            .lock()
+            .unwrap()
+            .replace_status_files(status_files, tmp_dir, data_dir);
     }
 
     pub fn start(&self, cfg: Arc<Config>) -> Sender<u8> {
@@ -294,12 +386,32 @@ mod tests {
         env_list: Vec<(&str, String)>,
         change_paths: bool,
     ) -> OpenVPNStCollectorInner {
+        let api_config_file = OpenVPNStatusSamplingConfig::path("./etc");
+        let _ = fs::remove_file(&api_config_file);
+
         for v in env_list.iter() {
             env::set_var(v.0, &v.1);
         }
 
         env::set_var("API_KEY", "d64c88318c8f213f427af857d0013f93");
         let cfg = Arc::new(Config::new().unwrap());
+
+        for v in env_list.iter() {
+            if v.0 == "OPENVPN_STATUS_FILES" {
+                let status_files: Vec<String> =
+                    v.1.split(',')
+                        .filter(|file| !file.is_empty())
+                        .map(|file| String::from(file.trim()))
+                        .collect();
+
+                OpenVPNStatusSamplingConfig {
+                    enabled: !status_files.is_empty(),
+                    status_files,
+                }
+                .save(cfg.etc_dir)
+                .unwrap();
+            }
+        }
 
         for v in env_list.iter() {
             env::remove_var(v.0);
@@ -354,22 +466,9 @@ mod tests {
 
     #[test]
     #[serial]
-    fn generates_right_default_openvpn_status_file_vector() {
+    fn generates_empty_openvpn_status_file_vector_without_api_config() {
         let collector = collector_factory(vec![], false);
-        assert_eq!(collector.openvpn_status_files.len(), 1);
-        assert_eq!(
-            collector.openvpn_status_files[0].st_file,
-            String::from("/etc/openvpn/openvpn-status.log")
-        );
-        assert_eq!(
-            collector.openvpn_status_files[0].tmp_file,
-            String::from("./tmp/_etc_openvpn_openvpn-status.log.tmp")
-        );
-        assert_eq!(
-            collector.openvpn_status_files[0].cache_file,
-            String::from("./data/_etc_openvpn_openvpn-status.log.data")
-        );
-        assert_eq!(collector.openvpn_status_files[0].last_update, 0);
+        assert_eq!(collector.openvpn_status_files.len(), 0);
     }
 
     #[test]

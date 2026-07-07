@@ -33,8 +33,10 @@ lazy_static! {
 
   pub static ref ALPHA_NUM: Regex = Regex::new("^[a-zA-Z0-9]*$").unwrap();
   pub static ref ALPHA_NUM_2: Regex = Regex::new("^[a-zA-Z0-9\\-_]*$").unwrap();
+  pub static ref NETWORK_INTERFACE_NAME: Regex = Regex::new("^[a-zA-Z0-9_.:-]{1,64}$").unwrap();
 
   pub static ref FILE_PERMISSIONS: Regex = Regex::new("^[0-7]{3}$").unwrap();
+  pub static ref LINUX_USER_GROUP: Regex = Regex::new("^[a-zA-Z_]([a-zA-Z0-9_-]{0,31}|[a-zA-Z0-9_-]{0,30}\\$)$").unwrap();
 
   pub static ref ABSOLUTE_PATH: Regex = Regex::new("^/{1}(((/{1}\\.{1})?[a-zA-Z0-9 -_]+/?)+(\\.{1}[a-zA-Z0-9]{2,4})?)$").unwrap();
   pub static ref ABSOLUTE_PATH_LIST: Regex = Regex::new("^((/{1}(((/{1}\\.{1})?[a-zA-Z0-9 -_]+/?)+(\\.{1}[a-zA-Z0-9]{2,4})?))(,?))*$").unwrap();
@@ -43,7 +45,7 @@ lazy_static! {
   pub static ref PLUGINS_ACTIONS: Regex = Regex::new("^(enable|disable|info)$").unwrap();
 
   pub static ref SYSTEMCTL_COMMANDS: Regex = Regex::new("^(status|start|stop|restart|reload|enable|disable)$").unwrap();
-  pub static ref SYSTEMCTL_SERVICES: Regex = Regex::new("^(openvpn|openvpn@[a-zA-Z0-9\\-_]+|wg-quick|wg-quick@[a-zA-Z0-9\\-_]+|strongswan|strongswan-starter|isc-dhcp-server|keepalived|haproxy)$").unwrap();
+  pub static ref SYSTEMCTL_SERVICES: Regex = Regex::new("^(openvpn|openvpn@[a-zA-Z0-9\\-_]+|openvpn-server@[a-zA-Z0-9\\-_]+|wg-quick|wg-quick@[a-zA-Z0-9\\-_]+|strongswan|strongswan-starter|isc-dhcp-server|keepalived|haproxy)$").unwrap();
 }
 
 impl AsRegex for IPV4 {
@@ -78,8 +80,19 @@ impl AsRegex for ALPHA_NUM_2 {
         std::borrow::Cow::Borrowed(self)
     }
 }
+impl AsRegex for NETWORK_INTERFACE_NAME {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
 
 impl AsRegex for FILE_PERMISSIONS {
+    fn as_regex(&self) -> Cow<'_, regex::Regex> {
+        std::borrow::Cow::Borrowed(self)
+    }
+}
+
+impl AsRegex for LINUX_USER_GROUP {
     fn as_regex(&self) -> Cow<'_, regex::Regex> {
         std::borrow::Cow::Borrowed(self)
     }

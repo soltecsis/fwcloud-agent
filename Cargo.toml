@@ -1,6 +1,6 @@
 [package]
 name = "fwcloud-agent"
-version = "2.2.0"
+version = "2.2.1"
 license = "GNU AFFERO GENERAL PUBLIC LICENSE"
 description = "FWCloud Agent for firewalls management"
 readme = "README.md"
@@ -106,33 +106,33 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 
 [dependencies]
 actix = "0.13.5"
-actix-web-actors = "4.3.1+deprecated"
-actix-web = { version = "4.13.0", features = ["openssl"] }
+actix-web-actors = "4.3.1"
+actix-web = { version = "4.14.0", features = ["openssl"] }
 actix-service = "2.0.3"
-actix-multipart = "0.7.2"
-tokio = { version = "1.51.1", features = ["full"] }
+actix-multipart = "0.8.0"
+tokio = { version = "1.52.3", features = ["full"] }
 futures = "0.3.32"
-openssl = { version = "0.10.77", features = ["vendored"] }
+openssl = { version = "0.10.81", features = ["vendored"] }
 thiserror = "2.0.18"
 dotenvy = "0.15.7"
 validator = { version = "0.20.0", features = ["derive"] }
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+serde_json = "1.0.150"
 lazy_static = "1.5.0"
-rand = "0.10.1"
+rand = "0.10.2"
 rand_distr = "0.6.0" 
-regex = "1.12.3"
-log = "0.4.29"
-env_logger = "0.11.10"
+regex = "1.12.4"
+log = "0.4.33"
+env_logger = "0.11.11"
 sanitize-filename = "0.6.0"
-uuid = { version = "1.23.0", features = ["serde", "v4"] }
+uuid = { version = "1.23.4", features = ["serde", "v4"] }
 thread-id = "5.1.0"
-subprocess = "1.0.3"
+subprocess = "1.2.0"
 sha2 = "0.11.0"
 hex = "0.4.3"
-chrono = { version = "0.4.44", default-features = false }
-sysinfo = "0.38.4"
+chrono = { version = "0.4.45", default-features = false }
+sysinfo = "0.39.5"
 
 [dev-dependencies]
-serial_test = "3.4.0"
-reqwest = "0.13.2"
+serial_test = "3.5.0"
+reqwest = "0.13.4"

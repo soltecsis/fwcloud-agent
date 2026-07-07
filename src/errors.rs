@@ -88,6 +88,9 @@ pub enum FwcError {
     #[error("{0}")]
     Internal(&'static str),
 
+    #[error("{0}")]
+    BadRequest(String),
+
     #[error(transparent)]
     Validation(#[from] validator::ValidationErrors),
 
@@ -108,6 +111,7 @@ impl ResponseError for FwcError {
     fn status_code(&self) -> StatusCode {
         match self {
             FwcError::NotAllowedParameter
+            | FwcError::BadRequest(_)
             | FwcError::AtLeastOneFile
             | FwcError::Validation(_)
             | FwcError::TooBigFile
