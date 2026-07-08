@@ -48,6 +48,10 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
         env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     }
 
+    for warning in &config.startup_warnings {
+        info!("{}", warning);
+    }
+
     info!(
         "Starting fwcloud-agent application (version: {})",
         env!("CARGO_PKG_VERSION")
