@@ -256,6 +256,13 @@ impl Config {
                     inx -= 1;
                     removed_comments += 1;
                 }
+                while inx > 0
+                    && inx < lines.len()
+                    && lines[inx - 1].trim().is_empty()
+                    && lines[inx].trim().is_empty()
+                {
+                    lines.remove(inx);
+                }
                 removed = true;
                 continue;
             }
@@ -354,6 +361,43 @@ mod tests {
         assert!(!data.contains("Comma separated list of full paths"));
         assert!(data.contains("OPENVPN_STATUS_SAMPLING_INTERVAL=30"));
         assert!(env::var("OPENVPN_STATUS_FILES").is_err());
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn removes_extra_blank_line_after_deprecated_openvpn_status_files() -> std::io::Result<()> {
+        let path = format!("./tests/playground/tmp/.env_{}", Uuid::new_v4());
+        fs::write(
+            &path,
+            [
+                "API_KEY=\"test\"",
+                "",
+                "# Comma separated list of paths allowed for a fwcloud.sh script.",
+                "# FWCLOUD_SCRIPT_PATHS=\"/etc/fwcloud/fwcloud.sh,/config/scripts/post-config.d/fwcloud.sh\"",
+                "",
+                "# Deprecated OpenVPN status files",
+                "# Comma separated list of full paths of OpenVPN server status files",
+                "OPENVPN_STATUS_FILES=\"/run/openvpn/server.status\"",
+                "",
+                "# Sampling interval in seconds for the OpenVPN status collector thread.",
+                "# OPENVPN_STATUS_SAMPLING_INTERVAL=30",
+                "",
+            ]
+            .join("\n"),
+        )?;
+
+        let removed = Config::remove_deprecated_openvpn_status_files(Path::new(&path))?;
+
+        let data = fs::read_to_string(&path)?;
+        assert!(removed);
+        assert!(!data.contains("OPENVPN_STATUS_FILES"));
+        assert!(!data.contains("\n\n\n"));
+        assert!(data.contains(
+            "# FWCLOUD_SCRIPT_PATHS=\"/etc/fwcloud/fwcloud.sh,/config/scripts/post-config.d/fwcloud.sh\"\n\n# Sampling interval in seconds for the OpenVPN status collector thread."
+        ));
 
         fs::remove_file(path)?;
         Ok(())
