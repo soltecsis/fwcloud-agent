@@ -278,12 +278,14 @@ async fn get_status(
             return Err(FwcError::OnlyOneFileExpected);
         }
 
-        let file_name =
-            format!("{}/{}.data", files_list.dir(), files_list.name(0)).replace('/', "_");
+        let status_file_path = files_list.path(0);
+        let max_lines = PersistedOpenVPNStatusSamplingConfig::load_or_create(cfg.etc_dir)?
+            .request_max_lines_for_path(&status_file_path);
+        let file_name = format!("{}.data", status_file_path).replace('/', "_");
         files_list.chdir(cfg.data_dir);
         files_list.rename(0, &file_name);
 
-        result = files_list.head_remove(0, cfg.openvpn_status_request_max_lines)?;
+        result = files_list.head_remove(0, max_lines)?;
         result.insert(
             0,
             String::from(
@@ -316,8 +318,6 @@ async fn status_sampling_update(
     collector: web::Data<OpenVPNStCollector>,
 ) -> Result<HttpResponse> {
     let status_files = config.normalized_status_files()?;
-    let status_file_paths: Vec<String> =
-        status_files.iter().map(|file| file.path.clone()).collect();
 
     {
         debug!("Locking OpenVPN mutex (thread id: {})", thread_id::get());
@@ -325,7 +325,7 @@ async fn status_sampling_update(
         let _mutex_data = mutex.lock().await;
         debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
 
-        collector.replace_status_files(&status_file_paths, cfg.tmp_dir, cfg.data_dir);
+        collector.replace_status_files(&status_files, cfg.tmp_dir, cfg.data_dir);
         PersistedOpenVPNStatusSamplingConfig {
             status_files: status_files.clone(),
         }
