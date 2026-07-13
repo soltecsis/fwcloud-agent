@@ -84,22 +84,6 @@ pub struct Config {
     fwcloud_script_paths_list: String,
     pub fwcloud_script_paths: Vec<String>,
 
-    #[validate(regex(
-        path = "crate::utils::myregex::ABSOLUTE_PATH_LIST",
-        message = "Bad absolute path file names in OPENVPN_STATUS_FILES"
-    ))]
-    openvpn_status_files_list: String,
-    pub openvpn_status_files: Vec<String>,
-
-    #[validate(range(min = 1))]
-    pub openvpn_status_sampling_interval: u64,
-
-    #[validate(range(min = 1, max = 10_000))]
-    pub openvpn_status_request_max_lines: usize,
-
-    #[validate(range(min = 1))]
-    pub openvpn_status_cache_max_size: usize,
-
     pub mutex: MyMutex,
 
     pub ws_map: Arc<Mutex<HashMap<Uuid, Arc<Mutex<WsData>>>>>,
@@ -110,11 +94,10 @@ impl Config {
         let mut startup_warnings = Vec::new();
         let env_file = dotenvy::dotenv().ok();
         if let Some(path) = env_file {
-            if Self::remove_deprecated_openvpn_status_files(&path)? {
-                startup_warnings.push(
-                    "OPENVPN_STATUS_FILES has been removed from .env because it is deprecated"
-                        .to_string(),
-                );
+            for key in Self::remove_deprecated_openvpn_status_options(&path)? {
+                startup_warnings.push(format!(
+                    "{key} has been removed from .env because it is deprecated"
+                ));
             }
         }
 
@@ -161,22 +144,6 @@ impl Config {
             }),
             fwcloud_script_paths: vec![],
 
-            openvpn_status_files_list: env::var("OPENVPN_STATUS_FILES")
-                .unwrap_or_else(|_| String::from("/etc/openvpn/openvpn-status.log")),
-            openvpn_status_files: vec![],
-            openvpn_status_sampling_interval: env::var("OPENVPN_STATUS_SAMPLING_INTERVAL")
-                .unwrap_or_else(|_| String::from("30"))
-                .parse::<u64>()
-                .unwrap_or(30),
-            openvpn_status_request_max_lines: env::var("OPENVPN_STATUS_REQUEST_MAX_LINES")
-                .unwrap_or_else(|_| String::from("1000"))
-                .parse::<usize>()
-                .unwrap_or(1000),
-            openvpn_status_cache_max_size: env::var("OPENVPN_STATUS_CACHE_MAX_SIZE")
-                .unwrap_or_else(|_| String::from("10_485_760"))
-                .parse::<usize>()
-                .unwrap_or(10_485_760),
-
             mutex: MyMutex {
                 openvpn: Arc::new(tokio::sync::Mutex::new(0)),
                 wireguard: Arc::new(tokio::sync::Mutex::new(0)),
@@ -210,14 +177,6 @@ impl Config {
             cfg.fwcloud_script_paths.push(String::from(file.trim()));
         }
 
-        for file in cfg
-            .openvpn_status_files_list
-            .split(',')
-            .filter(|&x| !x.is_empty())
-        {
-            cfg.openvpn_status_files.push(String::from(file.trim()));
-        }
-
         // Create config and temporary directories if don't exist.
         fs::create_dir_all(cfg.etc_dir)?;
         fs::create_dir_all(cfg.tmp_dir)?;
@@ -226,11 +185,18 @@ impl Config {
         Ok(cfg)
     }
 
-    fn remove_deprecated_openvpn_status_files(path: &Path) -> std::io::Result<bool> {
+    fn remove_deprecated_openvpn_status_options(path: &Path) -> std::io::Result<Vec<String>> {
+        const DEPRECATED_KEYS: [&str; 4] = [
+            "OPENVPN_STATUS_FILES",
+            "OPENVPN_STATUS_SAMPLING_INTERVAL",
+            "OPENVPN_STATUS_REQUEST_MAX_LINES",
+            "OPENVPN_STATUS_CACHE_MAX_SIZE",
+        ];
+
         let data = fs::read_to_string(path)?;
         let mut lines: Vec<&str> = data.lines().collect();
         let has_trailing_newline = data.ends_with('\n');
-        let mut removed = false;
+        let mut removed_keys: Vec<String> = vec![];
 
         let mut inx = 0;
         while inx < lines.len() {
@@ -245,11 +211,13 @@ impl Config {
                 .split_once('=')
                 .map(|(key, _)| key.trim());
 
-            if key == Some("OPENVPN_STATUS_FILES") {
+            if let Some(key) = key.filter(|key| DEPRECATED_KEYS.contains(key)) {
+                let max_comments = if key == "OPENVPN_STATUS_FILES" { 2 } else { 1 };
+
                 lines.remove(inx);
                 let mut removed_comments = 0;
                 while inx > 0
-                    && removed_comments < 2
+                    && removed_comments < max_comments
                     && lines[inx - 1].trim_start().starts_with('#')
                 {
                     lines.remove(inx - 1);
@@ -263,23 +231,27 @@ impl Config {
                 {
                     lines.remove(inx);
                 }
-                removed = true;
+                if !removed_keys.iter().any(|removed_key| removed_key == key) {
+                    removed_keys.push(String::from(key));
+                }
                 continue;
             }
 
             inx += 1;
         }
 
-        if removed {
+        if !removed_keys.is_empty() {
             let mut updated = lines.join("\n");
             if has_trailing_newline {
                 updated.push('\n');
             }
             fs::write(path, updated)?;
-            env::remove_var("OPENVPN_STATUS_FILES");
+            for key in removed_keys.iter() {
+                env::remove_var(key);
+            }
         }
 
-        Ok(removed)
+        Ok(removed_keys)
     }
 
     pub fn bind_to(&mut self) -> TcpListener {
@@ -304,7 +276,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn removes_deprecated_openvpn_status_files_from_env_file() -> std::io::Result<()> {
+    fn removes_deprecated_openvpn_status_options_from_env_file() -> std::io::Result<()> {
         let path = format!("./tests/playground/tmp/.env_{}", Uuid::new_v4());
         fs::write(
             &path,
@@ -313,22 +285,46 @@ mod tests {
                 "# Deprecated OpenVPN status files",
                 "# Comma separated list of full paths of OpenVPN server status files",
                 "OPENVPN_STATUS_FILES=\"/run/openvpn/server.status\"",
+                "# Sampling interval in seconds for the OpenVPN status collector thread.",
                 "OPENVPN_STATUS_SAMPLING_INTERVAL=30",
+                "# Maximum number of lines returned per OpenVPN status request.",
+                "OPENVPN_STATUS_REQUEST_MAX_LINES=1000",
+                "# Maximum cache size for OpenVPN status content.",
+                "OPENVPN_STATUS_CACHE_MAX_SIZE=10485760",
                 "",
             ]
             .join("\n"),
         )?;
 
         env::set_var("OPENVPN_STATUS_FILES", "/run/openvpn/server.status");
-        let removed = Config::remove_deprecated_openvpn_status_files(Path::new(&path))?;
+        env::set_var("OPENVPN_STATUS_SAMPLING_INTERVAL", "30");
+        env::set_var("OPENVPN_STATUS_REQUEST_MAX_LINES", "1000");
+        env::set_var("OPENVPN_STATUS_CACHE_MAX_SIZE", "10485760");
+        let removed = Config::remove_deprecated_openvpn_status_options(Path::new(&path))?;
 
         let data = fs::read_to_string(&path)?;
-        assert!(removed);
+        assert_eq!(
+            removed,
+            vec![
+                "OPENVPN_STATUS_FILES",
+                "OPENVPN_STATUS_SAMPLING_INTERVAL",
+                "OPENVPN_STATUS_REQUEST_MAX_LINES",
+                "OPENVPN_STATUS_CACHE_MAX_SIZE"
+            ]
+        );
         assert!(!data.contains("OPENVPN_STATUS_FILES"));
+        assert!(!data.contains("OPENVPN_STATUS_SAMPLING_INTERVAL"));
+        assert!(!data.contains("OPENVPN_STATUS_REQUEST_MAX_LINES"));
+        assert!(!data.contains("OPENVPN_STATUS_CACHE_MAX_SIZE"));
         assert!(!data.contains("Deprecated OpenVPN status files"));
         assert!(!data.contains("Comma separated list of full paths"));
-        assert!(data.contains("OPENVPN_STATUS_SAMPLING_INTERVAL=30"));
+        assert!(!data.contains("Sampling interval in seconds"));
+        assert!(!data.contains("Maximum number of lines"));
+        assert!(!data.contains("Maximum cache size"));
         assert!(env::var("OPENVPN_STATUS_FILES").is_err());
+        assert!(env::var("OPENVPN_STATUS_SAMPLING_INTERVAL").is_err());
+        assert!(env::var("OPENVPN_STATUS_REQUEST_MAX_LINES").is_err());
+        assert!(env::var("OPENVPN_STATUS_CACHE_MAX_SIZE").is_err());
 
         fs::remove_file(path)?;
         Ok(())
@@ -336,7 +332,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn removes_commented_deprecated_openvpn_status_files_from_env_file() -> std::io::Result<()> {
+    fn removes_commented_deprecated_openvpn_status_options_from_env_file() -> std::io::Result<()> {
         let path = format!("./tests/playground/tmp/.env_{}", Uuid::new_v4());
         fs::write(
             &path,
@@ -345,22 +341,46 @@ mod tests {
                 "# Deprecated OpenVPN status files",
                 "# Comma separated list of full paths of OpenVPN server status files",
                 "# OPENVPN_STATUS_FILES=\"/run/openvpn/server.status\"",
-                "OPENVPN_STATUS_SAMPLING_INTERVAL=30",
+                "# Sampling interval in seconds for the OpenVPN status collector thread.",
+                "# OPENVPN_STATUS_SAMPLING_INTERVAL=30",
+                "# Maximum number of lines returned per OpenVPN status request.",
+                "# OPENVPN_STATUS_REQUEST_MAX_LINES=1000",
+                "# Maximum cache size for OpenVPN status content.",
+                "# OPENVPN_STATUS_CACHE_MAX_SIZE=10485760",
                 "",
             ]
             .join("\n"),
         )?;
 
         env::set_var("OPENVPN_STATUS_FILES", "/run/openvpn/server.status");
-        let removed = Config::remove_deprecated_openvpn_status_files(Path::new(&path))?;
+        env::set_var("OPENVPN_STATUS_SAMPLING_INTERVAL", "30");
+        env::set_var("OPENVPN_STATUS_REQUEST_MAX_LINES", "1000");
+        env::set_var("OPENVPN_STATUS_CACHE_MAX_SIZE", "10485760");
+        let removed = Config::remove_deprecated_openvpn_status_options(Path::new(&path))?;
 
         let data = fs::read_to_string(&path)?;
-        assert!(removed);
+        assert_eq!(
+            removed,
+            vec![
+                "OPENVPN_STATUS_FILES",
+                "OPENVPN_STATUS_SAMPLING_INTERVAL",
+                "OPENVPN_STATUS_REQUEST_MAX_LINES",
+                "OPENVPN_STATUS_CACHE_MAX_SIZE"
+            ]
+        );
         assert!(!data.contains("OPENVPN_STATUS_FILES"));
+        assert!(!data.contains("OPENVPN_STATUS_SAMPLING_INTERVAL"));
+        assert!(!data.contains("OPENVPN_STATUS_REQUEST_MAX_LINES"));
+        assert!(!data.contains("OPENVPN_STATUS_CACHE_MAX_SIZE"));
         assert!(!data.contains("Deprecated OpenVPN status files"));
         assert!(!data.contains("Comma separated list of full paths"));
-        assert!(data.contains("OPENVPN_STATUS_SAMPLING_INTERVAL=30"));
+        assert!(!data.contains("Sampling interval in seconds"));
+        assert!(!data.contains("Maximum number of lines"));
+        assert!(!data.contains("Maximum cache size"));
         assert!(env::var("OPENVPN_STATUS_FILES").is_err());
+        assert!(env::var("OPENVPN_STATUS_SAMPLING_INTERVAL").is_err());
+        assert!(env::var("OPENVPN_STATUS_REQUEST_MAX_LINES").is_err());
+        assert!(env::var("OPENVPN_STATUS_CACHE_MAX_SIZE").is_err());
 
         fs::remove_file(path)?;
         Ok(())
@@ -389,15 +409,17 @@ mod tests {
             .join("\n"),
         )?;
 
-        let removed = Config::remove_deprecated_openvpn_status_files(Path::new(&path))?;
+        let removed = Config::remove_deprecated_openvpn_status_options(Path::new(&path))?;
 
         let data = fs::read_to_string(&path)?;
-        assert!(removed);
+        assert_eq!(
+            removed,
+            vec!["OPENVPN_STATUS_FILES", "OPENVPN_STATUS_SAMPLING_INTERVAL"]
+        );
         assert!(!data.contains("OPENVPN_STATUS_FILES"));
+        assert!(!data.contains("OPENVPN_STATUS_SAMPLING_INTERVAL"));
         assert!(!data.contains("\n\n\n"));
-        assert!(data.contains(
-            "# FWCLOUD_SCRIPT_PATHS=\"/etc/fwcloud/fwcloud.sh,/config/scripts/post-config.d/fwcloud.sh\"\n\n# Sampling interval in seconds for the OpenVPN status collector thread."
-        ));
+        assert!(data.contains("# FWCLOUD_SCRIPT_PATHS=\"/etc/fwcloud/fwcloud.sh,/config/scripts/post-config.d/fwcloud.sh\""));
 
         fs::remove_file(path)?;
         Ok(())
