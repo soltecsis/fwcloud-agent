@@ -41,6 +41,7 @@ use crate::workers::WorkersChannels;
 use thread_id;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct OpenVPNStatusSamplingConfig {
     status_files: Vec<OpenVPNStatusFileConfig>,
 }
@@ -67,6 +68,24 @@ impl OpenVPNStatusSamplingConfig {
             if !Path::new(path).is_absolute() {
                 return Err(FwcError::BadRequest(format!(
                     "OpenVPN status file path must be absolute: {path}"
+                )));
+            }
+
+            if status_file.sampling_interval == 0 {
+                return Err(FwcError::BadRequest(String::from(
+                    "OpenVPN status sampling interval must be a positive integer",
+                )));
+            }
+
+            if status_file.request_max_lines == 0 {
+                return Err(FwcError::BadRequest(String::from(
+                    "OpenVPN status request max lines must be a positive integer",
+                )));
+            }
+
+            if status_file.cache_max_size == 0 {
+                return Err(FwcError::BadRequest(String::from(
+                    "OpenVPN status cache max size must be a positive integer",
                 )));
             }
 

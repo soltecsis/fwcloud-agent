@@ -155,6 +155,90 @@ async fn openvpn_status_sampling_rejects_empty_paths() {
 
 #[tokio::test]
 #[serial]
+async fn openvpn_status_sampling_rejects_zero_sampling_parameters() {
+    remove_api_config_file();
+    let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));
+
+    let res = reqwest::Client::new()
+        .put(url)
+        .header("Content-Type", "application/json")
+        .body(
+            serde_json::json!({
+                "status_files": [{
+                    "path": "/run/openvpn/server.status",
+                    "sampling_interval": 0,
+                    "request_max_lines": 1000,
+                    "cache_max_size": 10485760
+                }]
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status().as_u16(), 400);
+    remove_api_config_file();
+}
+
+#[tokio::test]
+#[serial]
+async fn openvpn_status_sampling_rejects_missing_sampling_parameters() {
+    remove_api_config_file();
+    let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));
+
+    let res = reqwest::Client::new()
+        .put(url)
+        .header("Content-Type", "application/json")
+        .body(
+            serde_json::json!({
+                "status_files": [{
+                    "path": "/run/openvpn/server.status",
+                    "request_max_lines": 1000,
+                    "cache_max_size": 10485760
+                }]
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status().as_u16(), 400);
+    remove_api_config_file();
+}
+
+#[tokio::test]
+#[serial]
+async fn openvpn_status_sampling_rejects_unknown_fields() {
+    remove_api_config_file();
+    let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));
+
+    let res = reqwest::Client::new()
+        .put(url)
+        .header("Content-Type", "application/json")
+        .body(
+            serde_json::json!({
+                "status_files": [{
+                    "path": "/run/openvpn/server.status",
+                    "sampling_interval": 30,
+                    "request_max_lines": 1000,
+                    "cache_max_size": 10485760,
+                    "unexpected": true
+                }]
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status().as_u16(), 400);
+    remove_api_config_file();
+}
+
+#[tokio::test]
+#[serial]
 async fn openvpn_status_sampling_deduplicates_valid_paths() {
     remove_api_config_file();
     let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));

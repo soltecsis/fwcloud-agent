@@ -42,6 +42,7 @@ pub const DEFAULT_REQUEST_MAX_LINES: usize = 1000;
 pub const DEFAULT_CACHE_MAX_SIZE: usize = 10485760;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct OpenVPNStatusFileConfig {
     pub path: String,
     pub sampling_interval: u64,
