@@ -34,51 +34,46 @@ use crate::utils::openvpn_dir::{OpenVPNDir, OpenVPNDirConfig};
 
 use crate::errors::{FwcError, Result};
 use crate::workers::openvpn_status_collector::{
-    OpenVPNStCollector, OpenVPNStatusSamplingConfig as PersistedOpenVPNStatusSamplingConfig,
+    OpenVPNStCollector, OpenVPNStatusFileConfig,
+    OpenVPNStatusSamplingConfig as PersistedOpenVPNStatusSamplingConfig,
 };
 use crate::workers::WorkersChannels;
 use thread_id;
 
 #[derive(Deserialize)]
 struct OpenVPNStatusSamplingConfig {
-    enabled: bool,
-    status_files: Vec<String>,
+    status_files: Vec<OpenVPNStatusFileConfig>,
 }
 
 #[derive(Serialize)]
 struct OpenVPNStatusSamplingConfigResponse {
     accepted: bool,
-    enabled: bool,
-    status_files: Vec<String>,
+    status_files: Vec<OpenVPNStatusFileConfig>,
 }
 
 impl OpenVPNStatusSamplingConfig {
-    fn normalized_status_files(&self) -> Result<Vec<String>> {
-        if self.enabled && self.status_files.is_empty() {
-            return Err(FwcError::BadRequest(String::from(
-                "OpenVPN status sampling requires at least one status file when enabled",
-            )));
-        }
-
-        let mut status_files: Vec<String> = vec![];
+    fn normalized_status_files(&self) -> Result<Vec<OpenVPNStatusFileConfig>> {
+        let mut status_files: Vec<OpenVPNStatusFileConfig> = vec![];
 
         for status_file in self.status_files.iter() {
-            let status_file = status_file.trim();
+            let path = status_file.path.trim();
 
-            if status_file.is_empty() {
+            if path.is_empty() {
                 return Err(FwcError::BadRequest(String::from(
                     "OpenVPN status file path cannot be empty",
                 )));
             }
 
-            if !Path::new(status_file).is_absolute() {
+            if !Path::new(path).is_absolute() {
                 return Err(FwcError::BadRequest(format!(
-                    "OpenVPN status file path must be absolute: {status_file}"
+                    "OpenVPN status file path must be absolute: {path}"
                 )));
             }
 
-            if !status_files.contains(&String::from(status_file)) {
-                status_files.push(String::from(status_file));
+            if !status_files.iter().any(|item| item.path == path) {
+                let mut status_file = status_file.clone();
+                status_file.path = String::from(path);
+                status_files.push(status_file);
             }
         }
 
@@ -301,11 +296,9 @@ async fn status_sampling_update(
     cfg: web::Data<Arc<Config>>,
     collector: web::Data<OpenVPNStCollector>,
 ) -> Result<HttpResponse> {
-    let status_files = if config.enabled {
-        config.normalized_status_files()?
-    } else {
-        vec![]
-    };
+    let status_files = config.normalized_status_files()?;
+    let status_file_paths: Vec<String> =
+        status_files.iter().map(|file| file.path.clone()).collect();
 
     {
         debug!("Locking OpenVPN mutex (thread id: {})", thread_id::get());
@@ -313,9 +306,8 @@ async fn status_sampling_update(
         let _mutex_data = mutex.lock().await;
         debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
 
-        collector.replace_status_files(&status_files, cfg.tmp_dir, cfg.data_dir);
+        collector.replace_status_files(&status_file_paths, cfg.tmp_dir, cfg.data_dir);
         PersistedOpenVPNStatusSamplingConfig {
-            enabled: config.enabled,
             status_files: status_files.clone(),
         }
         .save(cfg.etc_dir)?;
@@ -326,7 +318,6 @@ async fn status_sampling_update(
     Ok(
         HttpResponse::Ok().json(OpenVPNStatusSamplingConfigResponse {
             accepted: true,
-            enabled: config.enabled,
             status_files,
         }),
     )
@@ -350,7 +341,6 @@ async fn status_sampling_show(cfg: web::Data<Arc<Config>>) -> Result<HttpRespons
     Ok(
         HttpResponse::Ok().json(OpenVPNStatusSamplingConfigResponse {
             accepted: true,
-            enabled: persisted_config.enabled,
             status_files: persisted_config.status_files,
         }),
     )

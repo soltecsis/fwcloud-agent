@@ -25,6 +25,7 @@ use futures::executor::block_on;
 
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
@@ -36,17 +37,37 @@ use crate::config::Config;
 const FORMAT_STR_OLD: &str = "%a %b %e %H:%M:%S %Y";
 const FORMAT_STR_NEW: &str = "%Y-%m-%d %H:%M:%S";
 const API_CONFIG_FILE: &str = "openvpn_status_sampling.json";
+pub const DEFAULT_SAMPLING_INTERVAL: u64 = 30;
+pub const DEFAULT_REQUEST_MAX_LINES: usize = 1000;
+pub const DEFAULT_CACHE_MAX_SIZE: usize = 10485760;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct OpenVPNStatusFileConfig {
+    pub path: String,
+    pub sampling_interval: u64,
+    pub request_max_lines: usize,
+    pub cache_max_size: usize,
+}
+
+impl OpenVPNStatusFileConfig {
+    pub fn with_defaults(path: String) -> Self {
+        OpenVPNStatusFileConfig {
+            path,
+            sampling_interval: DEFAULT_SAMPLING_INTERVAL,
+            request_max_lines: DEFAULT_REQUEST_MAX_LINES,
+            cache_max_size: DEFAULT_CACHE_MAX_SIZE,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct OpenVPNStatusSamplingConfig {
-    pub enabled: bool,
-    pub status_files: Vec<String>,
+    pub status_files: Vec<OpenVPNStatusFileConfig>,
 }
 
 impl OpenVPNStatusSamplingConfig {
     pub fn empty() -> Self {
         OpenVPNStatusSamplingConfig {
-            enabled: false,
             status_files: vec![],
         }
     }
@@ -63,9 +84,7 @@ impl OpenVPNStatusSamplingConfig {
         }
 
         fs::read_to_string(path)
-            .and_then(|data| {
-                serde_json::from_str(&data).map_err(|err| std::io::Error::other(err.to_string()))
-            })
+            .and_then(|data| Self::from_json(&data))
             .map(Some)
     }
 
@@ -88,12 +107,39 @@ impl OpenVPNStatusSamplingConfig {
         )
     }
 
-    fn effective_status_files(&self) -> Vec<String> {
-        if self.enabled {
-            self.status_files.clone()
-        } else {
-            vec![]
+    fn effective_status_files(&self) -> Vec<OpenVPNStatusFileConfig> {
+        self.status_files.clone()
+    }
+
+    fn from_json(data: &str) -> std::io::Result<Self> {
+        let value: Value =
+            serde_json::from_str(data).map_err(|err| std::io::Error::other(err.to_string()))?;
+        let enabled = value
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+
+        let mut status_files = vec![];
+
+        if enabled {
+            for item in value
+                .get("status_files")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+            {
+                if let Some(path) = item.as_str() {
+                    status_files.push(OpenVPNStatusFileConfig::with_defaults(path.to_string()));
+                } else {
+                    status_files.push(
+                        serde_json::from_value(item)
+                            .map_err(|err| std::io::Error::other(err.to_string()))?,
+                    );
+                }
+            }
         }
+
+        Ok(OpenVPNStatusSamplingConfig { status_files })
     }
 }
 
@@ -144,8 +190,11 @@ impl OpenVPNStCollectorInner {
 
         // Create the list of OpenVPN status files.
         for file in status_files.iter() {
-            data.openvpn_status_files
-                .push(OpenVPNStFile::new(file, cfg.tmp_dir, cfg.data_dir));
+            data.openvpn_status_files.push(OpenVPNStFile::new(
+                &file.path,
+                cfg.tmp_dir,
+                cfg.data_dir,
+            ));
         }
 
         data
@@ -405,8 +454,10 @@ mod tests {
                         .collect();
 
                 OpenVPNStatusSamplingConfig {
-                    enabled: !status_files.is_empty(),
-                    status_files,
+                    status_files: status_files
+                        .into_iter()
+                        .map(OpenVPNStatusFileConfig::with_defaults)
+                        .collect(),
                 }
                 .save(cfg.etc_dir)
                 .unwrap();

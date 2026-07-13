@@ -42,8 +42,12 @@ async fn openvpn_status_sampling_accepts_valid_config() {
         .header("Content-Type", "application/json")
         .body(
             serde_json::json!({
-                "enabled": true,
-                "status_files": ["/run/openvpn/server.status"]
+                "status_files": [{
+                    "path": "/run/openvpn/server.status",
+                    "sampling_interval": 30,
+                    "request_max_lines": 1000,
+                    "cache_max_size": 10485760
+                }]
             })
             .to_string(),
         )
@@ -55,13 +59,21 @@ async fn openvpn_status_sampling_accepts_valid_config() {
 
     let body: serde_json::Value = serde_json::from_str(&res.text().await.unwrap()).unwrap();
     assert_eq!(body["accepted"], true);
-    assert_eq!(body["enabled"], true);
-    assert_eq!(body["status_files"][0], "/run/openvpn/server.status");
+    assert_eq!(
+        body["status_files"][0]["path"],
+        "/run/openvpn/server.status"
+    );
+    assert_eq!(body["status_files"][0]["sampling_interval"], 30);
+    assert_eq!(body["status_files"][0]["request_max_lines"], 1000);
+    assert_eq!(body["status_files"][0]["cache_max_size"], 10485760);
 
     let persisted: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(API_CONFIG_FILE).unwrap()).unwrap();
-    assert_eq!(persisted["enabled"], true);
-    assert_eq!(persisted["status_files"][0], "/run/openvpn/server.status");
+    assert!(persisted.get("enabled").is_none());
+    assert_eq!(
+        persisted["status_files"][0]["path"],
+        "/run/openvpn/server.status"
+    );
     remove_api_config_file();
 }
 
@@ -76,12 +88,11 @@ async fn openvpn_status_sampling_creates_initial_config() {
 
     let body: serde_json::Value = serde_json::from_str(&res.text().await.unwrap()).unwrap();
     assert_eq!(body["accepted"], true);
-    assert_eq!(body["enabled"], false);
     assert_eq!(body["status_files"].as_array().unwrap().len(), 0);
 
     let persisted: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(API_CONFIG_FILE).unwrap()).unwrap();
-    assert_eq!(persisted["enabled"], false);
+    assert!(persisted.get("enabled").is_none());
     assert_eq!(persisted["status_files"].as_array().unwrap().len(), 0);
     remove_api_config_file();
 }
@@ -97,8 +108,12 @@ async fn openvpn_status_sampling_rejects_relative_paths() {
         .header("Content-Type", "application/json")
         .body(
             serde_json::json!({
-                "enabled": true,
-                "status_files": ["openvpn/server.status"]
+                "status_files": [{
+                    "path": "openvpn/server.status",
+                    "sampling_interval": 30,
+                    "request_max_lines": 1000,
+                    "cache_max_size": 10485760
+                }]
             })
             .to_string(),
         )
@@ -121,8 +136,12 @@ async fn openvpn_status_sampling_rejects_empty_paths() {
         .header("Content-Type", "application/json")
         .body(
             serde_json::json!({
-                "enabled": true,
-                "status_files": [""]
+                "status_files": [{
+                    "path": "",
+                    "sampling_interval": 30,
+                    "request_max_lines": 1000,
+                    "cache_max_size": 10485760
+                }]
             })
             .to_string(),
         )
@@ -145,10 +164,19 @@ async fn openvpn_status_sampling_deduplicates_valid_paths() {
         .header("Content-Type", "application/json")
         .body(
             serde_json::json!({
-                "enabled": true,
                 "status_files": [
-                    "/run/openvpn/server.status",
-                    "/run/openvpn/server.status"
+                    {
+                        "path": "/run/openvpn/server.status",
+                        "sampling_interval": 30,
+                        "request_max_lines": 1000,
+                        "cache_max_size": 10485760
+                    },
+                    {
+                        "path": "/run/openvpn/server.status",
+                        "sampling_interval": 30,
+                        "request_max_lines": 1000,
+                        "cache_max_size": 10485760
+                    }
                 ]
             })
             .to_string(),
@@ -161,7 +189,10 @@ async fn openvpn_status_sampling_deduplicates_valid_paths() {
 
     let body: serde_json::Value = serde_json::from_str(&res.text().await.unwrap()).unwrap();
     assert_eq!(body["status_files"].as_array().unwrap().len(), 1);
-    assert_eq!(body["status_files"][0], "/run/openvpn/server.status");
+    assert_eq!(
+        body["status_files"][0]["path"],
+        "/run/openvpn/server.status"
+    );
     remove_api_config_file();
 }
 
@@ -176,8 +207,7 @@ async fn openvpn_status_sampling_disable_clears_paths() {
         .header("Content-Type", "application/json")
         .body(
             serde_json::json!({
-                "enabled": false,
-                "status_files": ["/run/openvpn/server.status"]
+                "status_files": []
             })
             .to_string(),
         )
@@ -188,7 +218,6 @@ async fn openvpn_status_sampling_disable_clears_paths() {
     assert_eq!(res.status().as_u16(), 200);
 
     let body: serde_json::Value = serde_json::from_str(&res.text().await.unwrap()).unwrap();
-    assert_eq!(body["enabled"], false);
     assert_eq!(body["status_files"].as_array().unwrap().len(), 0);
     remove_api_config_file();
 }
@@ -205,8 +234,12 @@ async fn openvpn_status_sampling_show_returns_applied_config() {
         .header("Content-Type", "application/json")
         .body(
             serde_json::json!({
-                "enabled": true,
-                "status_files": ["/run/openvpn/server.status"]
+                "status_files": [{
+                    "path": "/run/openvpn/server.status",
+                    "sampling_interval": 30,
+                    "request_max_lines": 1000,
+                    "cache_max_size": 10485760
+                }]
             })
             .to_string(),
         )
@@ -220,8 +253,10 @@ async fn openvpn_status_sampling_show_returns_applied_config() {
 
     let body: serde_json::Value = serde_json::from_str(&res.text().await.unwrap()).unwrap();
     assert_eq!(body["accepted"], true);
-    assert_eq!(body["enabled"], true);
-    assert_eq!(body["status_files"][0], "/run/openvpn/server.status");
+    assert_eq!(
+        body["status_files"][0]["path"],
+        "/run/openvpn/server.status"
+    );
 
     remove_api_config_file();
 }
