@@ -339,9 +339,6 @@ impl OpenVPNStCollectorInner {
                     item.seconds_until_next_sample = item.sampling_interval;
                 }
                 Err(e) => {
-                    /* If the legacy default openvpn status log file doesn't exist then only display error
-                    at the debug level to avoid repetitive messages for deployments that still have that
-                    file configured. */
                     if item.st_file == "/etc/openvpn/openvpn-status.log"
                         && e.to_string() == "No such file or directory (os error 2)"
                     {
