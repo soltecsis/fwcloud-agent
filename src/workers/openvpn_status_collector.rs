@@ -602,6 +602,55 @@ mod tests {
 
     #[test]
     #[serial]
+    fn should_apply_api_sampling_parameters_per_file() -> Result<()> {
+        let api_config_file = OpenVPNStatusSamplingConfig::path("./etc");
+        let _ = fs::remove_file(&api_config_file);
+        env::set_var("API_KEY", "d64c88318c8f213f427af857d0013f93");
+        let cfg = Arc::new(Config::new().unwrap());
+        let list = status_files_list_factory(2);
+
+        OpenVPNStatusSamplingConfig {
+            status_files: vec![
+                OpenVPNStatusFileConfig {
+                    path: list[0].clone(),
+                    sampling_interval: 10,
+                    request_max_lines: 200,
+                    cache_max_size: 1024,
+                },
+                OpenVPNStatusFileConfig {
+                    path: list[1].clone(),
+                    sampling_interval: 45,
+                    request_max_lines: 500,
+                    cache_max_size: 2097152,
+                },
+            ],
+        }
+        .save(cfg.etc_dir)?;
+
+        let collector = OpenVPNStCollectorInner::new(&cfg);
+        assert_eq!(collector.openvpn_status_files.len(), 2);
+        assert_eq!(collector.openvpn_status_files[0].st_file, list[0]);
+        assert_eq!(collector.openvpn_status_files[0].sampling_interval, 10);
+        assert_eq!(collector.openvpn_status_files[0].cache_max_size, 1024);
+        assert_eq!(collector.openvpn_status_files[1].st_file, list[1]);
+        assert_eq!(collector.openvpn_status_files[1].sampling_interval, 45);
+        assert_eq!(collector.openvpn_status_files[1].cache_max_size, 2097152);
+
+        let config = OpenVPNStatusSamplingConfig::load(cfg.etc_dir)?.unwrap();
+        assert_eq!(config.request_max_lines_for_path(&list[0]), 200);
+        assert_eq!(config.request_max_lines_for_path(&list[1]), 500);
+        assert_eq!(
+            config.request_max_lines_for_path("/run/openvpn/missing.status"),
+            DEFAULT_REQUEST_MAX_LINES
+        );
+
+        env::remove_var("API_KEY");
+        fs::remove_file(api_config_file)?;
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
     fn should_wait_for_file_sampling_interval() -> Result<()> {
         let list = status_files_list_factory(1);
         let mut collector = collector_factory(
