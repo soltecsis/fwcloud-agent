@@ -25,6 +25,7 @@ use futures::executor::block_on;
 
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
@@ -36,17 +37,38 @@ use crate::config::Config;
 const FORMAT_STR_OLD: &str = "%a %b %e %H:%M:%S %Y";
 const FORMAT_STR_NEW: &str = "%Y-%m-%d %H:%M:%S";
 const API_CONFIG_FILE: &str = "openvpn_status_sampling.json";
+pub const DEFAULT_SAMPLING_INTERVAL: u64 = 30;
+pub const DEFAULT_REQUEST_MAX_LINES: usize = 1000;
+pub const DEFAULT_CACHE_MAX_SIZE: usize = 10485760;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenVPNStatusFileConfig {
+    pub path: String,
+    pub sampling_interval: u64,
+    pub request_max_lines: usize,
+    pub cache_max_size: usize,
+}
+
+impl OpenVPNStatusFileConfig {
+    pub fn with_defaults(path: String) -> Self {
+        OpenVPNStatusFileConfig {
+            path,
+            sampling_interval: DEFAULT_SAMPLING_INTERVAL,
+            request_max_lines: DEFAULT_REQUEST_MAX_LINES,
+            cache_max_size: DEFAULT_CACHE_MAX_SIZE,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct OpenVPNStatusSamplingConfig {
-    pub enabled: bool,
-    pub status_files: Vec<String>,
+    pub status_files: Vec<OpenVPNStatusFileConfig>,
 }
 
 impl OpenVPNStatusSamplingConfig {
     pub fn empty() -> Self {
         OpenVPNStatusSamplingConfig {
-            enabled: false,
             status_files: vec![],
         }
     }
@@ -63,9 +85,7 @@ impl OpenVPNStatusSamplingConfig {
         }
 
         fs::read_to_string(path)
-            .and_then(|data| {
-                serde_json::from_str(&data).map_err(|err| std::io::Error::other(err.to_string()))
-            })
+            .and_then(|data| Self::from_json(&data))
             .map(Some)
     }
 
@@ -88,12 +108,47 @@ impl OpenVPNStatusSamplingConfig {
         )
     }
 
-    fn effective_status_files(&self) -> Vec<String> {
-        if self.enabled {
-            self.status_files.clone()
-        } else {
-            vec![]
+    fn effective_status_files(&self) -> Vec<OpenVPNStatusFileConfig> {
+        self.status_files.clone()
+    }
+
+    pub fn request_max_lines_for_path(&self, path: &str) -> usize {
+        self.status_files
+            .iter()
+            .find(|status_file| status_file.path == path)
+            .map(|status_file| status_file.request_max_lines)
+            .unwrap_or(DEFAULT_REQUEST_MAX_LINES)
+    }
+
+    fn from_json(data: &str) -> std::io::Result<Self> {
+        let value: Value =
+            serde_json::from_str(data).map_err(|err| std::io::Error::other(err.to_string()))?;
+        let enabled = value
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+
+        let mut status_files = vec![];
+
+        if enabled {
+            for item in value
+                .get("status_files")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+            {
+                if let Some(path) = item.as_str() {
+                    status_files.push(OpenVPNStatusFileConfig::with_defaults(path.to_string()));
+                } else {
+                    status_files.push(
+                        serde_json::from_value(item)
+                            .map_err(|err| std::io::Error::other(err.to_string()))?,
+                    );
+                }
+            }
         }
+
+        Ok(OpenVPNStatusSamplingConfig { status_files })
     }
 }
 
@@ -102,23 +157,27 @@ struct OpenVPNStFile {
     tmp_file: String,
     cache_file: String,
     last_update: u64,
+    sampling_interval: u64,
+    cache_max_size: usize,
+    seconds_until_next_sample: u64,
 }
 
 impl OpenVPNStFile {
-    fn new(file: &str, tmp_dir: &str, data_dir: &str) -> Self {
+    fn new(config: &OpenVPNStatusFileConfig, tmp_dir: &str, data_dir: &str) -> Self {
         OpenVPNStFile {
-            st_file: String::from(file),
-            tmp_file: format!("{}/{}.tmp", tmp_dir, file.replace('/', "_")),
-            cache_file: format!("{}/{}.data", data_dir, file.replace('/', "_")),
+            st_file: config.path.clone(),
+            tmp_file: format!("{}/{}.tmp", tmp_dir, config.path.replace('/', "_")),
+            cache_file: format!("{}/{}.data", data_dir, config.path.replace('/', "_")),
             last_update: 0,
+            sampling_interval: config.sampling_interval,
+            cache_max_size: config.cache_max_size,
+            seconds_until_next_sample: 0,
         }
     }
 }
 
 struct OpenVPNStCollectorInner {
     openvpn_status_files: Vec<OpenVPNStFile>,
-    max_size: usize,
-    sampling_interval: u64,
 }
 
 #[derive(Clone)]
@@ -130,8 +189,6 @@ impl OpenVPNStCollectorInner {
     pub fn new(cfg: &Config) -> Self {
         let mut data = OpenVPNStCollectorInner {
             openvpn_status_files: vec![],
-            max_size: cfg.openvpn_status_cache_max_size,
-            sampling_interval: cfg.openvpn_status_sampling_interval,
         };
 
         let status_files = match OpenVPNStatusSamplingConfig::load_or_create(cfg.etc_dir) {
@@ -171,9 +228,9 @@ impl OpenVPNStCollectorInner {
         }
     }
 
-    fn collect_status_data(item: &mut OpenVPNStFile, max_size: usize) -> std::io::Result<()> {
+    fn collect_status_data(item: &mut OpenVPNStFile) -> std::io::Result<()> {
         if Path::new(&item.cache_file).is_file()
-            && fs::metadata(&item.cache_file)?.len() > max_size as u64
+            && fs::metadata(&item.cache_file)?.len() > item.cache_max_size as u64
         {
             error!("OpenVPN status cache file for '{}' too big", item.st_file);
             return Ok(());
@@ -267,15 +324,21 @@ impl OpenVPNStCollectorInner {
         Ok(())
     }
 
-    pub fn collect_all_files_data(&mut self) {
+    pub fn collect_all_files_data(&mut self, force: bool) {
         for item in self.openvpn_status_files.iter_mut() {
+            if !force && item.seconds_until_next_sample > 0 {
+                item.seconds_until_next_sample -= 1;
+                if item.seconds_until_next_sample > 0 {
+                    continue;
+                }
+            }
+
             debug!("Collecting OpenVPN status data from file: {}", item.st_file);
-            match OpenVPNStCollectorInner::collect_status_data(item, self.max_size) {
-                Ok(_) => (),
+            match OpenVPNStCollectorInner::collect_status_data(item) {
+                Ok(_) => {
+                    item.seconds_until_next_sample = item.sampling_interval;
+                }
                 Err(e) => {
-                    /* If the legacy default openvpn status log file doesn't exist then only display error
-                    at the debug level to avoid repetitive messages for deployments that still have that
-                    file configured. */
                     if item.st_file == "/etc/openvpn/openvpn-status.log"
                         && e.to_string() == "No such file or directory (os error 2)"
                     {
@@ -298,7 +361,12 @@ impl OpenVPNStCollectorInner {
         self.openvpn_status_files.len()
     }
 
-    pub fn replace_status_files(&mut self, status_files: &[String], tmp_dir: &str, data_dir: &str) {
+    pub fn replace_status_files(
+        &mut self,
+        status_files: &[OpenVPNStatusFileConfig],
+        tmp_dir: &str,
+        data_dir: &str,
+    ) {
         self.openvpn_status_files = status_files
             .iter()
             .map(|file| OpenVPNStFile::new(file, tmp_dir, data_dir))
@@ -313,7 +381,12 @@ impl OpenVPNStCollector {
         }
     }
 
-    pub fn replace_status_files(&self, status_files: &[String], tmp_dir: &str, data_dir: &str) {
+    pub fn replace_status_files(
+        &self,
+        status_files: &[OpenVPNStatusFileConfig],
+        tmp_dir: &str,
+        data_dir: &str,
+    ) {
         self.inner
             .lock()
             .unwrap()
@@ -336,7 +409,11 @@ impl OpenVPNStCollector {
                 }
 
                 loop {
-                    let pause: u64;
+                    let mut force = false;
+                    while rx.try_recv().unwrap_or(0) == 1 {
+                        debug!("OpenVPN status data update requested");
+                        force = true;
+                    }
 
                     // Start of mutex scope.
                     {
@@ -349,22 +426,12 @@ impl OpenVPNStCollector {
                         //thread::sleep(time::Duration::from_millis(10_000));
 
                         let mut collector = local_self.lock().unwrap();
-                        collector.collect_all_files_data();
-                        pause = collector.sampling_interval;
+                        collector.collect_all_files_data(force);
 
                         debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
                     } // End of mutex scope.
 
-                    // Pause between samplings.
-                    for _n in 0..pause {
-                        thread::sleep(time::Duration::from_secs(1));
-
-                        let cmd = rx.try_recv().unwrap_or(0);
-                        if cmd == 1 {
-                            debug!("OpenVPN status data update requested");
-                            break;
-                        }
-                    }
+                    thread::sleep(time::Duration::from_secs(1));
                 }
             })
         });
@@ -403,10 +470,32 @@ mod tests {
                         .filter(|file| !file.is_empty())
                         .map(|file| String::from(file.trim()))
                         .collect();
+                let sampling_interval = env_list
+                    .iter()
+                    .find(|v| v.0 == "OPENVPN_STATUS_SAMPLING_INTERVAL")
+                    .and_then(|v| v.1.parse::<u64>().ok())
+                    .unwrap_or(DEFAULT_SAMPLING_INTERVAL);
+                let request_max_lines = env_list
+                    .iter()
+                    .find(|v| v.0 == "OPENVPN_STATUS_REQUEST_MAX_LINES")
+                    .and_then(|v| v.1.parse::<usize>().ok())
+                    .unwrap_or(DEFAULT_REQUEST_MAX_LINES);
+                let cache_max_size = env_list
+                    .iter()
+                    .find(|v| v.0 == "OPENVPN_STATUS_CACHE_MAX_SIZE")
+                    .and_then(|v| v.1.parse::<usize>().ok())
+                    .unwrap_or(DEFAULT_CACHE_MAX_SIZE);
 
                 OpenVPNStatusSamplingConfig {
-                    enabled: !status_files.is_empty(),
-                    status_files,
+                    status_files: status_files
+                        .into_iter()
+                        .map(|path| OpenVPNStatusFileConfig {
+                            path,
+                            sampling_interval,
+                            request_max_lines,
+                            cache_max_size,
+                        })
+                        .collect(),
                 }
                 .save(cfg.etc_dir)
                 .unwrap();
@@ -497,7 +586,109 @@ mod tests {
                 format!("./data/{}.data", list[inx].replace('/', "_"))
             );
             assert_eq!(collector.openvpn_status_files[inx].last_update, 0);
+            assert_eq!(
+                collector.openvpn_status_files[inx].sampling_interval,
+                DEFAULT_SAMPLING_INTERVAL
+            );
+            assert_eq!(
+                collector.openvpn_status_files[inx].cache_max_size,
+                DEFAULT_CACHE_MAX_SIZE
+            );
         }
+    }
+
+    #[test]
+    #[serial]
+    fn should_apply_api_sampling_parameters_per_file() -> Result<()> {
+        let api_config_file = OpenVPNStatusSamplingConfig::path("./etc");
+        let _ = fs::remove_file(&api_config_file);
+        env::set_var("API_KEY", "d64c88318c8f213f427af857d0013f93");
+        let cfg = Arc::new(Config::new().unwrap());
+        let list = status_files_list_factory(2);
+
+        OpenVPNStatusSamplingConfig {
+            status_files: vec![
+                OpenVPNStatusFileConfig {
+                    path: list[0].clone(),
+                    sampling_interval: 10,
+                    request_max_lines: 200,
+                    cache_max_size: 1024,
+                },
+                OpenVPNStatusFileConfig {
+                    path: list[1].clone(),
+                    sampling_interval: 45,
+                    request_max_lines: 500,
+                    cache_max_size: 2097152,
+                },
+            ],
+        }
+        .save(cfg.etc_dir)?;
+
+        let collector = OpenVPNStCollectorInner::new(&cfg);
+        assert_eq!(collector.openvpn_status_files.len(), 2);
+        assert_eq!(collector.openvpn_status_files[0].st_file, list[0]);
+        assert_eq!(collector.openvpn_status_files[0].sampling_interval, 10);
+        assert_eq!(collector.openvpn_status_files[0].cache_max_size, 1024);
+        assert_eq!(collector.openvpn_status_files[1].st_file, list[1]);
+        assert_eq!(collector.openvpn_status_files[1].sampling_interval, 45);
+        assert_eq!(collector.openvpn_status_files[1].cache_max_size, 2097152);
+
+        let config = OpenVPNStatusSamplingConfig::load(cfg.etc_dir)?.unwrap();
+        assert_eq!(config.request_max_lines_for_path(&list[0]), 200);
+        assert_eq!(config.request_max_lines_for_path(&list[1]), 500);
+        assert_eq!(
+            config.request_max_lines_for_path("/run/openvpn/missing.status"),
+            DEFAULT_REQUEST_MAX_LINES
+        );
+
+        env::remove_var("API_KEY");
+        fs::remove_file(api_config_file)?;
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn should_wait_for_file_sampling_interval() -> Result<()> {
+        let list = status_files_list_factory(1);
+        let mut collector = collector_factory(
+            vec![
+                ("OPENVPN_STATUS_SAMPLING_INTERVAL", String::from("2")),
+                ("OPENVPN_STATUS_FILES", list.join(",")),
+            ],
+            true,
+        );
+
+        fs::copy(
+            "./tests/templates/openvpn-status.log_ts1",
+            &collector.openvpn_status_files[0].st_file,
+        )?;
+        collector.collect_all_files_data(false);
+        assert_eq!(collector.openvpn_status_files[0].last_update, 1633366402);
+        assert_eq!(
+            collector.openvpn_status_files[0].seconds_until_next_sample,
+            2
+        );
+
+        fs::copy(
+            "./tests/templates/openvpn-status.log_ts2",
+            &collector.openvpn_status_files[0].st_file,
+        )?;
+        collector.collect_all_files_data(false);
+        assert_eq!(collector.openvpn_status_files[0].last_update, 1633366402);
+        assert_eq!(
+            collector.openvpn_status_files[0].seconds_until_next_sample,
+            1
+        );
+
+        collector.collect_all_files_data(false);
+        assert_eq!(collector.openvpn_status_files[0].last_update, 1633366441);
+        assert_eq!(
+            collector.openvpn_status_files[0].seconds_until_next_sample,
+            2
+        );
+
+        remove_collector_files(&collector)?;
+        Ok(())
     }
 
     #[test]
@@ -511,7 +702,7 @@ mod tests {
             &collector.openvpn_status_files[0].st_file,
         )?;
 
-        collector.collect_all_files_data();
+        collector.collect_all_files_data(true);
 
         // This is the first data collection, and then the cache file should be created but with 0 bytes.
         let size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
@@ -533,7 +724,7 @@ mod tests {
             "./tests/templates/openvpn-status.log_ts1",
             &collector.openvpn_status_files[0].st_file,
         )?;
-        collector.collect_all_files_data();
+        collector.collect_all_files_data(true);
 
         // This is the first data collection, and then the cache file should be created but with 0 bytes.
         let mut size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
@@ -546,7 +737,7 @@ mod tests {
             "./tests/templates/openvpn-status.log_ts2",
             &collector.openvpn_status_files[0].st_file,
         )?;
-        collector.collect_all_files_data();
+        collector.collect_all_files_data(true);
         size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
         assert_eq!(size, 262);
         assert_eq!(collector.openvpn_status_files[0].last_update, 1633366441);
@@ -556,7 +747,7 @@ mod tests {
             "./tests/templates/openvpn-status.log_ts3",
             &collector.openvpn_status_files[0].st_file,
         )?;
-        collector.collect_all_files_data();
+        collector.collect_all_files_data(true);
         size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
         assert_eq!(size, 524);
         assert_eq!(collector.openvpn_status_files[0].last_update, 1633366496);
@@ -566,7 +757,7 @@ mod tests {
             "./tests/templates/openvpn-status.log_ts1",
             &collector.openvpn_status_files[0].st_file,
         )?;
-        collector.collect_all_files_data();
+        collector.collect_all_files_data(true);
         size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
         assert_eq!(size, 786);
         assert_eq!(collector.openvpn_status_files[0].last_update, 1633366402);
@@ -585,7 +776,7 @@ mod tests {
             "./tests/templates/openvpn-status.log_ts1",
             &collector.openvpn_status_files[0].st_file,
         )?;
-        collector.collect_all_files_data();
+        collector.collect_all_files_data(true);
 
         // This is the first data collection, and then the cache file should be created but with 0 bytes.
         let mut size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
@@ -598,13 +789,13 @@ mod tests {
             "./tests/templates/openvpn-status.log_ts2",
             &collector.openvpn_status_files[0].st_file,
         )?;
-        collector.collect_all_files_data();
+        collector.collect_all_files_data(true);
         size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
         assert_eq!(size, 262);
         assert_eq!(collector.openvpn_status_files[0].last_update, 1633366441);
 
         // Don't change OpenVPN status log file, then timestamp is the same.
-        collector.collect_all_files_data();
+        collector.collect_all_files_data(true);
         size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
         assert_eq!(size, 262);
         assert_eq!(collector.openvpn_status_files[0].last_update, 1633366441);
@@ -629,7 +820,7 @@ mod tests {
             "./tests/templates/openvpn-status.log_ts1",
             &collector.openvpn_status_files[0].st_file,
         )?;
-        collector.collect_all_files_data();
+        collector.collect_all_files_data(true);
         let mut size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
         assert_eq!(size, 0);
         assert_eq!(collector.openvpn_status_files[0].last_update, 1633366402);
@@ -638,7 +829,7 @@ mod tests {
             "./tests/templates/openvpn-status.log_ts2",
             &collector.openvpn_status_files[0].st_file,
         )?;
-        collector.collect_all_files_data();
+        collector.collect_all_files_data(true);
         size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
         assert_eq!(size, 262);
         assert_eq!(collector.openvpn_status_files[0].last_update, 1633366441);
@@ -647,7 +838,7 @@ mod tests {
             "./tests/templates/openvpn-status.log_ts3",
             &collector.openvpn_status_files[0].st_file,
         )?;
-        collector.collect_all_files_data();
+        collector.collect_all_files_data(true);
         size = fs::metadata(&collector.openvpn_status_files[0].cache_file)?.len();
         // The cache file size control takes effect and no more status data is collected.
         assert_eq!(size, 262);
