@@ -1,5 +1,5 @@
 /*
-    Copyright 2022 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2026 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -25,6 +25,7 @@ extern crate lazy_static;
 
 mod auth;
 pub mod config;
+pub mod crowdsec;
 mod errors;
 pub mod routes;
 mod utils;

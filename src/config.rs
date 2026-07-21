@@ -1,5 +1,5 @@
 /*
-    Copyright 2025 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2026 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -35,6 +35,7 @@ use crate::errors::Result;
 use crate::utils::ws::WsData;
 
 pub struct MyMutex {
+    pub crowdsec: Arc<tokio::sync::Mutex<u8>>,
     pub openvpn: Arc<tokio::sync::Mutex<u8>>,
     pub wireguard: Arc<tokio::sync::Mutex<u8>>,
     pub ipsec: Arc<tokio::sync::Mutex<u8>>,
@@ -145,6 +146,7 @@ impl Config {
             fwcloud_script_paths: vec![],
 
             mutex: MyMutex {
+                crowdsec: Arc::new(tokio::sync::Mutex::new(0)),
                 openvpn: Arc::new(tokio::sync::Mutex::new(0)),
                 wireguard: Arc::new(tokio::sync::Mutex::new(0)),
                 ipsec: Arc::new(tokio::sync::Mutex::new(0)),

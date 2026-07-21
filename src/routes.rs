@@ -1,5 +1,5 @@
 /*
-    Copyright 2025 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2026 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -20,6 +20,7 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+mod crowdsec;
 mod daemon;
 mod fwcloud_script;
 mod info;
@@ -40,6 +41,8 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
         web::scope("/api/v1")
             .service(ping::ping)
             .service(info::info)
+            // CrowdSec.
+            .service(crowdsec::crowdsec)
             // FWCloud script.
             .service(fwcloud_script::upload_and_run)
             // OpenVPN.
