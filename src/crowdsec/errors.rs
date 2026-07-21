@@ -20,14 +20,10 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::sync::Arc;
-
-use actix_web::{get, web, HttpResponse};
-
-use crate::{config::Config, crowdsec::models::CrowdSecCapabilitiesResponse};
-
-#[get("/crowdsec")]
-async fn crowdsec(cfg: web::Data<Arc<Config>>) -> HttpResponse {
-    let _lock = cfg.mutex.crowdsec.lock().await;
-    HttpResponse::NotImplemented().json(CrowdSecCapabilitiesResponse::not_implemented())
-}
+pub const COMMAND_FAILED: &str = "CROWDSEC_COMMAND_FAILED";
+pub const FIREWALL_INTEGRATION_INVALID: &str = "CROWDSEC_FIREWALL_INTEGRATION_INVALID";
+pub const INVALID_COMMAND: &str = "CROWDSEC_INVALID_COMMAND";
+pub const LAPI_UNREACHABLE: &str = "CROWDSEC_LAPI_UNREACHABLE";
+pub const NOT_INSTALLED: &str = "CROWDSEC_NOT_INSTALLED";
+pub const OPERATION_TIMEOUT: &str = "CROWDSEC_OPERATION_TIMEOUT";
+pub const UNSUPPORTED_OS: &str = "CROWDSEC_UNSUPPORTED_OS";

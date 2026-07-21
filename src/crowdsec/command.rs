@@ -24,7 +24,10 @@ use std::time::Duration;
 
 use tokio::{process::Command, time::timeout};
 
-use crate::errors::{FwcError, Result};
+use crate::{
+    crowdsec::errors::{COMMAND_FAILED, INVALID_COMMAND, OPERATION_TIMEOUT},
+    errors::{FwcError, Result},
+};
 
 pub const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -44,8 +47,9 @@ impl CrowdSecCommand {
                 .iter()
                 .any(|arg| arg.is_empty() || arg.len() > 256 || arg.chars().any(char::is_control))
         {
-            return Err(FwcError::BadRequest(
-                "Invalid CrowdSec command argument".to_string(),
+            return Err(FwcError::crowdsec(
+                INVALID_COMMAND,
+                "Invalid CrowdSec command argument",
             ));
         }
 
@@ -60,10 +64,13 @@ impl CrowdSecCommand {
             Command::new("cscli").args(&self.args).output(),
         )
         .await
-        .map_err(|_| FwcError::Internal("CrowdSec command timed out"))??;
+        .map_err(|_| FwcError::crowdsec(OPERATION_TIMEOUT, "CrowdSec command timed out"))??;
 
         if !output.status.success() {
-            return Err(FwcError::CmdExitStatusNotZero);
+            return Err(FwcError::crowdsec(
+                COMMAND_FAILED,
+                "CrowdSec command failed",
+            ));
         }
 
         Ok(CrowdSecCommandOutput {

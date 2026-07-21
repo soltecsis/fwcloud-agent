@@ -1,5 +1,5 @@
 /*
-    Copyright 2023 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
+    Copyright 2026 SOLTECSIS SOLUCIONES TECNOLOGICAS, SLU
     https://soltecsis.com
     info@soltecsis.com
 
@@ -91,6 +91,12 @@ pub enum FwcError {
     #[error("{0}")]
     BadRequest(String),
 
+    #[error("{message}")]
+    CrowdSec {
+        code: &'static str,
+        message: &'static str,
+    },
+
     #[error(transparent)]
     Validation(#[from] validator::ValidationErrors),
 
@@ -135,6 +141,18 @@ impl ResponseError for FwcError {
         );
 
         error!("{}", self);
-        resp.set_body(BoxBody::new(format!("{{\"message\":\"{self}\"}}")))
+        let body = match self {
+            FwcError::CrowdSec { code, message } => {
+                serde_json::json!({ "code": code, "message": message }).to_string()
+            }
+            _ => serde_json::json!({ "message": self.to_string() }).to_string(),
+        };
+        resp.set_body(BoxBody::new(body))
+    }
+}
+
+impl FwcError {
+    pub fn crowdsec(code: &'static str, message: &'static str) -> Self {
+        Self::CrowdSec { code, message }
     }
 }
