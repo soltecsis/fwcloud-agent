@@ -25,6 +25,7 @@ extern crate lazy_static;
 
 mod auth;
 pub mod config;
+pub mod crowdsec;
 mod errors;
 pub mod routes;
 mod utils;

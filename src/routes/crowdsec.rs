@@ -22,9 +22,9 @@
 
 use actix_web::{get, HttpResponse};
 
+use crate::crowdsec::models::CrowdSecCapabilitiesResponse;
+
 #[get("/crowdsec")]
 async fn crowdsec() -> HttpResponse {
-    HttpResponse::NotImplemented().json(serde_json::json!({
-        "message": "CrowdSec operations are not implemented yet"
-    }))
+    HttpResponse::NotImplemented().json(CrowdSecCapabilitiesResponse::not_implemented())
 }
