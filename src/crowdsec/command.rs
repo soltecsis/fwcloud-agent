@@ -31,6 +31,7 @@ use crate::{
 
 pub const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[derive(Debug)]
 pub struct CrowdSecCommand {
     args: Vec<String>,
 }
@@ -77,5 +78,43 @@ impl CrowdSecCommand {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CrowdSecCommand;
+    use crate::{crowdsec::errors::INVALID_COMMAND, errors::FwcError};
+
+    #[test]
+    fn rejects_empty_control_and_oversized_arguments() {
+        let oversized_argument = "a".repeat(257);
+
+        for args in [
+            vec![],
+            vec![""],
+            vec!["invalid\nargument"],
+            vec![oversized_argument.as_str()],
+        ] {
+            let error = CrowdSecCommand::cscli(&args).unwrap_err();
+            assert!(matches!(
+                error,
+                FwcError::CrowdSec {
+                    code: INVALID_COMMAND,
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn preserves_valid_arguments_as_separate_values() {
+        let command =
+            CrowdSecCommand::cscli(&["collections", "install", "crowdsecurity/sshd"]).unwrap();
+
+        assert_eq!(
+            command.args,
+            vec!["collections", "install", "crowdsecurity/sshd"]
+        );
     }
 }

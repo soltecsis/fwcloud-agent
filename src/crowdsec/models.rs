@@ -65,3 +65,23 @@ impl CrowdSecCapabilitiesResponse {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{CrowdSecCapabilitiesResponse, CrowdSecOperationRequest};
+
+    #[test]
+    fn rejects_unknown_crowdsec_operations() {
+        let request = serde_json::from_str::<CrowdSecOperationRequest>(r#"{"operation":"shell"}"#);
+        assert!(request.is_err());
+    }
+
+    #[test]
+    fn capability_response_does_not_include_sensitive_fields() {
+        let response =
+            serde_json::to_string(&CrowdSecCapabilitiesResponse::not_implemented()).unwrap();
+
+        assert!(!response.contains("api_key"));
+        assert!(!response.contains("enrollment_key"));
+    }
+}
