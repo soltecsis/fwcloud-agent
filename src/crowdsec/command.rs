@@ -26,6 +26,7 @@ use tokio::{process::Command, time::timeout};
 
 use crate::{
     crowdsec::errors::{COMMAND_FAILED, INVALID_COMMAND, OPERATION_TIMEOUT},
+    crowdsec::secrets::redact_sensitive_text,
     errors::{FwcError, Result},
 };
 
@@ -37,8 +38,18 @@ pub struct CrowdSecCommand {
 }
 
 pub struct CrowdSecCommandOutput {
-    pub stdout: String,
-    pub stderr: String,
+    stdout: String,
+    stderr: String,
+}
+
+impl CrowdSecCommandOutput {
+    pub fn redacted_stdout(&self) -> String {
+        redact_sensitive_text(&self.stdout)
+    }
+
+    pub fn redacted_stderr(&self) -> String {
+        redact_sensitive_text(&self.stderr)
+    }
 }
 
 impl CrowdSecCommand {
