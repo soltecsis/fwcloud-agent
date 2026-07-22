@@ -20,7 +20,16 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+use std::time::Duration;
+
+use log::debug;
 use serde::Serialize;
+use tokio::{process::Command, time::timeout};
+
+use crate::{
+    crowdsec::errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
+    errors::{FwcError, Result},
+};
 
 pub const FIREWALL_BOUNCER_PACKAGE: &str = "crowdsec-firewall-bouncer-iptables";
 pub const FIREWALL_BOUNCER_SERVICE: &str = "crowdsec-firewall-bouncer.service";
@@ -32,6 +41,10 @@ pub const IPSET_SETUP_SERVICE: &str = "fwcloud-crowdsec-ipsets.service";
 pub const IPSET_SETUP_SERVICE_PATH: &str = "/etc/systemd/system/fwcloud-crowdsec-ipsets.service";
 pub const IPSET_V4_BLACKLIST: &str = "crowdsec-blacklists";
 pub const IPSET_V6_BLACKLIST: &str = "crowdsec6-blacklists";
+
+const IPSET_COMMAND: &str = "/usr/sbin/ipset";
+const IPSET_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+const IPSET_MAX_ELEMENTS: &str = "150000";
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,4 +87,85 @@ impl Default for CrowdSecBouncerSetOnlyConfig {
             blacklists_ipv6: IPSET_V6_BLACKLIST,
         }
     }
+}
+
+pub async fn ensure_blacklist_ipsets() -> Result<[CrowdSecIpSetStatus; 2]> {
+    create_ipset(&[
+        "create",
+        IPSET_V4_BLACKLIST,
+        "hash:ip",
+        "timeout",
+        "0",
+        "maxelem",
+        IPSET_MAX_ELEMENTS,
+        "-exist",
+    ])
+    .await?;
+    create_ipset(&[
+        "create",
+        IPSET_V6_BLACKLIST,
+        "hash:ip",
+        "family",
+        "inet6",
+        "timeout",
+        "0",
+        "maxelem",
+        IPSET_MAX_ELEMENTS,
+        "-exist",
+    ])
+    .await?;
+
+    let ipv4_blacklist = ipset_status(IPSET_V4_BLACKLIST).await?;
+    let ipv6_blacklist = ipset_status(IPSET_V6_BLACKLIST).await?;
+
+    if !ipv4_blacklist.exists || !ipv6_blacklist.exists {
+        return Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "FWCloud CrowdSec blacklist IPSet are unavailable",
+        ));
+    }
+
+    Ok([ipv4_blacklist, ipv6_blacklist])
+}
+
+pub async fn ipset_status(name: &'static str) -> Result<CrowdSecIpSetStatus> {
+    let output = run_ipset(&["list", name]).await?;
+
+    Ok(CrowdSecIpSetStatus {
+        name,
+        exists: output.status.success(),
+    })
+}
+
+async fn create_ipset(arguments: &[&str]) -> Result<()> {
+    let output = run_ipset(arguments).await?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to create FWCloud CrowdSec blacklist IPSet",
+        ))
+    }
+}
+
+async fn run_ipset(arguments: &[&str]) -> Result<std::process::Output> {
+    debug!(
+        "Running CrowdSec IPSet command: {} {:?}",
+        IPSET_COMMAND, arguments
+    );
+
+    timeout(
+        IPSET_COMMAND_TIMEOUT,
+        Command::new(IPSET_COMMAND).args(arguments).output(),
+    )
+    .await
+    .map_err(|_| FwcError::crowdsec(OPERATION_TIMEOUT, "CrowdSec IPSet command timed out"))?
+    .map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to run FWCloud CrowdSec IPSet command",
+        )
+    })
 }
