@@ -20,14 +20,22 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::time::Duration;
+use std::{
+    fs::{self as std_fs, OpenOptions},
+    io::Write,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    time::Duration,
+};
 
 use log::debug;
 use serde::Serialize;
 use tokio::{fs, process::Command, time::timeout};
 
 use crate::{
-    crowdsec::errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
+    crowdsec::{
+        command::CrowdSecCommand,
+        errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
+    },
     errors::{FwcError, Result},
 };
 
@@ -96,6 +104,23 @@ impl Default for CrowdSecBouncerSetOnlyConfig {
             blacklists_ipv6: IPSET_V6_BLACKLIST,
         }
     }
+}
+
+pub async fn prepare_set_only_configuration() -> Result<()> {
+    let api_key = existing_bouncer_api_key()
+        .await?
+        .unwrap_or(generate_bouncer_api_key().await?);
+    let configuration = CrowdSecBouncerSetOnlyConfig::default();
+
+    fs::create_dir_all(BOUNCER_CONFIG_DIRECTORY)
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create CrowdSec Firewall Bouncer configuration directory",
+            )
+        })?;
+    write_bouncer_configuration(&configuration, &api_key)
 }
 
 pub async fn ensure_blacklist_ipsets() -> Result<[CrowdSecIpSetStatus; 2]> {
@@ -239,4 +264,116 @@ async fn write_if_changed(path: &str, contents: &str) -> Result<()> {
             )
         }),
     }
+}
+
+async fn existing_bouncer_api_key() -> Result<Option<String>> {
+    match fs::read_to_string(BOUNCER_CONFIG_OVERRIDE_PATH).await {
+        Ok(configuration) => configuration
+            .lines()
+            .find_map(|line| {
+                line.split_once(':').and_then(|(key, value)| {
+                    (key.trim() == "api_key").then(|| {
+                        value
+                            .trim()
+                            .trim_matches('"')
+                            .trim_matches('\'')
+                            .to_string()
+                    })
+                })
+            })
+            .filter(|api_key| valid_api_key(api_key))
+            .map(Some)
+            .ok_or_else(|| {
+                FwcError::crowdsec(
+                    FIREWALL_INTEGRATION_INVALID,
+                    "Existing CrowdSec Firewall Bouncer configuration has no valid API key",
+                )
+            }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to read CrowdSec Firewall Bouncer configuration",
+        )),
+    }
+}
+
+async fn generate_bouncer_api_key() -> Result<String> {
+    debug!("Generating FWCloud CrowdSec Firewall Bouncer API key");
+    let output = CrowdSecCommand::cscli(&["bouncers", "add", FWCLOUD_BOUNCER_NAME, "-o", "raw"])?
+        .execute()
+        .await?;
+    let api_key = output.stdout().trim().to_string();
+
+    if valid_api_key(&api_key) {
+        Ok(api_key)
+    } else {
+        Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "CrowdSec Firewall Bouncer did not return a valid API key",
+        ))
+    }
+}
+
+fn valid_api_key(api_key: &str) -> bool {
+    !api_key.is_empty()
+        && api_key.len() <= 512
+        && !api_key.chars().any(char::is_control)
+        && !api_key.contains('\n')
+        && !api_key.contains('\r')
+}
+
+fn write_bouncer_configuration(
+    configuration: &CrowdSecBouncerSetOnlyConfig,
+    api_key: &str,
+) -> Result<()> {
+    let temporary_path = format!("{}.tmp", BOUNCER_CONFIG_OVERRIDE_PATH);
+    let _ = std_fs::remove_file(&temporary_path);
+    let mut configuration_file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(&temporary_path)
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create CrowdSec Firewall Bouncer configuration",
+            )
+        })?;
+    std_fs::set_permissions(&temporary_path, std_fs::Permissions::from_mode(0o600)).map_err(
+        |_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to secure CrowdSec Firewall Bouncer configuration",
+            )
+        },
+    )?;
+    configuration_file
+        .write_all(set_only_configuration_contents(configuration, api_key).as_bytes())
+        .and_then(|_| configuration_file.sync_all())
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to write CrowdSec Firewall Bouncer configuration",
+            )
+        })?;
+    std_fs::rename(&temporary_path, BOUNCER_CONFIG_OVERRIDE_PATH).map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to install CrowdSec Firewall Bouncer configuration",
+        )
+    })
+}
+
+fn set_only_configuration_contents(
+    configuration: &CrowdSecBouncerSetOnlyConfig,
+    api_key: &str,
+) -> String {
+    format!(
+        "mode: {}\napi_url: http://127.0.0.1:8080/\napi_key: {}\ndisable_ipv6: false\nblacklists_ipv4: {}\nblacklists_ipv6: {}\nipset_type: hash:ip\n",
+        configuration.mode,
+        api_key,
+        configuration.blacklists_ipv4,
+        configuration.blacklists_ipv6,
+    )
 }
