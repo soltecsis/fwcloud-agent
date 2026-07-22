@@ -22,17 +22,19 @@
 
 use std::time::Duration;
 
+use log::debug;
 use tokio::{fs, process::Command, time::timeout};
 
 use crate::{
     crowdsec::{
         errors::{COMMAND_FAILED, OPERATION_TIMEOUT, UNSUPPORTED_OS},
         models::{CrowdSecInstallStep, CrowdSecStepResult, CrowdSecStepStatus},
+        secrets::redact_sensitive_text,
     },
     errors::{FwcError, Result},
 };
 
-const CROWDSEC_PACKAGES: &[&str] = &["crowdsec", "ipset", "crowdsec-firewall-bouncer-iptables"];
+const CROWDSEC_PACKAGES: &[&str] = &["crowdsec", "ipset"];
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 const OS_RELEASE_PATH: &str = "/etc/os-release";
 const APT_KEYRING_DIRECTORY: &str = "/etc/apt/keyrings";
@@ -131,7 +133,7 @@ async fn configure_repository(package_manager: PackageManager) -> Result<()> {
 
 async fn configure_apt_repository() -> Result<()> {
     if apt_repository_is_configured().await {
-        return Ok(());
+        return run_command("/usr/bin/apt-get", &["update"]).await;
     }
 
     install_package(PackageManager::Apt, "curl").await?;
@@ -199,8 +201,20 @@ async fn run_command(program: &str, arguments: &[&str]) -> Result<()> {
     let output = run_command_allow_failure(program, arguments).await?;
 
     if output.status.success() {
+        debug!(
+            "CrowdSec package command completed: {} {:?}",
+            program, arguments
+        );
         Ok(())
     } else {
+        debug!(
+            "CrowdSec package command failed: {} {:?} (exit code: {:?}, stdout: {}, stderr: {})",
+            program,
+            arguments,
+            output.status.code(),
+            redact_sensitive_text(&String::from_utf8_lossy(&output.stdout)),
+            redact_sensitive_text(&String::from_utf8_lossy(&output.stderr)),
+        );
         Err(FwcError::crowdsec(
             COMMAND_FAILED,
             "CrowdSec package command failed",
@@ -212,13 +226,30 @@ async fn run_command_allow_failure(
     program: &str,
     arguments: &[&str],
 ) -> Result<std::process::Output> {
+    debug!(
+        "Running CrowdSec package command: {} {:?}",
+        program, arguments
+    );
+
     timeout(
         COMMAND_TIMEOUT,
         Command::new(program).args(arguments).output(),
     )
     .await
-    .map_err(|_| FwcError::crowdsec(OPERATION_TIMEOUT, "CrowdSec package command timed out"))?
-    .map_err(|_| FwcError::crowdsec(COMMAND_FAILED, "Unable to run CrowdSec package command"))
+    .map_err(|_| {
+        debug!(
+            "CrowdSec package command timed out: {} {:?}",
+            program, arguments
+        );
+        FwcError::crowdsec(OPERATION_TIMEOUT, "CrowdSec package command timed out")
+    })?
+    .map_err(|error| {
+        debug!(
+            "Unable to run CrowdSec package command: {} {:?} ({})",
+            program, arguments, error
+        );
+        FwcError::crowdsec(COMMAND_FAILED, "Unable to run CrowdSec package command")
+    })
 }
 
 async fn write_if_changed(path: &str, contents: &str) -> Result<()> {

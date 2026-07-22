@@ -57,8 +57,8 @@ pub enum CrowdSecInstallStep {
     Repository,
     Packages,
     CrowdSecService,
+    HubUpdate,
     DefaultCollections,
-    FirewallBouncerPackage,
 }
 
 #[derive(Debug, Serialize)]

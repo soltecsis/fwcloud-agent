@@ -22,12 +22,48 @@
 
 use std::sync::Arc;
 
-use actix_web::{get, web, HttpResponse};
+use actix_web::{get, post, web, HttpResponse};
+use log::debug;
 
-use crate::{config::Config, crowdsec::models::CrowdSecCapabilitiesResponse};
+use crate::{
+    config::Config,
+    crowdsec::{
+        install,
+        models::{CrowdSecCapabilitiesResponse, CrowdSecInstallRequest},
+    },
+    errors::Result,
+};
 
 #[get("/crowdsec")]
 async fn crowdsec(cfg: web::Data<Arc<Config>>) -> HttpResponse {
-    let _lock = cfg.mutex.crowdsec.lock().await;
+    {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+    }
+
     HttpResponse::NotImplemented().json(CrowdSecCapabilitiesResponse::not_implemented())
+}
+
+#[post("/crowdsec/install")]
+async fn install_crowdsec(
+    cfg: web::Data<Arc<Config>>,
+    _request: web::Json<CrowdSecInstallRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let install_result = install::install().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        install_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }

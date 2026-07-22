@@ -22,6 +22,7 @@
 
 use std::time::Duration;
 
+use log::debug;
 use tokio::{process::Command, time::timeout};
 
 use crate::{
@@ -43,6 +44,10 @@ pub struct CrowdSecCommandOutput {
 }
 
 impl CrowdSecCommandOutput {
+    pub(crate) fn stdout(&self) -> &str {
+        &self.stdout
+    }
+
     pub fn redacted_stdout(&self) -> String {
         redact_sensitive_text(&self.stdout)
     }
@@ -79,6 +84,15 @@ impl CrowdSecCommand {
         .map_err(|_| FwcError::crowdsec(OPERATION_TIMEOUT, "CrowdSec command timed out"))??;
 
         if !output.status.success() {
+            if self.has_safe_diagnostic_output() {
+                debug!(
+                    "CrowdSec collection command failed (exit code: {:?}, stdout: {}, stderr: {})",
+                    output.status.code(),
+                    redact_sensitive_text(&String::from_utf8_lossy(&output.stdout)),
+                    redact_sensitive_text(&String::from_utf8_lossy(&output.stderr)),
+                );
+            }
+
             return Err(FwcError::crowdsec(
                 COMMAND_FAILED,
                 "CrowdSec command failed",
@@ -89,6 +103,13 @@ impl CrowdSecCommand {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         })
+    }
+
+    fn has_safe_diagnostic_output(&self) -> bool {
+        matches!(
+            self.args.first().map(String::as_str),
+            Some("collections") | Some("hub")
+        )
     }
 }
 
