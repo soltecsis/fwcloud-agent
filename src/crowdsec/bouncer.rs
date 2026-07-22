@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use log::debug;
 use serde::Serialize;
-use tokio::{process::Command, time::timeout};
+use tokio::{fs, process::Command, time::timeout};
 
 use crate::{
     crowdsec::errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
@@ -39,12 +39,21 @@ pub const BOUNCER_CONFIG_OVERRIDE_PATH: &str =
     "/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local";
 pub const IPSET_SETUP_SERVICE: &str = "fwcloud-crowdsec-ipsets.service";
 pub const IPSET_SETUP_SERVICE_PATH: &str = "/etc/systemd/system/fwcloud-crowdsec-ipsets.service";
+pub const BOUNCER_IPSET_DROP_IN_DIRECTORY: &str =
+    "/etc/systemd/system/crowdsec-firewall-bouncer.service.d";
+pub const BOUNCER_IPSET_DROP_IN_PATH: &str =
+    "/etc/systemd/system/crowdsec-firewall-bouncer.service.d/fwcloud-ipsets.conf";
 pub const IPSET_V4_BLACKLIST: &str = "crowdsec-blacklists";
 pub const IPSET_V6_BLACKLIST: &str = "crowdsec6-blacklists";
 
 const IPSET_COMMAND: &str = "/usr/sbin/ipset";
 const IPSET_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const IPSET_MAX_ELEMENTS: &str = "150000";
+const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
+
+const IPSET_SETUP_SERVICE_CONTENT: &str = "[Unit]\nDescription=Create FWCloud CrowdSec blacklist IPSet\nBefore=crowdsec-firewall-bouncer.service\n\n[Service]\nType=oneshot\nExecStart=/usr/sbin/ipset create crowdsec-blacklists hash:ip timeout 0 maxelem 150000 -exist\nExecStart=/usr/sbin/ipset create crowdsec6-blacklists hash:ip family inet6 timeout 0 maxelem 150000 -exist\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n";
+const BOUNCER_IPSET_DROP_IN_CONTENT: &str =
+    "[Unit]\nRequires=fwcloud-crowdsec-ipsets.service\nAfter=fwcloud-crowdsec-ipsets.service\n";
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -128,6 +137,22 @@ pub async fn ensure_blacklist_ipsets() -> Result<[CrowdSecIpSetStatus; 2]> {
     Ok([ipv4_blacklist, ipv6_blacklist])
 }
 
+pub async fn install_ipset_setup_service() -> Result<()> {
+    write_if_changed(IPSET_SETUP_SERVICE_PATH, IPSET_SETUP_SERVICE_CONTENT).await?;
+    fs::create_dir_all(BOUNCER_IPSET_DROP_IN_DIRECTORY)
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create CrowdSec Firewall Bouncer systemd drop-in directory",
+            )
+        })?;
+    write_if_changed(BOUNCER_IPSET_DROP_IN_PATH, BOUNCER_IPSET_DROP_IN_CONTENT).await?;
+
+    run_systemctl(&["daemon-reload"]).await?;
+    run_systemctl(&["enable", IPSET_SETUP_SERVICE]).await
+}
+
 pub async fn ipset_status(name: &'static str) -> Result<CrowdSecIpSetStatus> {
     let output = run_ipset(&["list", name]).await?;
 
@@ -168,4 +193,50 @@ async fn run_ipset(arguments: &[&str]) -> Result<std::process::Output> {
             "Unable to run FWCloud CrowdSec IPSet command",
         )
     })
+}
+
+async fn run_systemctl(arguments: &[&str]) -> Result<()> {
+    debug!(
+        "Running CrowdSec IPSet systemd command: {} {:?}",
+        SYSTEMCTL_COMMAND, arguments
+    );
+
+    let output = timeout(
+        IPSET_COMMAND_TIMEOUT,
+        Command::new(SYSTEMCTL_COMMAND).args(arguments).output(),
+    )
+    .await
+    .map_err(|_| {
+        FwcError::crowdsec(
+            OPERATION_TIMEOUT,
+            "CrowdSec IPSet systemd command timed out",
+        )
+    })?
+    .map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to run CrowdSec IPSet systemd command",
+        )
+    })?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to configure CrowdSec IPSet systemd service",
+        ))
+    }
+}
+
+async fn write_if_changed(path: &str, contents: &str) -> Result<()> {
+    match fs::read_to_string(path).await {
+        Ok(current_contents) if current_contents == contents => Ok(()),
+        Ok(_) | Err(_) => fs::write(path, contents).await.map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to write CrowdSec IPSet systemd configuration",
+            )
+        }),
+    }
 }
