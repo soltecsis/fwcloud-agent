@@ -27,7 +27,7 @@ use tokio::{process::Command, time::timeout};
 
 use crate::{
     crowdsec::{
-        errors::{COMMAND_FAILED, OPERATION_TIMEOUT},
+        errors::{COMMAND_FAILED, OPERATION_TIMEOUT, UNINSTALL_CONFIRMATION_REQUIRED},
         models::{
             CrowdSecDataRetention, CrowdSecStepResult, CrowdSecStepStatus,
             CrowdSecUninstallResponse, CrowdSecUninstallStep,
@@ -38,6 +38,17 @@ use crate::{
 };
 
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+
+pub fn require_confirmation(confirm: bool) -> Result<()> {
+    if confirm {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            UNINSTALL_CONFIRMATION_REQUIRED,
+            "CrowdSec uninstall requires confirm: true",
+        ))
+    }
+}
 
 pub async fn uninstall() -> Result<CrowdSecUninstallResponse> {
     info!("Uninstalling CrowdSec services and packages while preserving data");
@@ -115,4 +126,24 @@ async fn run_systemctl_allow_failure(arguments: &[&str]) -> Result<std::process:
     .await
     .map_err(|_| FwcError::crowdsec(OPERATION_TIMEOUT, "CrowdSec service command timed out"))?
     .map_err(|_| FwcError::crowdsec(COMMAND_FAILED, "Unable to run CrowdSec service command"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::require_confirmation;
+    use crate::{crowdsec::errors::UNINSTALL_CONFIRMATION_REQUIRED, errors::FwcError};
+
+    #[test]
+    fn uninstall_requires_explicit_confirmation() {
+        assert!(require_confirmation(true).is_ok());
+
+        let error = require_confirmation(false).unwrap_err();
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: UNINSTALL_CONFIRMATION_REQUIRED,
+                ..
+            }
+        ));
+    }
 }

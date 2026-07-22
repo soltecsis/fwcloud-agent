@@ -27,13 +27,12 @@ use log::debug;
 
 use crate::{
     config::Config,
-    crowdsec::errors::UNINSTALL_CONFIRMATION_REQUIRED,
     crowdsec::{
         install,
         models::{CrowdSecCapabilitiesResponse, CrowdSecInstallRequest, CrowdSecUninstallRequest},
         uninstall,
     },
-    errors::{FwcError, Result},
+    errors::Result,
 };
 
 #[get("/crowdsec")]
@@ -75,12 +74,7 @@ async fn uninstall_crowdsec(
     cfg: web::Data<Arc<Config>>,
     request: web::Json<CrowdSecUninstallRequest>,
 ) -> Result<HttpResponse> {
-    if !request.confirm {
-        return Err(FwcError::crowdsec(
-            UNINSTALL_CONFIRMATION_REQUIRED,
-            "CrowdSec uninstall requires confirm: true",
-        ));
-    }
+    uninstall::require_confirmation(request.confirm)?;
 
     let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());

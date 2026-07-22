@@ -49,7 +49,7 @@ const CROWDSEC_GPG_KEY_URL: &str = "https://packagecloud.io/crowdsec/crowdsec/gp
 const CROWDSEC_APT_REPOSITORY: &str = "deb [signed-by=/etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg] https://packagecloud.io/crowdsec/crowdsec/any any main\ndeb-src [signed-by=/etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg] https://packagecloud.io/crowdsec/crowdsec/any any main\n";
 const CROWDSEC_RPM_REPOSITORY: &str = "[crowdsec_crowdsec]\nname=crowdsec_crowdsec\nbaseurl=https://packagecloud.io/crowdsec/crowdsec/rpm_any/rpm_any/$basearch\nrepo_gpgcheck=1\ngpgcheck=1\nenabled=1\ngpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey\n       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-EDE2C695EC9A5A5C.pub.gpg\n";
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PackageManager {
     Apt,
     Dnf,
@@ -117,16 +117,7 @@ pub async fn uninstall_packages() -> Result<CrowdSecStepResult<CrowdSecUninstall
         }
     }
 
-    let message = match (removed_packages.is_empty(), absent_packages.is_empty()) {
-        (true, false) => "CrowdSec packages are already absent".to_string(),
-        (false, true) => format!("Removed CrowdSec packages: {}", removed_packages.join(", ")),
-        (false, false) => format!(
-            "Removed CrowdSec packages: {}; already absent: {}",
-            removed_packages.join(", "),
-            absent_packages.join(", ")
-        ),
-        (true, true) => "No CrowdSec packages were requested for removal".to_string(),
-    };
+    let message = package_removal_message(&removed_packages, &absent_packages);
 
     Ok(CrowdSecStepResult {
         step: CrowdSecUninstallStep::Packages,
@@ -141,18 +132,44 @@ async fn detect_package_manager() -> Result<PackageManager> {
     })?;
     let distribution = os_release_value(&os_release, "ID").unwrap_or_default();
 
-    match distribution.as_str() {
-        "debian" | "ubuntu" if command_exists("/usr/bin/apt-get") => Ok(PackageManager::Apt),
-        "rhel" | "centos" | "rocky" | "fedora" if command_exists("/usr/bin/dnf") => {
-            Ok(PackageManager::Dnf)
-        }
-        "rhel" | "centos" | "rocky" | "fedora" if command_exists("/usr/bin/yum") => {
-            Ok(PackageManager::Yum)
-        }
-        _ => Err(FwcError::crowdsec(
+    package_manager_for_os_release(
+        &distribution,
+        command_exists("/usr/bin/apt-get"),
+        command_exists("/usr/bin/dnf"),
+        command_exists("/usr/bin/yum"),
+    )
+    .ok_or_else(|| {
+        FwcError::crowdsec(
             UNSUPPORTED_OS,
             "CrowdSec installation is not supported on this system",
-        )),
+        )
+    })
+}
+
+fn package_manager_for_os_release(
+    distribution: &str,
+    apt_available: bool,
+    dnf_available: bool,
+    yum_available: bool,
+) -> Option<PackageManager> {
+    match distribution {
+        "debian" | "ubuntu" if apt_available => Some(PackageManager::Apt),
+        "rhel" | "centos" | "rocky" | "fedora" if dnf_available => Some(PackageManager::Dnf),
+        "rhel" | "centos" | "rocky" | "fedora" if yum_available => Some(PackageManager::Yum),
+        _ => None,
+    }
+}
+
+fn package_removal_message(removed_packages: &[&str], absent_packages: &[&str]) -> String {
+    match (removed_packages.is_empty(), absent_packages.is_empty()) {
+        (true, false) => "CrowdSec packages are already absent".to_string(),
+        (false, true) => format!("Removed CrowdSec packages: {}", removed_packages.join(", ")),
+        (false, false) => format!(
+            "Removed CrowdSec packages: {}; already absent: {}",
+            removed_packages.join(", "),
+            absent_packages.join(", ")
+        ),
+        (true, true) => "No CrowdSec packages were requested for removal".to_string(),
     }
 }
 
@@ -322,4 +339,41 @@ fn os_release_value(os_release: &str, key: &str) -> Option<String> {
 
         (line_key == key).then(|| value.trim_matches('"').to_string())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{package_manager_for_os_release, package_removal_message, PackageManager};
+
+    #[test]
+    fn selects_supported_package_managers() {
+        assert_eq!(
+            package_manager_for_os_release("ubuntu", true, false, false),
+            Some(PackageManager::Apt)
+        );
+        assert_eq!(
+            package_manager_for_os_release("rocky", false, true, true),
+            Some(PackageManager::Dnf)
+        );
+        assert_eq!(
+            package_manager_for_os_release("centos", false, false, true),
+            Some(PackageManager::Yum)
+        );
+        assert_eq!(
+            package_manager_for_os_release("alpine", false, false, false),
+            None
+        );
+    }
+
+    #[test]
+    fn removal_message_reports_idempotent_results() {
+        assert_eq!(
+            package_removal_message(&[], &["crowdsec"]),
+            "CrowdSec packages are already absent"
+        );
+        assert_eq!(
+            package_removal_message(&["crowdsec"], &["crowdsec-firewall-bouncer-iptables"]),
+            "Removed CrowdSec packages: crowdsec; already absent: crowdsec-firewall-bouncer-iptables"
+        );
+    }
 }

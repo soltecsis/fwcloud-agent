@@ -160,3 +160,28 @@ async fn run_systemctl(arguments: &[&str]) -> Result<()> {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::json_collection_is_installed;
+    use serde_json::json;
+
+    #[test]
+    fn recognizes_installed_collections_in_json_output() {
+        let collection_state = json!({
+            "collections": [
+                {"name": "crowdsecurity/linux", "installed": true, "tainted": true},
+                {"name": "crowdsecurity/sshd", "installed": false}
+            ]
+        });
+
+        assert!(json_collection_is_installed(
+            &collection_state,
+            "crowdsecurity/linux"
+        ));
+        assert!(!json_collection_is_installed(
+            &collection_state,
+            "crowdsecurity/sshd"
+        ));
+    }
+}

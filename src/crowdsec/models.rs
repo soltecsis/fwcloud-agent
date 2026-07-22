@@ -130,7 +130,10 @@ impl CrowdSecCapabilitiesResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{CrowdSecCapabilitiesResponse, CrowdSecOperationRequest};
+    use super::{
+        CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecOperationRequest,
+        CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
+    };
 
     #[test]
     fn rejects_unknown_crowdsec_operations() {
@@ -145,5 +148,22 @@ mod tests {
 
         assert!(!response.contains("api_key"));
         assert!(!response.contains("enrollment_key"));
+    }
+
+    #[test]
+    fn uninstall_response_preserves_data_and_reports_steps() {
+        let response = CrowdSecUninstallResponse {
+            data_retention: CrowdSecDataRetention::Preserve,
+            steps: vec![CrowdSecStepResult {
+                step: CrowdSecUninstallStep::Packages,
+                status: CrowdSecStepStatus::Completed,
+                message: "Removed CrowdSec packages: crowdsec".to_string(),
+            }],
+        };
+
+        let response = serde_json::to_value(response).unwrap();
+        assert_eq!(response["data_retention"], "preserve");
+        assert_eq!(response["steps"][0]["step"], "packages");
+        assert_eq!(response["steps"][0]["status"], "completed");
     }
 }
