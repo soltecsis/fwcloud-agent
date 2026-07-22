@@ -26,3 +26,4 @@ pub mod install;
 pub mod models;
 pub mod packages;
 pub mod secrets;
+pub mod uninstall;

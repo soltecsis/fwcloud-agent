@@ -28,13 +28,16 @@ use tokio::{fs, process::Command, time::timeout};
 use crate::{
     crowdsec::{
         errors::{COMMAND_FAILED, OPERATION_TIMEOUT, UNSUPPORTED_OS},
-        models::{CrowdSecInstallStep, CrowdSecStepResult, CrowdSecStepStatus},
+        models::{
+            CrowdSecInstallStep, CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallStep,
+        },
         secrets::redact_sensitive_text,
     },
     errors::{FwcError, Result},
 };
 
 const CROWDSEC_PACKAGES: &[&str] = &["crowdsec", "ipset"];
+const CROWDSEC_REMOVABLE_PACKAGES: &[&str] = &["crowdsec-firewall-bouncer-iptables", "crowdsec"];
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 const OS_RELEASE_PATH: &str = "/etc/os-release";
 const APT_KEYRING_DIRECTORY: &str = "/etc/apt/keyrings";
@@ -98,6 +101,38 @@ pub async fn install_packages() -> Result<Vec<CrowdSecStepResult<CrowdSecInstall
             message: package_message,
         },
     ])
+}
+
+pub async fn uninstall_packages() -> Result<CrowdSecStepResult<CrowdSecUninstallStep>> {
+    let package_manager = detect_package_manager().await?;
+    let mut removed_packages = Vec::new();
+    let mut absent_packages = Vec::new();
+
+    for package in CROWDSEC_REMOVABLE_PACKAGES {
+        if package_is_installed(package_manager, package).await? {
+            remove_package(package_manager, package).await?;
+            removed_packages.push(*package);
+        } else {
+            absent_packages.push(*package);
+        }
+    }
+
+    let message = match (removed_packages.is_empty(), absent_packages.is_empty()) {
+        (true, false) => "CrowdSec packages are already absent".to_string(),
+        (false, true) => format!("Removed CrowdSec packages: {}", removed_packages.join(", ")),
+        (false, false) => format!(
+            "Removed CrowdSec packages: {}; already absent: {}",
+            removed_packages.join(", "),
+            absent_packages.join(", ")
+        ),
+        (true, true) => "No CrowdSec packages were requested for removal".to_string(),
+    };
+
+    Ok(CrowdSecStepResult {
+        step: CrowdSecUninstallStep::Packages,
+        status: CrowdSecStepStatus::Completed,
+        message,
+    })
 }
 
 async fn detect_package_manager() -> Result<PackageManager> {
@@ -192,6 +227,16 @@ async fn install_package(package_manager: PackageManager, package: &str) -> Resu
         PackageManager::Apt => ("/usr/bin/apt-get", vec!["install", "--yes", package]),
         PackageManager::Dnf => ("/usr/bin/dnf", vec!["install", "--assumeyes", package]),
         PackageManager::Yum => ("/usr/bin/yum", vec!["install", "--assumeyes", package]),
+    };
+
+    run_command(program, &arguments).await
+}
+
+async fn remove_package(package_manager: PackageManager, package: &str) -> Result<()> {
+    let (program, arguments): (&str, Vec<&str>) = match package_manager {
+        PackageManager::Apt => ("/usr/bin/apt-get", vec!["remove", "--yes", package]),
+        PackageManager::Dnf => ("/usr/bin/dnf", vec!["remove", "--assumeyes", package]),
+        PackageManager::Yum => ("/usr/bin/yum", vec!["remove", "--assumeyes", package]),
     };
 
     run_command(program, &arguments).await

@@ -27,11 +27,13 @@ use log::debug;
 
 use crate::{
     config::Config,
+    crowdsec::errors::UNINSTALL_CONFIRMATION_REQUIRED,
     crowdsec::{
         install,
-        models::{CrowdSecCapabilitiesResponse, CrowdSecInstallRequest},
+        models::{CrowdSecCapabilitiesResponse, CrowdSecInstallRequest, CrowdSecUninstallRequest},
+        uninstall,
     },
-    errors::Result,
+    errors::{FwcError, Result},
 };
 
 #[get("/crowdsec")]
@@ -63,6 +65,33 @@ async fn install_crowdsec(
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         install_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/uninstall")]
+async fn uninstall_crowdsec(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecUninstallRequest>,
+) -> Result<HttpResponse> {
+    if !request.confirm {
+        return Err(FwcError::crowdsec(
+            UNINSTALL_CONFIRMATION_REQUIRED,
+            "CrowdSec uninstall requires confirm: true",
+        ));
+    }
+
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let uninstall_result = uninstall::uninstall().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        uninstall_result?
     };
 
     Ok(HttpResponse::Ok().json(response))
