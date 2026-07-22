@@ -22,4 +22,8 @@
 
 pub mod command;
 pub mod errors;
+pub mod install;
 pub mod models;
+pub mod packages;
+pub mod secrets;
+pub mod uninstall;

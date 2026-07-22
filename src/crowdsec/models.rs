@@ -41,6 +41,68 @@ pub struct CrowdSecOperationRequest {
     pub operation: CrowdSecOperation,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecInstallRequest {}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecUninstallRequest {
+    pub confirm: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecInstallStep {
+    Repository,
+    Packages,
+    CrowdSecService,
+    HubUpdate,
+    DefaultCollections,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecUninstallStep {
+    CrowdSecService,
+    FirewallBouncerService,
+    Packages,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecStepStatus {
+    Pending,
+    Completed,
+    Skipped,
+    Failed,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecStepResult<T> {
+    pub step: T,
+    pub status: CrowdSecStepStatus,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecDataRetention {
+    Preserve,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecInstallResponse {
+    pub data_retention: CrowdSecDataRetention,
+    pub steps: Vec<CrowdSecStepResult<CrowdSecInstallStep>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecUninstallResponse {
+    pub data_retention: CrowdSecDataRetention,
+    pub steps: Vec<CrowdSecStepResult<CrowdSecUninstallStep>>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecApiStatus {
@@ -68,7 +130,10 @@ impl CrowdSecCapabilitiesResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{CrowdSecCapabilitiesResponse, CrowdSecOperationRequest};
+    use super::{
+        CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecOperationRequest,
+        CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
+    };
 
     #[test]
     fn rejects_unknown_crowdsec_operations() {
@@ -83,5 +148,22 @@ mod tests {
 
         assert!(!response.contains("api_key"));
         assert!(!response.contains("enrollment_key"));
+    }
+
+    #[test]
+    fn uninstall_response_preserves_data_and_reports_steps() {
+        let response = CrowdSecUninstallResponse {
+            data_retention: CrowdSecDataRetention::Preserve,
+            steps: vec![CrowdSecStepResult {
+                step: CrowdSecUninstallStep::Packages,
+                status: CrowdSecStepStatus::Completed,
+                message: "Removed CrowdSec packages: crowdsec".to_string(),
+            }],
+        };
+
+        let response = serde_json::to_value(response).unwrap();
+        assert_eq!(response["data_retention"], "preserve");
+        assert_eq!(response["steps"][0]["step"], "packages");
+        assert_eq!(response["steps"][0]["status"], "completed");
     }
 }

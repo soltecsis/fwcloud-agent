@@ -116,6 +116,11 @@ pub enum FwcError {
 impl ResponseError for FwcError {
     fn status_code(&self) -> StatusCode {
         match self {
+            FwcError::CrowdSec { code, .. }
+                if *code == crate::crowdsec::errors::UNINSTALL_CONFIRMATION_REQUIRED =>
+            {
+                StatusCode::BAD_REQUEST
+            }
             FwcError::NotAllowedParameter
             | FwcError::BadRequest(_)
             | FwcError::AtLeastOneFile
