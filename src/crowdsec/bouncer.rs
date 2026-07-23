@@ -24,6 +24,7 @@ use std::{
     fs::{self as std_fs, OpenOptions},
     io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    path::Path,
     time::Duration,
 };
 
@@ -61,6 +62,7 @@ pub const IPSET_V4_BLACKLIST: &str = "crowdsec-blacklists";
 pub const IPSET_V6_BLACKLIST: &str = "crowdsec6-blacklists";
 
 const IPSET_COMMAND: &str = "/usr/sbin/ipset";
+const CSCLI_COMMAND: &str = "/usr/bin/cscli";
 const IPSET_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const IPSET_MAX_ELEMENTS: &str = "150000";
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
@@ -345,6 +347,11 @@ async fn disable_systemd_service(service: &str) -> Result<bool> {
 }
 
 async fn remove_bouncer_registration() -> Result<bool> {
+    if !Path::new(CSCLI_COMMAND).is_file() {
+        debug!("CrowdSec is not installed; skipping Firewall Bouncer registration removal");
+        return Ok(false);
+    }
+
     if !bouncer_is_registered().await? {
         return Ok(false);
     }
