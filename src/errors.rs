@@ -121,6 +121,24 @@ impl ResponseError for FwcError {
             {
                 StatusCode::BAD_REQUEST
             }
+            FwcError::CrowdSec { code, .. }
+                if matches!(
+                    *code,
+                    crate::crowdsec::errors::INVALID_COMMAND
+                        | crate::crowdsec::errors::COLLECTION_INVALID
+                ) =>
+            {
+                StatusCode::BAD_REQUEST
+            }
+            FwcError::CrowdSec { code, .. }
+                if matches!(
+                    *code,
+                    crate::crowdsec::errors::COLLECTION_TAINTED
+                        | crate::crowdsec::errors::COLLECTION_CONFLICT
+                ) =>
+            {
+                StatusCode::CONFLICT
+            }
             FwcError::NotAllowedParameter
             | FwcError::BadRequest(_)
             | FwcError::AtLeastOneFile
