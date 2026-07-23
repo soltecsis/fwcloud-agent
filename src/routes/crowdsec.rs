@@ -33,7 +33,8 @@ use crate::{
             CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
             CrowdSecCollectionInstallRequest, CrowdSecCollectionOperation,
             CrowdSecCollectionOperationResponse, CrowdSecCollectionRemoveRequest,
-            CrowdSecCollectionUpdateRequest, CrowdSecInstallRequest, CrowdSecUninstallRequest,
+            CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery, CrowdSecInstallRequest,
+            CrowdSecUninstallRequest,
         },
         status, uninstall,
     },
@@ -58,14 +59,17 @@ async fn crowdsec_status(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
 }
 
 #[get("/crowdsec/collections")]
-async fn crowdsec_collections(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+async fn crowdsec_collections(
+    cfg: web::Data<Arc<Config>>,
+    query: web::Query<CrowdSecCollectionsQuery>,
+) -> Result<HttpResponse> {
     let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let collections_result = collections::list().await;
+        let collections_result = collections::list(query.installed.unwrap_or(false)).await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         collections_result?

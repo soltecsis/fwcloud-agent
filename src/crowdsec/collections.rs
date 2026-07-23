@@ -29,10 +29,13 @@ use crate::{
     errors::{FwcError, Result},
 };
 
-pub async fn list() -> Result<CrowdSecCollectionsResponse> {
-    let output = CrowdSecCommand::cscli(&["collections", "list", "--all", "-o", "json"])?
-        .execute()
-        .await?;
+pub async fn list(installed_only: bool) -> Result<CrowdSecCollectionsResponse> {
+    let arguments: &[&str] = if installed_only {
+        &["collections", "list", "-o", "json"]
+    } else {
+        &["collections", "list", "--all", "-o", "json"]
+    };
+    let output = CrowdSecCommand::cscli(arguments)?.execute().await?;
     let value = serde_json::from_str::<serde_json::Value>(output.stdout()).map_err(|_| {
         FwcError::crowdsec(COMMAND_FAILED, "Unable to read CrowdSec collection list")
     })?;

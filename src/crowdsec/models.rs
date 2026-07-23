@@ -193,6 +193,12 @@ pub struct CrowdSecCollectionsResponse {
     pub collections: Vec<CrowdSecCollection>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecCollectionsQuery {
+    pub installed: Option<bool>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecCollectionInstallRequest {
