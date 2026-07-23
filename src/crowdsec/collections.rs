@@ -73,6 +73,8 @@ pub async fn install(name: &str) -> Result<CrowdSecCollectionOperationResponse> 
     Ok(CrowdSecCollectionOperationResponse {
         operation: CrowdSecCollectionOperation::Install,
         collection: Some(name.to_string()),
+        processed_collections: vec![name.to_string()],
+        skipped_collections: vec![],
         message: "CrowdSec collection is installed and CrowdSec service is reloaded".to_string(),
     })
 }
@@ -110,7 +112,45 @@ pub async fn remove(name: &str) -> Result<CrowdSecCollectionOperationResponse> {
     Ok(CrowdSecCollectionOperationResponse {
         operation: CrowdSecCollectionOperation::Remove,
         collection: Some(name.to_string()),
+        processed_collections: vec![name.to_string()],
+        skipped_collections: vec![],
         message: "CrowdSec collection is removed and CrowdSec service is reloaded".to_string(),
+    })
+}
+
+pub async fn update() -> Result<CrowdSecCollectionOperationResponse> {
+    CrowdSecCommand::cscli(&["hub", "update"])?
+        .execute()
+        .await?;
+
+    let collections = list(true).await?.collections;
+    let mut processed_collections = Vec::new();
+    let mut skipped_collections = Vec::new();
+
+    for collection in collections {
+        match collection.state {
+            CrowdSecCollectionState::Installed => {
+                validate_collection_name(&collection.name)?;
+                CrowdSecCommand::cscli(&["collections", "upgrade", &collection.name])?
+                    .execute()
+                    .await?;
+                processed_collections.push(collection.name);
+            }
+            CrowdSecCollectionState::Tainted => skipped_collections.push(collection.name),
+            _ => {}
+        }
+    }
+
+    if !processed_collections.is_empty() {
+        reload_crowdsec_service().await?;
+    }
+
+    Ok(CrowdSecCollectionOperationResponse {
+        operation: CrowdSecCollectionOperation::Update,
+        collection: None,
+        processed_collections,
+        skipped_collections,
+        message: "CrowdSec Hub index and installed collections are updated".to_string(),
     })
 }
 

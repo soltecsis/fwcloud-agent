@@ -226,7 +226,10 @@ pub enum CrowdSecCollectionOperation {
 #[derive(Debug, Serialize)]
 pub struct CrowdSecCollectionOperationResponse {
     pub operation: CrowdSecCollectionOperation,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub collection: Option<String>,
+    pub processed_collections: Vec<String>,
+    pub skipped_collections: Vec<String>,
     pub message: String,
 }
 
