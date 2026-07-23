@@ -143,6 +143,32 @@ pub struct CrowdSecBouncerUninstallResponse {
     pub steps: Vec<CrowdSecStepResult<CrowdSecBouncerUninstallStep>>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct CrowdSecPackageStatus {
+    pub crowdsec_installed: bool,
+    pub ipset_installed: bool,
+    pub firewall_bouncer_installed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecServiceStatus {
+    pub installed: bool,
+    pub running: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecFirewallBouncerStatus {
+    pub installed: bool,
+    pub integration: crate::crowdsec::bouncer::CrowdSecBouncerIntegrationStatus,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecStatusResponse {
+    pub crowdsec: CrowdSecServiceStatus,
+    pub ipset_installed: bool,
+    pub firewall_bouncer: CrowdSecFirewallBouncerStatus,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecApiStatus {

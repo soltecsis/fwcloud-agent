@@ -63,6 +63,8 @@ pub const IPSET_V6_BLACKLIST: &str = "crowdsec6-blacklists";
 
 const IPSET_COMMAND: &str = "/usr/sbin/ipset";
 const CSCLI_COMMAND: &str = "/usr/bin/cscli";
+const IPTABLES_SAVE_COMMAND: &str = "/usr/sbin/iptables-save";
+const IP6TABLES_SAVE_COMMAND: &str = "/usr/sbin/ip6tables-save";
 const IPSET_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const IPSET_MAX_ELEMENTS: &str = "150000";
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
@@ -71,13 +73,14 @@ const IPSET_SETUP_SERVICE_CONTENT: &str = "[Unit]\nDescription=Create FWCloud Cr
 const BOUNCER_IPSET_DROP_IN_CONTENT: &str =
     "[Unit]\nRequires=fwcloud-crowdsec-ipsets.service\nAfter=fwcloud-crowdsec-ipsets.service\n";
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecBouncerIntegrationState {
     NotConfigured,
     Ready,
     MissingBlacklistSets,
     ManagedConfiguration,
+    UnmanagedFirewallRules,
     ServiceInactive,
     Error,
 }
@@ -93,6 +96,8 @@ pub struct CrowdSecBouncerIntegrationStatus {
     pub state: CrowdSecBouncerIntegrationState,
     pub ipv4_blacklist: CrowdSecIpSetStatus,
     pub ipv6_blacklist: CrowdSecIpSetStatus,
+    pub managed_configuration: bool,
+    pub unmanaged_firewall_rules: bool,
     pub service_running: bool,
     pub message: String,
 }
@@ -112,6 +117,40 @@ impl Default for CrowdSecBouncerSetOnlyConfig {
             blacklists_ipv6: IPSET_V6_BLACKLIST,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BouncerConfigurationState {
+    NotConfigured,
+    SetOnly,
+    Managed,
+}
+
+pub async fn status() -> Result<CrowdSecBouncerIntegrationStatus> {
+    let ipv4_blacklist = blacklist_ipset_status(IPSET_V4_BLACKLIST).await?;
+    let ipv6_blacklist = blacklist_ipset_status(IPSET_V6_BLACKLIST).await?;
+    let configuration_state = bouncer_configuration_state().await?;
+    let service_running = systemd_service_is_running(FIREWALL_BOUNCER_SERVICE).await?;
+    let unmanaged_firewall_rules = has_unmanaged_crowdsec_firewall_rules().await?;
+
+    Ok(integration_status(
+        ipv4_blacklist,
+        ipv6_blacklist,
+        configuration_state,
+        service_running,
+        unmanaged_firewall_rules,
+    ))
+}
+
+async fn blacklist_ipset_status(name: &'static str) -> Result<CrowdSecIpSetStatus> {
+    if !Path::new(IPSET_COMMAND).is_file() {
+        return Ok(CrowdSecIpSetStatus {
+            name,
+            exists: false,
+        });
+    }
+
+    ipset_status(name).await
 }
 
 pub async fn prepare_set_only_configuration() -> Result<String> {
@@ -239,6 +278,89 @@ async fn write_set_only_configuration(api_key: &str) -> Result<()> {
             )
         })?;
     write_bouncer_configuration(&configuration, api_key)
+}
+
+async fn bouncer_configuration_state() -> Result<BouncerConfigurationState> {
+    match fs::read_to_string(BOUNCER_CONFIG_OVERRIDE_PATH).await {
+        Ok(configuration) if configuration_is_set_only(&configuration) => {
+            Ok(BouncerConfigurationState::SetOnly)
+        }
+        Ok(_) => Ok(BouncerConfigurationState::Managed),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(BouncerConfigurationState::NotConfigured)
+        }
+        Err(_) => Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to read CrowdSec Firewall Bouncer configuration",
+        )),
+    }
+}
+
+fn integration_status(
+    ipv4_blacklist: CrowdSecIpSetStatus,
+    ipv6_blacklist: CrowdSecIpSetStatus,
+    configuration_state: BouncerConfigurationState,
+    service_running: bool,
+    unmanaged_firewall_rules: bool,
+) -> CrowdSecBouncerIntegrationStatus {
+    let (state, message) = if unmanaged_firewall_rules {
+        (
+            CrowdSecBouncerIntegrationState::UnmanagedFirewallRules,
+            "Unmanaged CrowdSec firewall rules were detected".to_string(),
+        )
+    } else if !ipv4_blacklist.exists || !ipv6_blacklist.exists {
+        (
+            CrowdSecBouncerIntegrationState::MissingBlacklistSets,
+            "FWCloud CrowdSec blacklist IPSet are missing".to_string(),
+        )
+    } else if configuration_state == BouncerConfigurationState::Managed {
+        (
+            CrowdSecBouncerIntegrationState::ManagedConfiguration,
+            "CrowdSec Firewall Bouncer configuration is not FWCloud IPSet-only".to_string(),
+        )
+    } else if configuration_state == BouncerConfigurationState::NotConfigured {
+        (
+            CrowdSecBouncerIntegrationState::NotConfigured,
+            "CrowdSec Firewall Bouncer is not configured".to_string(),
+        )
+    } else if !service_running {
+        (
+            CrowdSecBouncerIntegrationState::ServiceInactive,
+            "CrowdSec Firewall Bouncer service is not running".to_string(),
+        )
+    } else {
+        (
+            CrowdSecBouncerIntegrationState::Ready,
+            "CrowdSec Firewall Bouncer is updating FWCloud IPSet only".to_string(),
+        )
+    };
+
+    CrowdSecBouncerIntegrationStatus {
+        state,
+        ipv4_blacklist,
+        ipv6_blacklist,
+        managed_configuration: configuration_state == BouncerConfigurationState::Managed,
+        unmanaged_firewall_rules,
+        service_running,
+        message,
+    }
+}
+
+fn configuration_is_set_only(configuration: &str) -> bool {
+    let expected = [
+        ("mode", "ipset"),
+        ("blacklists_ipv4", IPSET_V4_BLACKLIST),
+        ("blacklists_ipv6", IPSET_V6_BLACKLIST),
+        ("ipset_type", "hash:ip"),
+    ];
+
+    expected.iter().all(|(key, expected_value)| {
+        configuration.lines().any(|line| {
+            line.split_once(':').is_some_and(|(line_key, value)| {
+                line_key.trim() == *key && value.trim().trim_matches('"') == *expected_value
+            })
+        })
+    })
 }
 
 fn boolean_step<T>(
@@ -513,6 +635,87 @@ async fn systemd_unit_exists(service: &str) -> Result<bool> {
     Ok(output.status.success() && String::from_utf8_lossy(&output.stdout).trim() != "not-found")
 }
 
+async fn systemd_service_is_running(service: &str) -> Result<bool> {
+    debug!(
+        "Checking CrowdSec systemd service state: {} is-active",
+        service
+    );
+    let output = timeout(
+        IPSET_COMMAND_TIMEOUT,
+        Command::new(SYSTEMCTL_COMMAND)
+            .args(["is-active", "--quiet", service])
+            .output(),
+    )
+    .await
+    .map_err(|_| {
+        FwcError::crowdsec(
+            OPERATION_TIMEOUT,
+            "CrowdSec Firewall Bouncer service command timed out",
+        )
+    })?
+    .map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to run CrowdSec Firewall Bouncer service command",
+        )
+    })?;
+
+    Ok(output.status.success())
+}
+
+async fn has_unmanaged_crowdsec_firewall_rules() -> Result<bool> {
+    for command in [IPTABLES_SAVE_COMMAND, IP6TABLES_SAVE_COMMAND] {
+        if !Path::new(command).is_file() {
+            continue;
+        }
+
+        debug!(
+            "Inspecting firewall rules for unmanaged CrowdSec entries: {}",
+            command
+        );
+        let output = timeout(IPSET_COMMAND_TIMEOUT, Command::new(command).output())
+            .await
+            .map_err(|_| {
+                FwcError::crowdsec(
+                    OPERATION_TIMEOUT,
+                    "CrowdSec firewall inspection command timed out",
+                )
+            })?
+            .map_err(|_| {
+                FwcError::crowdsec(
+                    FIREWALL_INTEGRATION_INVALID,
+                    "Unable to inspect firewall rules for CrowdSec integration",
+                )
+            })?;
+
+        if !output.status.success() {
+            return Err(FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to inspect firewall rules for CrowdSec integration",
+            ));
+        }
+
+        if firewall_rules_contain_unmanaged_crowdsec(&String::from_utf8_lossy(&output.stdout)) {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn firewall_rules_contain_unmanaged_crowdsec(rules: &str) -> bool {
+    rules.lines().any(|line| {
+        let normalized = line.to_ascii_lowercase();
+        normalized.contains("crowdsec") && !is_fwcloud_blacklist_rule(&normalized)
+    })
+}
+
+fn is_fwcloud_blacklist_rule(rule: &str) -> bool {
+    (rule.starts_with("-a input ") || rule.starts_with("-a forward "))
+        && (rule.contains("--match-set crowdsec-blacklists ")
+            || rule.contains("--match-set crowdsec6-blacklists "))
+}
+
 async fn remove_managed_file(path: &str) -> Result<bool> {
     match fs::remove_file(path).await {
         Ok(()) => Ok(true),
@@ -680,4 +883,56 @@ fn set_only_configuration_contents(
         configuration.blacklists_ipv4,
         configuration.blacklists_ipv6,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        configuration_is_set_only, firewall_rules_contain_unmanaged_crowdsec, integration_status,
+        set_only_configuration_contents, BouncerConfigurationState,
+        CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig, CrowdSecIpSetStatus,
+        IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
+    };
+
+    fn ipset_status(name: &'static str, exists: bool) -> CrowdSecIpSetStatus {
+        CrowdSecIpSetStatus { name, exists }
+    }
+
+    #[test]
+    fn recognizes_set_only_configuration() {
+        let configuration =
+            set_only_configuration_contents(&CrowdSecBouncerSetOnlyConfig::default(), "secret");
+
+        assert!(configuration_is_set_only(&configuration));
+        assert!(!configuration_is_set_only(
+            &configuration.replace("mode: ipset", "mode: iptables")
+        ));
+    }
+
+    #[test]
+    fn identifies_unmanaged_crowdsec_firewall_rules() {
+        let fwcloud_rules = "-A INPUT -m set --match-set crowdsec-blacklists src -j DROP\n-A FORWARD -m set --match-set crowdsec6-blacklists src -j DROP\n";
+        let unmanaged_rules = "-N CROWDSEC\n-A INPUT -j CROWDSEC\n";
+
+        assert!(!firewall_rules_contain_unmanaged_crowdsec(fwcloud_rules));
+        assert!(firewall_rules_contain_unmanaged_crowdsec(unmanaged_rules));
+    }
+
+    #[test]
+    fn reports_invalid_integration_without_serializing_a_key() {
+        let status = integration_status(
+            ipset_status(IPSET_V4_BLACKLIST, true),
+            ipset_status(IPSET_V6_BLACKLIST, true),
+            BouncerConfigurationState::Managed,
+            true,
+            false,
+        );
+
+        assert_eq!(
+            status.state,
+            CrowdSecBouncerIntegrationState::ManagedConfiguration
+        );
+        assert!(status.managed_configuration);
+        assert!(!serde_json::to_string(&status).unwrap().contains("api_key"));
+    }
 }

@@ -30,26 +30,29 @@ use crate::{
     crowdsec::{
         bouncer, install,
         models::{
-            CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
-            CrowdSecCapabilitiesResponse, CrowdSecInstallRequest, CrowdSecUninstallRequest,
+            CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest, CrowdSecInstallRequest,
+            CrowdSecUninstallRequest,
         },
-        uninstall,
+        status, uninstall,
     },
     errors::Result,
 };
 
-#[get("/crowdsec")]
-async fn crowdsec(cfg: web::Data<Arc<Config>>) -> HttpResponse {
-    {
+#[get("/crowdsec/status")]
+async fn crowdsec_status(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+    let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
-    }
+        let status_result = status::status().await;
 
-    HttpResponse::NotImplemented().json(CrowdSecCapabilitiesResponse::not_implemented())
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        status_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[post("/crowdsec/install")]
