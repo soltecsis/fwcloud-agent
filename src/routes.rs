@@ -43,6 +43,10 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(info::info)
             // CrowdSec.
             .service(crowdsec::crowdsec_status)
+            .service(crowdsec::crowdsec_collections)
+            .service(crowdsec::install_crowdsec_collection)
+            .service(crowdsec::remove_crowdsec_collection)
+            .service(crowdsec::update_crowdsec_collections)
             .service(crowdsec::install_crowdsec)
             .service(crowdsec::uninstall_crowdsec)
             .service(crowdsec::install_crowdsec_bouncer)

@@ -41,11 +41,20 @@ pub struct CrowdSecCommand {
 pub struct CrowdSecCommandOutput {
     stdout: String,
     stderr: String,
+    succeeded: bool,
 }
 
 impl CrowdSecCommandOutput {
     pub(crate) fn stdout(&self) -> &str {
         &self.stdout
+    }
+
+    pub(crate) fn stderr(&self) -> &str {
+        &self.stderr
+    }
+
+    pub(crate) fn succeeded(&self) -> bool {
+        self.succeeded
     }
 
     pub fn redacted_stdout(&self) -> String {
@@ -76,6 +85,19 @@ impl CrowdSecCommand {
     }
 
     pub async fn execute(self) -> Result<CrowdSecCommandOutput> {
+        let output = self.execute_allow_failure().await?;
+
+        if output.succeeded() {
+            Ok(output)
+        } else {
+            Err(FwcError::crowdsec(
+                COMMAND_FAILED,
+                "CrowdSec command failed",
+            ))
+        }
+    }
+
+    pub(crate) async fn execute_allow_failure(self) -> Result<CrowdSecCommandOutput> {
         let output = timeout(
             DEFAULT_COMMAND_TIMEOUT,
             Command::new("cscli").args(&self.args).output(),
@@ -83,7 +105,8 @@ impl CrowdSecCommand {
         .await
         .map_err(|_| FwcError::crowdsec(OPERATION_TIMEOUT, "CrowdSec command timed out"))??;
 
-        if !output.status.success() {
+        let succeeded = output.status.success();
+        if !succeeded {
             if self.has_safe_diagnostic_output() {
                 debug!(
                     "CrowdSec collection command failed (exit code: {:?}, stdout: {}, stderr: {})",
@@ -92,16 +115,12 @@ impl CrowdSecCommand {
                     redact_sensitive_text(&String::from_utf8_lossy(&output.stderr)),
                 );
             }
-
-            return Err(FwcError::crowdsec(
-                COMMAND_FAILED,
-                "CrowdSec command failed",
-            ));
         }
 
         Ok(CrowdSecCommandOutput {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            succeeded,
         })
     }
 

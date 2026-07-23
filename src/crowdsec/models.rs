@@ -169,6 +169,70 @@ pub struct CrowdSecStatusResponse {
     pub firewall_bouncer: CrowdSecFirewallBouncerStatus,
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecCollectionState {
+    Available,
+    Installed,
+    Tainted,
+    Disabled,
+    Unknown,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecCollection {
+    pub name: String,
+    pub version: Option<String>,
+    pub state: CrowdSecCollectionState,
+    pub available: bool,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecCollectionsResponse {
+    pub collections: Vec<CrowdSecCollection>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecCollectionsQuery {
+    pub installed: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecCollectionInstallRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecCollectionRemoveRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecCollectionUpdateRequest {}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecCollectionOperation {
+    Install,
+    Remove,
+    Update,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecCollectionOperationResponse {
+    pub operation: CrowdSecCollectionOperation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collection: Option<String>,
+    pub processed_collections: Vec<String>,
+    pub skipped_collections: Vec<String>,
+    pub message: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecApiStatus {
