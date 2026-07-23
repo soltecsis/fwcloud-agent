@@ -28,7 +28,7 @@ use log::debug;
 use crate::{
     config::Config,
     crowdsec::{
-        bouncer, collections, install,
+        bouncer, collections, console, install,
         models::{
             CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
             CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
@@ -139,11 +139,20 @@ async fn update_crowdsec_collections(
 }
 
 #[get("/crowdsec/console/status")]
-async fn crowdsec_console_status() -> Result<HttpResponse> {
-    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
-        "code": "CROWDSEC_CONSOLE_NOT_IMPLEMENTED",
-        "message": "CrowdSec Console status is not implemented yet"
-    })))
+async fn crowdsec_console_status(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let status_result = console::status().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        status_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[post("/crowdsec/console/enroll")]
