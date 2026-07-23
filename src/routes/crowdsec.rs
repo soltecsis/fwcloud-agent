@@ -28,13 +28,12 @@ use log::debug;
 use crate::{
     config::Config,
     crowdsec::{
-        bouncer, install,
+        bouncer, collections, install,
         models::{
             CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
             CrowdSecCollectionInstallRequest, CrowdSecCollectionOperation,
             CrowdSecCollectionOperationResponse, CrowdSecCollectionRemoveRequest,
-            CrowdSecCollectionUpdateRequest, CrowdSecCollectionsResponse, CrowdSecInstallRequest,
-            CrowdSecUninstallRequest,
+            CrowdSecCollectionUpdateRequest, CrowdSecInstallRequest, CrowdSecUninstallRequest,
         },
         status, uninstall,
     },
@@ -59,10 +58,20 @@ async fn crowdsec_status(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
 }
 
 #[get("/crowdsec/collections")]
-async fn crowdsec_collections() -> HttpResponse {
-    HttpResponse::NotImplemented().json(CrowdSecCollectionsResponse {
-        collections: vec![],
-    })
+async fn crowdsec_collections(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let collections_result = collections::list().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        collections_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[post("/crowdsec/collections/install")]

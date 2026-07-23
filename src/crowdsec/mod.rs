@@ -21,6 +21,7 @@
 */
 
 pub mod bouncer;
+pub mod collections;
 pub mod command;
 pub mod errors;
 pub mod install;
