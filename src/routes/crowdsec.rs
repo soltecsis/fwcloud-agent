@@ -80,9 +80,22 @@ async fn crowdsec_collections(
 
 #[post("/crowdsec/collections/install")]
 async fn install_crowdsec_collection(
-    _request: web::Json<CrowdSecCollectionInstallRequest>,
-) -> HttpResponse {
-    collection_operation_not_implemented(CrowdSecCollectionOperation::Install)
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecCollectionInstallRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let install_result = collections::install(&request.name).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        install_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[post("/crowdsec/collections/remove")]
@@ -102,7 +115,8 @@ async fn update_crowdsec_collections(
 fn collection_operation_not_implemented(operation: CrowdSecCollectionOperation) -> HttpResponse {
     HttpResponse::NotImplemented().json(CrowdSecCollectionOperationResponse {
         operation,
-        message: "CrowdSec collection operation is not implemented yet",
+        collection: None,
+        message: "CrowdSec collection operation is not implemented yet".to_string(),
     })
 }
 

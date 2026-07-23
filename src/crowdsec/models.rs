@@ -226,7 +226,8 @@ pub enum CrowdSecCollectionOperation {
 #[derive(Debug, Serialize)]
 pub struct CrowdSecCollectionOperationResponse {
     pub operation: CrowdSecCollectionOperation,
-    pub message: &'static str,
+    pub collection: Option<String>,
+    pub message: String,
 }
 
 #[derive(Serialize)]

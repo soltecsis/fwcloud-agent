@@ -20,14 +20,24 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+use std::time::Duration;
+
+use tokio::{process::Command, time::timeout};
+
 use crate::{
     crowdsec::{
         command::CrowdSecCommand,
-        errors::COMMAND_FAILED,
-        models::{CrowdSecCollection, CrowdSecCollectionState, CrowdSecCollectionsResponse},
+        errors::{COMMAND_FAILED, INVALID_COMMAND, OPERATION_TIMEOUT},
+        models::{
+            CrowdSecCollection, CrowdSecCollectionOperation, CrowdSecCollectionOperationResponse,
+            CrowdSecCollectionState, CrowdSecCollectionsResponse,
+        },
     },
     errors::{FwcError, Result},
 };
+
+const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
 
 pub async fn list(installed_only: bool) -> Result<CrowdSecCollectionsResponse> {
     let arguments: &[&str] = if installed_only {
@@ -43,6 +53,81 @@ pub async fn list(installed_only: bool) -> Result<CrowdSecCollectionsResponse> {
     Ok(CrowdSecCollectionsResponse {
         collections: collections_from_json(&value),
     })
+}
+
+pub async fn install(name: &str) -> Result<CrowdSecCollectionOperationResponse> {
+    validate_collection_name(name)?;
+
+    if !collection_exists(name).await? {
+        return Err(FwcError::crowdsec(
+            INVALID_COMMAND,
+            "CrowdSec collection is not available in the installed Hub",
+        ));
+    }
+
+    CrowdSecCommand::cscli(&["collections", "install", name])?
+        .execute()
+        .await?;
+    reload_crowdsec_service().await?;
+
+    Ok(CrowdSecCollectionOperationResponse {
+        operation: CrowdSecCollectionOperation::Install,
+        collection: Some(name.to_string()),
+        message: "CrowdSec collection is installed and CrowdSec service is reloaded".to_string(),
+    })
+}
+
+fn validate_collection_name(name: &str) -> Result<()> {
+    let valid_segment = |segment: &str| {
+        !segment.is_empty()
+            && segment.len() <= 64
+            && segment.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+            })
+    };
+    let mut segments = name.split('/');
+    let valid = name.len() <= 129
+        && segments.next().is_some_and(valid_segment)
+        && segments.next().is_some_and(valid_segment)
+        && segments.next().is_none();
+
+    if valid {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            INVALID_COMMAND,
+            "Invalid CrowdSec collection name",
+        ))
+    }
+}
+
+async fn collection_exists(name: &str) -> Result<bool> {
+    Ok(list(false)
+        .await?
+        .collections
+        .iter()
+        .any(|collection| collection.name == name))
+}
+
+async fn reload_crowdsec_service() -> Result<()> {
+    let output = timeout(
+        SERVICE_COMMAND_TIMEOUT,
+        Command::new(SYSTEMCTL_COMMAND)
+            .args(["reload", "crowdsec.service"])
+            .output(),
+    )
+    .await
+    .map_err(|_| FwcError::crowdsec(OPERATION_TIMEOUT, "CrowdSec service command timed out"))?
+    .map_err(|_| FwcError::crowdsec(COMMAND_FAILED, "Unable to run CrowdSec service command"))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            COMMAND_FAILED,
+            "CrowdSec service command failed",
+        ))
+    }
 }
 
 fn collections_from_json(value: &serde_json::Value) -> Vec<CrowdSecCollection> {
