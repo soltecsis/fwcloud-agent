@@ -27,6 +27,7 @@ use tokio::{process::Command, time::timeout};
 
 use crate::{
     crowdsec::{
+        bouncer,
         errors::{COMMAND_FAILED, OPERATION_TIMEOUT, UNINSTALL_CONFIRMATION_REQUIRED},
         models::{
             CrowdSecDataRetention, CrowdSecStepResult, CrowdSecStepStatus,
@@ -54,13 +55,8 @@ pub async fn uninstall() -> Result<CrowdSecUninstallResponse> {
     info!("Uninstalling CrowdSec services and packages while preserving data");
 
     let mut steps = Vec::new();
-    steps.push(
-        disable_service(
-            CrowdSecUninstallStep::FirewallBouncerService,
-            "crowdsec-firewall-bouncer.service",
-        )
-        .await?,
-    );
+    let bouncer_uninstall = bouncer::uninstall().await?;
+    steps.push(bouncer_uninstall_step(&bouncer_uninstall));
     steps.push(disable_service(CrowdSecUninstallStep::CrowdSecService, "crowdsec.service").await?);
     steps.push(packages::uninstall_packages().await?);
 
@@ -70,6 +66,29 @@ pub async fn uninstall() -> Result<CrowdSecUninstallResponse> {
         data_retention: CrowdSecDataRetention::Preserve,
         steps,
     })
+}
+
+fn bouncer_uninstall_step(
+    response: &crate::crowdsec::models::CrowdSecBouncerUninstallResponse,
+) -> CrowdSecStepResult<CrowdSecUninstallStep> {
+    let cleaned = response
+        .steps
+        .iter()
+        .any(|step| step.status == CrowdSecStepStatus::Completed);
+
+    CrowdSecStepResult {
+        step: CrowdSecUninstallStep::FirewallBouncerService,
+        status: if cleaned {
+            CrowdSecStepStatus::Completed
+        } else {
+            CrowdSecStepStatus::Skipped
+        },
+        message: if cleaned {
+            "FWCloud CrowdSec Firewall Bouncer is disabled and cleaned up".to_string()
+        } else {
+            "FWCloud CrowdSec Firewall Bouncer is already absent".to_string()
+        },
+    }
 }
 
 async fn disable_service(

@@ -51,6 +51,16 @@ pub struct CrowdSecUninstallRequest {
     pub confirm: bool,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecBouncerInstallRequest {}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecBouncerUninstallRequest {
+    pub confirm: bool,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecInstallStep {
@@ -70,6 +80,26 @@ pub enum CrowdSecUninstallStep {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecBouncerInstallStep {
+    BlacklistIpSets,
+    IpSetSetupService,
+    Configuration,
+    Package,
+    Service,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecBouncerUninstallStep {
+    Service,
+    Registration,
+    Configuration,
+    IpSetSetupService,
+    BlacklistIpSets,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecStepStatus {
     Pending,
@@ -101,6 +131,42 @@ pub struct CrowdSecInstallResponse {
 pub struct CrowdSecUninstallResponse {
     pub data_retention: CrowdSecDataRetention,
     pub steps: Vec<CrowdSecStepResult<CrowdSecUninstallStep>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecBouncerInstallResponse {
+    pub steps: Vec<CrowdSecStepResult<CrowdSecBouncerInstallStep>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecBouncerUninstallResponse {
+    pub steps: Vec<CrowdSecStepResult<CrowdSecBouncerUninstallStep>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecPackageStatus {
+    pub crowdsec_installed: bool,
+    pub ipset_installed: bool,
+    pub firewall_bouncer_installed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecServiceStatus {
+    pub installed: bool,
+    pub running: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecFirewallBouncerStatus {
+    pub installed: bool,
+    pub integration: crate::crowdsec::bouncer::CrowdSecBouncerIntegrationStatus,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecStatusResponse {
+    pub crowdsec: CrowdSecServiceStatus,
+    pub ipset_installed: bool,
+    pub firewall_bouncer: CrowdSecFirewallBouncerStatus,
 }
 
 #[derive(Serialize)]

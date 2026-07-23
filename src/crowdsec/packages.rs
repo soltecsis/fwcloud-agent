@@ -29,7 +29,8 @@ use crate::{
     crowdsec::{
         errors::{COMMAND_FAILED, OPERATION_TIMEOUT, UNSUPPORTED_OS},
         models::{
-            CrowdSecInstallStep, CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallStep,
+            CrowdSecInstallStep, CrowdSecPackageStatus, CrowdSecStepResult, CrowdSecStepStatus,
+            CrowdSecUninstallStep,
         },
         secrets::redact_sensitive_text,
     },
@@ -101,6 +102,32 @@ pub async fn install_packages() -> Result<Vec<CrowdSecStepResult<CrowdSecInstall
             message: package_message,
         },
     ])
+}
+
+pub async fn install_firewall_bouncer_package() -> Result<bool> {
+    let package_manager = detect_package_manager().await?;
+    configure_repository(package_manager).await?;
+
+    if package_is_installed(package_manager, super::bouncer::FIREWALL_BOUNCER_PACKAGE).await? {
+        return Ok(false);
+    }
+
+    install_package(package_manager, super::bouncer::FIREWALL_BOUNCER_PACKAGE).await?;
+    Ok(true)
+}
+
+pub async fn package_status() -> Result<CrowdSecPackageStatus> {
+    let package_manager = detect_package_manager().await?;
+
+    Ok(CrowdSecPackageStatus {
+        crowdsec_installed: package_is_installed(package_manager, "crowdsec").await?,
+        ipset_installed: package_is_installed(package_manager, "ipset").await?,
+        firewall_bouncer_installed: package_is_installed(
+            package_manager,
+            super::bouncer::FIREWALL_BOUNCER_PACKAGE,
+        )
+        .await?,
+    })
 }
 
 pub async fn uninstall_packages() -> Result<CrowdSecStepResult<CrowdSecUninstallStep>> {
