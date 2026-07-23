@@ -77,6 +77,43 @@ pub async fn install(name: &str) -> Result<CrowdSecCollectionOperationResponse> 
     })
 }
 
+pub async fn remove(name: &str) -> Result<CrowdSecCollectionOperationResponse> {
+    validate_collection_name(name)?;
+
+    let collection = list(false)
+        .await?
+        .collections
+        .into_iter()
+        .find(|collection| collection.name == name)
+        .ok_or_else(|| {
+            FwcError::crowdsec(
+                INVALID_COMMAND,
+                "CrowdSec collection is not available in the installed Hub",
+            )
+        })?;
+
+    if !matches!(
+        collection.state,
+        CrowdSecCollectionState::Installed | CrowdSecCollectionState::Tainted
+    ) {
+        return Err(FwcError::crowdsec(
+            INVALID_COMMAND,
+            "CrowdSec collection is not installed",
+        ));
+    }
+
+    CrowdSecCommand::cscli(&["collections", "remove", name])?
+        .execute()
+        .await?;
+    reload_crowdsec_service().await?;
+
+    Ok(CrowdSecCollectionOperationResponse {
+        operation: CrowdSecCollectionOperation::Remove,
+        collection: Some(name.to_string()),
+        message: "CrowdSec collection is removed and CrowdSec service is reloaded".to_string(),
+    })
+}
+
 fn validate_collection_name(name: &str) -> Result<()> {
     let valid_segment = |segment: &str| {
         !segment.is_empty()

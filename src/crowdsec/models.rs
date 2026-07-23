@@ -169,7 +169,7 @@ pub struct CrowdSecStatusResponse {
     pub firewall_bouncer: CrowdSecFirewallBouncerStatus,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecCollectionState {
     Available,

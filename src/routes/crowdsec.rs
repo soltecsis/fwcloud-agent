@@ -100,9 +100,22 @@ async fn install_crowdsec_collection(
 
 #[post("/crowdsec/collections/remove")]
 async fn remove_crowdsec_collection(
-    _request: web::Json<CrowdSecCollectionRemoveRequest>,
-) -> HttpResponse {
-    collection_operation_not_implemented(CrowdSecCollectionOperation::Remove)
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecCollectionRemoveRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let remove_result = collections::remove(&request.name).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        remove_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[post("/crowdsec/collections/update")]
