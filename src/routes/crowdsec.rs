@@ -30,7 +30,10 @@ use crate::{
     crowdsec::{
         bouncer, install,
         models::{
-            CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest, CrowdSecInstallRequest,
+            CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
+            CrowdSecCollectionInstallRequest, CrowdSecCollectionOperation,
+            CrowdSecCollectionOperationResponse, CrowdSecCollectionRemoveRequest,
+            CrowdSecCollectionUpdateRequest, CrowdSecCollectionsResponse, CrowdSecInstallRequest,
             CrowdSecUninstallRequest,
         },
         status, uninstall,
@@ -53,6 +56,41 @@ async fn crowdsec_status(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
     };
 
     Ok(HttpResponse::Ok().json(response))
+}
+
+#[get("/crowdsec/collections")]
+async fn crowdsec_collections() -> HttpResponse {
+    HttpResponse::NotImplemented().json(CrowdSecCollectionsResponse {
+        collections: vec![],
+    })
+}
+
+#[post("/crowdsec/collections/install")]
+async fn install_crowdsec_collection(
+    _request: web::Json<CrowdSecCollectionInstallRequest>,
+) -> HttpResponse {
+    collection_operation_not_implemented(CrowdSecCollectionOperation::Install)
+}
+
+#[post("/crowdsec/collections/remove")]
+async fn remove_crowdsec_collection(
+    _request: web::Json<CrowdSecCollectionRemoveRequest>,
+) -> HttpResponse {
+    collection_operation_not_implemented(CrowdSecCollectionOperation::Remove)
+}
+
+#[post("/crowdsec/collections/update")]
+async fn update_crowdsec_collections(
+    _request: web::Json<CrowdSecCollectionUpdateRequest>,
+) -> HttpResponse {
+    collection_operation_not_implemented(CrowdSecCollectionOperation::Update)
+}
+
+fn collection_operation_not_implemented(operation: CrowdSecCollectionOperation) -> HttpResponse {
+    HttpResponse::NotImplemented().json(CrowdSecCollectionOperationResponse {
+        operation,
+        message: "CrowdSec collection operation is not implemented yet",
+    })
 }
 
 #[post("/crowdsec/install")]

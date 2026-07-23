@@ -169,6 +169,60 @@ pub struct CrowdSecStatusResponse {
     pub firewall_bouncer: CrowdSecFirewallBouncerStatus,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecCollectionState {
+    Available,
+    Installed,
+    Tainted,
+    Disabled,
+    Unknown,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecCollection {
+    pub name: String,
+    pub version: Option<String>,
+    pub state: CrowdSecCollectionState,
+    pub available: bool,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecCollectionsResponse {
+    pub collections: Vec<CrowdSecCollection>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecCollectionInstallRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecCollectionRemoveRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecCollectionUpdateRequest {}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecCollectionOperation {
+    Install,
+    Remove,
+    Update,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecCollectionOperationResponse {
+    pub operation: CrowdSecCollectionOperation,
+    pub message: &'static str,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecApiStatus {
