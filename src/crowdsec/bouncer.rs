@@ -35,6 +35,12 @@ use crate::{
     crowdsec::{
         command::CrowdSecCommand,
         errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
+        models::{
+            CrowdSecBouncerInstallResponse, CrowdSecBouncerInstallStep,
+            CrowdSecBouncerUninstallResponse, CrowdSecBouncerUninstallStep, CrowdSecStepResult,
+            CrowdSecStepStatus,
+        },
+        packages,
     },
     errors::{FwcError, Result},
 };
@@ -106,7 +112,7 @@ impl Default for CrowdSecBouncerSetOnlyConfig {
     }
 }
 
-pub async fn prepare_set_only_configuration() -> Result<()> {
+pub async fn prepare_set_only_configuration() -> Result<String> {
     let api_key = existing_bouncer_api_key()
         .await?
         .unwrap_or(generate_bouncer_api_key().await?);
@@ -120,7 +126,138 @@ pub async fn prepare_set_only_configuration() -> Result<()> {
                 "Unable to create CrowdSec Firewall Bouncer configuration directory",
             )
         })?;
-    write_bouncer_configuration(&configuration, &api_key)
+    write_bouncer_configuration(&configuration, &api_key)?;
+    Ok(api_key)
+}
+
+pub async fn install() -> Result<CrowdSecBouncerInstallResponse> {
+    log::info!("Installing CrowdSec Firewall Bouncer in FWCloud IPSet-only mode");
+
+    ensure_blacklist_ipsets().await?;
+    install_ipset_setup_service().await?;
+    let api_key = prepare_set_only_configuration().await?;
+    let package_installed = packages::install_firewall_bouncer_package().await?;
+    write_set_only_configuration(&api_key).await?;
+    enable_firewall_bouncer_service().await?;
+
+    log::info!("CrowdSec Firewall Bouncer installation completed");
+
+    Ok(CrowdSecBouncerInstallResponse {
+        steps: vec![
+            CrowdSecStepResult {
+                step: CrowdSecBouncerInstallStep::BlacklistIpSets,
+                status: CrowdSecStepStatus::Completed,
+                message: "FWCloud CrowdSec blacklist IPSet are ready".to_string(),
+            },
+            CrowdSecStepResult {
+                step: CrowdSecBouncerInstallStep::IpSetSetupService,
+                status: CrowdSecStepStatus::Completed,
+                message: "FWCloud CrowdSec IPSet boot service is enabled".to_string(),
+            },
+            CrowdSecStepResult {
+                step: CrowdSecBouncerInstallStep::Configuration,
+                status: CrowdSecStepStatus::Completed,
+                message: "CrowdSec Firewall Bouncer is configured for FWCloud IPSet only"
+                    .to_string(),
+            },
+            CrowdSecStepResult {
+                step: CrowdSecBouncerInstallStep::Package,
+                status: CrowdSecStepStatus::Completed,
+                message: if package_installed {
+                    "CrowdSec Firewall Bouncer package is installed".to_string()
+                } else {
+                    "CrowdSec Firewall Bouncer package is already installed".to_string()
+                },
+            },
+            CrowdSecStepResult {
+                step: CrowdSecBouncerInstallStep::Service,
+                status: CrowdSecStepStatus::Completed,
+                message: "CrowdSec Firewall Bouncer service is enabled and running".to_string(),
+            },
+        ],
+    })
+}
+
+pub async fn uninstall() -> Result<CrowdSecBouncerUninstallResponse> {
+    log::info!("Disabling FWCloud CrowdSec Firewall Bouncer while preserving packages and IPSet");
+
+    let service_disabled = disable_systemd_service(FIREWALL_BOUNCER_SERVICE).await?;
+    let registration_removed = remove_bouncer_registration().await?;
+    let configuration_removed = remove_managed_file(BOUNCER_CONFIG_OVERRIDE_PATH).await?;
+    let ipset_service_removed = remove_ipset_setup_service().await?;
+    let cleared_ipsets = clear_blacklist_ipsets().await?;
+
+    log::info!("FWCloud CrowdSec Firewall Bouncer disabled");
+
+    Ok(CrowdSecBouncerUninstallResponse {
+        steps: vec![
+            boolean_step(
+                CrowdSecBouncerUninstallStep::Service,
+                service_disabled,
+                "CrowdSec Firewall Bouncer service is disabled and stopped",
+                "CrowdSec Firewall Bouncer service is already absent",
+            ),
+            boolean_step(
+                CrowdSecBouncerUninstallStep::Registration,
+                registration_removed,
+                "FWCloud CrowdSec Firewall Bouncer registration is removed",
+                "FWCloud CrowdSec Firewall Bouncer registration is already absent",
+            ),
+            boolean_step(
+                CrowdSecBouncerUninstallStep::Configuration,
+                configuration_removed,
+                "FWCloud CrowdSec Firewall Bouncer configuration is removed",
+                "FWCloud CrowdSec Firewall Bouncer configuration is already absent",
+            ),
+            boolean_step(
+                CrowdSecBouncerUninstallStep::IpSetSetupService,
+                ipset_service_removed,
+                "FWCloud CrowdSec IPSet boot service is removed",
+                "FWCloud CrowdSec IPSet boot service is already absent",
+            ),
+            boolean_step(
+                CrowdSecBouncerUninstallStep::BlacklistIpSets,
+                cleared_ipsets,
+                "FWCloud CrowdSec blacklist IPSet are cleared and preserved",
+                "FWCloud CrowdSec blacklist IPSet are already absent",
+            ),
+        ],
+    })
+}
+
+async fn write_set_only_configuration(api_key: &str) -> Result<()> {
+    let configuration = CrowdSecBouncerSetOnlyConfig::default();
+
+    fs::create_dir_all(BOUNCER_CONFIG_DIRECTORY)
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create CrowdSec Firewall Bouncer configuration directory",
+            )
+        })?;
+    write_bouncer_configuration(&configuration, api_key)
+}
+
+fn boolean_step<T>(
+    step: T,
+    completed: bool,
+    completed_message: &str,
+    skipped_message: &str,
+) -> CrowdSecStepResult<T> {
+    CrowdSecStepResult {
+        step,
+        status: if completed {
+            CrowdSecStepStatus::Completed
+        } else {
+            CrowdSecStepStatus::Skipped
+        },
+        message: if completed {
+            completed_message.to_string()
+        } else {
+            skipped_message.to_string()
+        },
+    }
 }
 
 pub async fn ensure_blacklist_ipsets() -> Result<[CrowdSecIpSetStatus; 2]> {
@@ -174,8 +311,95 @@ pub async fn install_ipset_setup_service() -> Result<()> {
         })?;
     write_if_changed(BOUNCER_IPSET_DROP_IN_PATH, BOUNCER_IPSET_DROP_IN_CONTENT).await?;
 
-    run_systemctl(&["daemon-reload"]).await?;
-    run_systemctl(&["enable", IPSET_SETUP_SERVICE]).await
+    run_systemctl(
+        &["daemon-reload"],
+        "Unable to reload CrowdSec IPSet systemd configuration",
+    )
+    .await?;
+    run_systemctl(
+        &["enable", IPSET_SETUP_SERVICE],
+        "Unable to enable CrowdSec IPSet systemd service",
+    )
+    .await
+}
+
+async fn enable_firewall_bouncer_service() -> Result<()> {
+    run_systemctl(
+        &["enable", "--now", FIREWALL_BOUNCER_SERVICE],
+        "Unable to enable CrowdSec Firewall Bouncer service",
+    )
+    .await
+}
+
+async fn disable_systemd_service(service: &str) -> Result<bool> {
+    if !systemd_unit_exists(service).await? {
+        return Ok(false);
+    }
+
+    run_systemctl(
+        &["disable", "--now", service],
+        "Unable to disable CrowdSec Firewall Bouncer service",
+    )
+    .await?;
+    Ok(true)
+}
+
+async fn remove_bouncer_registration() -> Result<bool> {
+    if !bouncer_is_registered().await? {
+        return Ok(false);
+    }
+
+    debug!("Removing FWCloud CrowdSec Firewall Bouncer registration");
+    CrowdSecCommand::cscli(&["bouncers", "delete", FWCLOUD_BOUNCER_NAME])?
+        .execute()
+        .await?;
+    Ok(true)
+}
+
+async fn remove_ipset_setup_service() -> Result<bool> {
+    let service_exists = systemd_unit_exists(IPSET_SETUP_SERVICE).await?;
+
+    if service_exists {
+        run_systemctl(
+            &["disable", "--now", IPSET_SETUP_SERVICE],
+            "Unable to disable CrowdSec IPSet systemd service",
+        )
+        .await?;
+    }
+
+    let service_removed = remove_managed_file(IPSET_SETUP_SERVICE_PATH).await?;
+    let drop_in_removed = remove_managed_file(BOUNCER_IPSET_DROP_IN_PATH).await?;
+
+    if service_removed || drop_in_removed {
+        run_systemctl(
+            &["daemon-reload"],
+            "Unable to reload CrowdSec IPSet systemd configuration",
+        )
+        .await?;
+    }
+
+    Ok(service_exists || service_removed || drop_in_removed)
+}
+
+async fn clear_blacklist_ipsets() -> Result<bool> {
+    let mut cleared_ipsets = false;
+
+    for name in [IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST] {
+        if ipset_status(name).await?.exists {
+            let output = run_ipset(&["flush", name]).await?;
+
+            if !output.status.success() {
+                return Err(FwcError::crowdsec(
+                    FIREWALL_INTEGRATION_INVALID,
+                    "Unable to clear FWCloud CrowdSec blacklist IPSet",
+                ));
+            }
+
+            cleared_ipsets = true;
+        }
+    }
+
+    Ok(cleared_ipsets)
 }
 
 pub async fn ipset_status(name: &'static str) -> Result<CrowdSecIpSetStatus> {
@@ -220,7 +444,7 @@ async fn run_ipset(arguments: &[&str]) -> Result<std::process::Output> {
     })
 }
 
-async fn run_systemctl(arguments: &[&str]) -> Result<()> {
+async fn run_systemctl(arguments: &[&str], error_message: &'static str) -> Result<()> {
     debug!(
         "Running CrowdSec IPSet systemd command: {} {:?}",
         SYSTEMCTL_COMMAND, arguments
@@ -249,8 +473,47 @@ async fn run_systemctl(arguments: &[&str]) -> Result<()> {
     } else {
         Err(FwcError::crowdsec(
             FIREWALL_INTEGRATION_INVALID,
-            "Unable to configure CrowdSec IPSet systemd service",
+            error_message,
         ))
+    }
+}
+
+async fn systemd_unit_exists(service: &str) -> Result<bool> {
+    debug!(
+        "Checking CrowdSec IPSet systemd unit: {} show LoadState",
+        service
+    );
+    let output = timeout(
+        IPSET_COMMAND_TIMEOUT,
+        Command::new(SYSTEMCTL_COMMAND)
+            .args(["show", "--property=LoadState", "--value", service])
+            .output(),
+    )
+    .await
+    .map_err(|_| {
+        FwcError::crowdsec(
+            OPERATION_TIMEOUT,
+            "CrowdSec IPSet systemd command timed out",
+        )
+    })?
+    .map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to run CrowdSec IPSet systemd command",
+        )
+    })?;
+
+    Ok(output.status.success() && String::from_utf8_lossy(&output.stdout).trim() != "not-found")
+}
+
+async fn remove_managed_file(path: &str) -> Result<bool> {
+    match fs::remove_file(path).await {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to remove FWCloud CrowdSec configuration",
+        )),
     }
 }
 
@@ -298,6 +561,15 @@ async fn existing_bouncer_api_key() -> Result<Option<String>> {
 }
 
 async fn generate_bouncer_api_key() -> Result<String> {
+    if bouncer_is_registered().await? {
+        debug!(
+            "Replacing FWCloud CrowdSec Firewall Bouncer registration without local configuration"
+        );
+        CrowdSecCommand::cscli(&["bouncers", "delete", FWCLOUD_BOUNCER_NAME])?
+            .execute()
+            .await?;
+    }
+
     debug!("Generating FWCloud CrowdSec Firewall Bouncer API key");
     let output = CrowdSecCommand::cscli(&["bouncers", "add", FWCLOUD_BOUNCER_NAME, "-o", "raw"])?
         .execute()
@@ -311,6 +583,31 @@ async fn generate_bouncer_api_key() -> Result<String> {
             FIREWALL_INTEGRATION_INVALID,
             "CrowdSec Firewall Bouncer did not return a valid API key",
         ))
+    }
+}
+
+async fn bouncer_is_registered() -> Result<bool> {
+    let output = CrowdSecCommand::cscli(&["bouncers", "list", "-o", "json"])?
+        .execute()
+        .await?;
+    let bouncers = serde_json::from_str::<serde_json::Value>(output.stdout()).map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to read CrowdSec Firewall Bouncer registrations",
+        )
+    })?;
+
+    Ok(json_bouncer_is_registered(&bouncers))
+}
+
+fn json_bouncer_is_registered(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Array(values) => values.iter().any(json_bouncer_is_registered),
+        serde_json::Value::Object(values) => {
+            values.get("name").and_then(serde_json::Value::as_str) == Some(FWCLOUD_BOUNCER_NAME)
+                || values.values().any(json_bouncer_is_registered)
+        }
+        _ => false,
     }
 }
 

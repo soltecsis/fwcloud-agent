@@ -28,8 +28,11 @@ use log::debug;
 use crate::{
     config::Config,
     crowdsec::{
-        install,
-        models::{CrowdSecCapabilitiesResponse, CrowdSecInstallRequest, CrowdSecUninstallRequest},
+        bouncer, install,
+        models::{
+            CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
+            CrowdSecCapabilitiesResponse, CrowdSecInstallRequest, CrowdSecUninstallRequest,
+        },
         uninstall,
     },
     errors::Result,
@@ -83,6 +86,48 @@ async fn uninstall_crowdsec(
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let uninstall_result = uninstall::uninstall().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        uninstall_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/bouncer/install")]
+async fn install_crowdsec_bouncer(
+    cfg: web::Data<Arc<Config>>,
+    _request: web::Json<CrowdSecBouncerInstallRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let install_result = bouncer::install().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        install_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/bouncer/uninstall")]
+async fn uninstall_crowdsec_bouncer(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecBouncerUninstallRequest>,
+) -> Result<HttpResponse> {
+    uninstall::require_confirmation(request.confirm)?;
+
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let uninstall_result = bouncer::uninstall().await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         uninstall_result?

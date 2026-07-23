@@ -103,6 +103,18 @@ pub async fn install_packages() -> Result<Vec<CrowdSecStepResult<CrowdSecInstall
     ])
 }
 
+pub async fn install_firewall_bouncer_package() -> Result<bool> {
+    let package_manager = detect_package_manager().await?;
+    configure_repository(package_manager).await?;
+
+    if package_is_installed(package_manager, super::bouncer::FIREWALL_BOUNCER_PACKAGE).await? {
+        return Ok(false);
+    }
+
+    install_package(package_manager, super::bouncer::FIREWALL_BOUNCER_PACKAGE).await?;
+    Ok(true)
+}
+
 pub async fn uninstall_packages() -> Result<CrowdSecStepResult<CrowdSecUninstallStep>> {
     let package_manager = detect_package_manager().await?;
     let mut removed_packages = Vec::new();

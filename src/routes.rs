@@ -45,6 +45,8 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(crowdsec::crowdsec)
             .service(crowdsec::install_crowdsec)
             .service(crowdsec::uninstall_crowdsec)
+            .service(crowdsec::install_crowdsec_bouncer)
+            .service(crowdsec::uninstall_crowdsec_bouncer)
             // FWCloud script.
             .service(fwcloud_script::upload_and_run)
             // OpenVPN.
