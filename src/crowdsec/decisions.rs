@@ -25,22 +25,48 @@ use serde_json::Value;
 use crate::{
     crowdsec::{
         command::CrowdSecCommand,
-        errors::COMMAND_FAILED,
+        errors::{COMMAND_FAILED, DECISIONS_INVALID},
         models::{CrowdSecDecision, CrowdSecDecisionsResponse},
     },
     errors::{FwcError, Result},
 };
 
-pub async fn list() -> Result<CrowdSecDecisionsResponse> {
-    let output = CrowdSecCommand::cscli(&["decisions", "list", "--all", "-o", "json"])?
-        .execute()
-        .await?;
+const DEFAULT_LIST_LIMIT: u32 = 50;
+const MAXIMUM_LIST_LIMIT: u32 = 100;
+
+pub async fn list(requested_limit: Option<u32>) -> Result<CrowdSecDecisionsResponse> {
+    let limit = list_limit(requested_limit)?;
+    let limit = limit.to_string();
+    let output = CrowdSecCommand::cscli(&[
+        "decisions",
+        "list",
+        "--all",
+        "--limit",
+        &limit,
+        "-o",
+        "json",
+    ])?
+    .execute()
+    .await?;
     let value = serde_json::from_str::<Value>(output.stdout())
         .map_err(|_| FwcError::crowdsec(COMMAND_FAILED, "Unable to read CrowdSec decision list"))?;
 
     Ok(CrowdSecDecisionsResponse {
         decisions: decisions_from_json(&value),
     })
+}
+
+fn list_limit(requested_limit: Option<u32>) -> Result<u32> {
+    let limit = requested_limit.unwrap_or(DEFAULT_LIST_LIMIT);
+
+    if (1..=MAXIMUM_LIST_LIMIT).contains(&limit) {
+        Ok(limit)
+    } else {
+        Err(FwcError::crowdsec(
+            DECISIONS_INVALID,
+            "CrowdSec decision limit must be between 1 and 100",
+        ))
+    }
 }
 
 fn decisions_from_json(value: &Value) -> Vec<CrowdSecDecision> {

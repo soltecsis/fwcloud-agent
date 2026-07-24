@@ -33,8 +33,8 @@ use crate::{
             CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
             CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
             CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
-            CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecInstallRequest,
-            CrowdSecUninstallRequest,
+            CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
+            CrowdSecInstallRequest, CrowdSecUninstallRequest,
         },
         status, uninstall,
     },
@@ -182,14 +182,17 @@ async fn enroll_crowdsec_console(
 }
 
 #[get("/crowdsec/decisions")]
-async fn crowdsec_decisions(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+async fn crowdsec_decisions(
+    cfg: web::Data<Arc<Config>>,
+    query: web::Query<CrowdSecDecisionsQuery>,
+) -> Result<HttpResponse> {
     let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let decisions_result = decisions::list().await;
+        let decisions_result = decisions::list(query.limit).await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         decisions_result?

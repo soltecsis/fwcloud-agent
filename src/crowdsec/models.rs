@@ -277,6 +277,12 @@ pub struct CrowdSecDecisionsResponse {
     pub decisions: Vec<CrowdSecDecision>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecDecisionsQuery {
+    pub limit: Option<u32>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecDecisionsFlushRequest {
