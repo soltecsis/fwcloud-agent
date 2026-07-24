@@ -23,7 +23,7 @@
 use crate::{
     crowdsec::{
         command::CrowdSecCommand,
-        errors::INVALID_COMMAND,
+        errors::CONSOLE_INVALID_ENROLLMENT,
         models::{CrowdSecConsoleState, CrowdSecConsoleStatusResponse},
     },
     errors::{FwcError, Result},
@@ -71,16 +71,7 @@ pub async fn enroll(
     validate_instance_name(name)?;
     validate_tags(tags)?;
 
-    let mut arguments = vec!["console", "enroll"];
-    if let Some(name) = name {
-        arguments.extend(["--name", name]);
-    }
-    if let Some(tags) = tags {
-        for tag in tags {
-            arguments.extend(["--tags", tag]);
-        }
-    }
-    arguments.push(enrollment_key);
+    let arguments = enrollment_arguments(enrollment_key, name, tags);
 
     CrowdSecCommand::cscli(&arguments)?.execute().await?;
     status().await
@@ -92,7 +83,7 @@ fn validate_enrollment_key(enrollment_key: &str) -> Result<()> {
         || enrollment_key.chars().any(char::is_control)
     {
         return Err(FwcError::crowdsec(
-            INVALID_COMMAND,
+            CONSOLE_INVALID_ENROLLMENT,
             "Invalid CrowdSec enrollment key",
         ));
     }
@@ -104,7 +95,7 @@ fn validate_instance_name(name: Option<&str>) -> Result<()> {
     if let Some(name) = name {
         if !is_valid_console_identifier(name, MAX_INSTANCE_NAME_LENGTH) {
             return Err(FwcError::crowdsec(
-                INVALID_COMMAND,
+                CONSOLE_INVALID_ENROLLMENT,
                 "Invalid CrowdSec Console instance name",
             ));
         }
@@ -121,7 +112,7 @@ fn validate_tags(tags: Option<&[String]>) -> Result<()> {
                 .any(|tag| !is_valid_console_identifier(tag, MAX_TAG_LENGTH))
         {
             return Err(FwcError::crowdsec(
-                INVALID_COMMAND,
+                CONSOLE_INVALID_ENROLLMENT,
                 "Invalid CrowdSec Console tags",
             ));
         }
@@ -136,6 +127,24 @@ fn is_valid_console_identifier(value: &str, maximum_length: usize) -> bool {
         && value.chars().all(|character| {
             character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
         })
+}
+
+fn enrollment_arguments<'a>(
+    enrollment_key: &'a str,
+    name: Option<&'a str>,
+    tags: Option<&'a [String]>,
+) -> Vec<&'a str> {
+    let mut arguments = vec!["console", "enroll"];
+    if let Some(name) = name {
+        arguments.extend(["--name", name]);
+    }
+    if let Some(tags) = tags {
+        for tag in tags {
+            arguments.extend(["--tags", tag]);
+        }
+    }
+    arguments.push(enrollment_key);
+    arguments
 }
 
 fn console_status(succeeded: bool, stdout: &str, stderr: &str) -> CrowdSecConsoleStatusResponse {
@@ -186,5 +195,110 @@ fn console_status_message(state: &CrowdSecConsoleState) -> &'static str {
         CrowdSecConsoleState::PendingApproval => "CrowdSec Console enrollment is pending approval",
         CrowdSecConsoleState::Connected => "CrowdSec Console is connected",
         CrowdSecConsoleState::Error => "Unable to determine CrowdSec Console status",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        console_status, enrollment_arguments, validate_enrollment_key, validate_instance_name,
+        validate_tags,
+    };
+    use crate::{
+        crowdsec::{
+            errors::CONSOLE_INVALID_ENROLLMENT,
+            models::{
+                CrowdSecConsoleEnrollResponse, CrowdSecConsoleState, CrowdSecConsoleStatusResponse,
+            },
+        },
+        errors::FwcError,
+    };
+
+    #[test]
+    fn rejects_invalid_enrollment_values() {
+        for enrollment_key in ["", "invalid\nkey"] {
+            let error = validate_enrollment_key(enrollment_key).unwrap_err();
+            assert!(matches!(
+                error,
+                FwcError::CrowdSec {
+                    code: CONSOLE_INVALID_ENROLLMENT,
+                    ..
+                }
+            ));
+        }
+
+        let error = validate_instance_name(Some("invalid name")).unwrap_err();
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: CONSOLE_INVALID_ENROLLMENT,
+                ..
+            }
+        ));
+
+        let tags = ["valid".to_string(), "invalid tag".to_string()];
+        let error = validate_tags(Some(&tags)).unwrap_err();
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: CONSOLE_INVALID_ENROLLMENT,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn builds_separate_enrollment_arguments() {
+        let tags = ["production".to_string(), "madrid".to_string()];
+        let arguments = enrollment_arguments("enrollment-key", Some("fwcloud-01"), Some(&tags));
+
+        assert_eq!(
+            arguments,
+            [
+                "console",
+                "enroll",
+                "--name",
+                "fwcloud-01",
+                "--tags",
+                "production",
+                "--tags",
+                "madrid",
+                "enrollment-key",
+            ]
+        );
+    }
+
+    #[test]
+    fn normalizes_console_connection_states() {
+        assert_eq!(
+            console_status(false, "", "no credentials found").state,
+            CrowdSecConsoleState::NotConfigured
+        );
+        assert_eq!(
+            console_status(false, "", "enrollment pending approval").state,
+            CrowdSecConsoleState::PendingApproval
+        );
+        assert_eq!(
+            console_status(true, "CAPI connection succeeded", "").state,
+            CrowdSecConsoleState::Connected
+        );
+        assert_eq!(
+            console_status(false, "", "network timeout").state,
+            CrowdSecConsoleState::Error
+        );
+    }
+
+    #[test]
+    fn enrollment_response_never_serializes_the_enrollment_key() {
+        let response = CrowdSecConsoleEnrollResponse {
+            status: CrowdSecConsoleStatusResponse {
+                state: CrowdSecConsoleState::PendingApproval,
+                message: "CrowdSec Console enrollment is pending approval".to_string(),
+            },
+        };
+        let response = serde_json::to_string(&response).unwrap();
+
+        assert!(!response.contains("enrollment_key"));
+        assert!(!response.contains("enrollment-key"));
     }
 }

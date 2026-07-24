@@ -49,7 +49,6 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(crowdsec::update_crowdsec_collections)
             .service(crowdsec::crowdsec_console_status)
             .service(crowdsec::enroll_crowdsec_console)
-            .service(crowdsec::disable_crowdsec_console)
             .service(crowdsec::install_crowdsec)
             .service(crowdsec::uninstall_crowdsec)
             .service(crowdsec::install_crowdsec_bouncer)

@@ -261,15 +261,6 @@ pub struct CrowdSecConsoleEnrollResponse {
     pub status: CrowdSecConsoleStatusResponse,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CrowdSecConsoleDisableRequest {}
-
-#[derive(Debug, Serialize)]
-pub struct CrowdSecConsoleDisableResponse {
-    pub status: CrowdSecConsoleStatusResponse,
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecApiStatus {

@@ -33,8 +33,7 @@ use crate::{
             CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
             CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
             CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
-            CrowdSecConsoleDisableRequest, CrowdSecConsoleEnrollRequest, CrowdSecInstallRequest,
-            CrowdSecUninstallRequest,
+            CrowdSecConsoleEnrollRequest, CrowdSecInstallRequest, CrowdSecUninstallRequest,
         },
         status, uninstall,
     },
@@ -179,16 +178,6 @@ async fn enroll_crowdsec_console(
 
     Ok(HttpResponse::Ok()
         .json(crate::crowdsec::models::CrowdSecConsoleEnrollResponse { status: response }))
-}
-
-#[post("/crowdsec/console/disable")]
-async fn disable_crowdsec_console(
-    _request: web::Json<CrowdSecConsoleDisableRequest>,
-) -> Result<HttpResponse> {
-    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
-        "code": "CROWDSEC_CONSOLE_NOT_IMPLEMENTED",
-        "message": "CrowdSec Console disable is not implemented yet"
-    })))
 }
 
 #[post("/crowdsec/install")]

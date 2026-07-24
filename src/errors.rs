@@ -126,6 +126,7 @@ impl ResponseError for FwcError {
                     *code,
                     crate::crowdsec::errors::INVALID_COMMAND
                         | crate::crowdsec::errors::COLLECTION_INVALID
+                        | crate::crowdsec::errors::CONSOLE_INVALID_ENROLLMENT
                 ) =>
             {
                 StatusCode::BAD_REQUEST
