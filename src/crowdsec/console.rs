@@ -39,23 +39,19 @@ pub async fn status() -> Result<CrowdSecConsoleStatusResponse> {
         .execute_allow_failure()
         .await?;
 
-    if output.succeeded() && !output_is_pending_approval(output.stdout()) {
-        return Ok(console_status(true, output.stdout(), output.stderr()));
-    }
-
     let diagnostics = format!("{}\n{}", output.stdout(), output.stderr());
     if output_uses_unsupported_json_option(&diagnostics) {
         let output = CrowdSecCommand::cscli(&["capi", "status"])?
             .execute_allow_failure()
             .await?;
-        return Ok(console_status(
+        return Ok(capi_status(
             output.succeeded(),
             output.stdout(),
             output.stderr(),
         ));
     }
 
-    Ok(console_status(
+    Ok(capi_status(
         output.succeeded(),
         output.stdout(),
         output.stderr(),
@@ -74,7 +70,7 @@ pub async fn enroll(
     let arguments = enrollment_arguments(enrollment_key, name, tags);
 
     CrowdSecCommand::cscli(&arguments)?.execute().await?;
-    status().await
+    Ok(pending_approval_status())
 }
 
 fn validate_enrollment_key(enrollment_key: &str) -> Result<()> {
@@ -147,11 +143,9 @@ fn enrollment_arguments<'a>(
     arguments
 }
 
-fn console_status(succeeded: bool, stdout: &str, stderr: &str) -> CrowdSecConsoleStatusResponse {
+fn capi_status(succeeded: bool, stdout: &str, stderr: &str) -> CrowdSecConsoleStatusResponse {
     let diagnostics = format!("{}\n{}", stdout, stderr).to_ascii_lowercase();
-    let state = if is_pending_approval(&diagnostics) {
-        CrowdSecConsoleState::PendingApproval
-    } else if succeeded {
+    let state = if succeeded {
         CrowdSecConsoleState::Connected
     } else if is_not_configured(&diagnostics) {
         CrowdSecConsoleState::NotConfigured
@@ -160,20 +154,16 @@ fn console_status(succeeded: bool, stdout: &str, stderr: &str) -> CrowdSecConsol
     };
 
     CrowdSecConsoleStatusResponse {
-        message: console_status_message(&state).to_string(),
+        message: capi_status_message(&state).to_string(),
         state,
     }
 }
 
-fn output_is_pending_approval(output: &str) -> bool {
-    is_pending_approval(&output.to_ascii_lowercase())
-}
-
-fn is_pending_approval(diagnostics: &str) -> bool {
-    diagnostics.contains("pending approval")
-        || diagnostics.contains("pending validation")
-        || diagnostics.contains("waiting for validation")
-        || diagnostics.contains("not yet validated")
+fn pending_approval_status() -> CrowdSecConsoleStatusResponse {
+    CrowdSecConsoleStatusResponse {
+        state: CrowdSecConsoleState::PendingApproval,
+        message: "Enrollment request submitted. Accept the Security Engine in CrowdSec Console to complete enrollment.".to_string(),
+    }
 }
 
 fn is_not_configured(diagnostics: &str) -> bool {
@@ -189,20 +179,26 @@ fn output_uses_unsupported_json_option(diagnostics: &str) -> bool {
     diagnostics.contains("unknown flag") && diagnostics.contains("output")
 }
 
-fn console_status_message(state: &CrowdSecConsoleState) -> &'static str {
+fn capi_status_message(state: &CrowdSecConsoleState) -> &'static str {
     match state {
-        CrowdSecConsoleState::NotConfigured => "CrowdSec Console is not configured",
-        CrowdSecConsoleState::PendingApproval => "CrowdSec Console enrollment is pending approval",
-        CrowdSecConsoleState::Connected => "CrowdSec Console is connected",
-        CrowdSecConsoleState::Error => "Unable to determine CrowdSec Console status",
+        CrowdSecConsoleState::NotConfigured => {
+            "CrowdSec Central API credentials are not configured"
+        }
+        CrowdSecConsoleState::PendingApproval => {
+            unreachable!("CAPI status cannot determine enrollment approval")
+        }
+        CrowdSecConsoleState::Connected => {
+            "CrowdSec Central API is reachable; CrowdSec Console approval cannot be checked locally"
+        }
+        CrowdSecConsoleState::Error => "Unable to determine CrowdSec Central API connectivity",
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        console_status, enrollment_arguments, validate_enrollment_key, validate_instance_name,
-        validate_tags,
+        capi_status, enrollment_arguments, pending_approval_status, validate_enrollment_key,
+        validate_instance_name, validate_tags,
     };
     use crate::{
         crowdsec::{
@@ -269,23 +265,27 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_console_connection_states() {
+    fn normalizes_capi_connection_states() {
         assert_eq!(
-            console_status(false, "", "no credentials found").state,
+            capi_status(false, "", "no credentials found").state,
             CrowdSecConsoleState::NotConfigured
         );
         assert_eq!(
-            console_status(false, "", "enrollment pending approval").state,
-            CrowdSecConsoleState::PendingApproval
-        );
-        assert_eq!(
-            console_status(true, "CAPI connection succeeded", "").state,
+            capi_status(true, "CAPI connection succeeded", "").state,
             CrowdSecConsoleState::Connected
         );
         assert_eq!(
-            console_status(false, "", "network timeout").state,
+            capi_status(false, "", "network timeout").state,
             CrowdSecConsoleState::Error
         );
+    }
+
+    #[test]
+    fn enrollment_always_reports_pending_approval() {
+        let status = pending_approval_status();
+
+        assert_eq!(status.state, CrowdSecConsoleState::PendingApproval);
+        assert!(status.message.contains("Accept the Security Engine"));
     }
 
     #[test]
