@@ -23,10 +23,16 @@
 use crate::{
     crowdsec::{
         command::CrowdSecCommand,
+        errors::INVALID_COMMAND,
         models::{CrowdSecConsoleState, CrowdSecConsoleStatusResponse},
     },
-    errors::Result,
+    errors::{FwcError, Result},
 };
+
+const MAX_ENROLLMENT_KEY_LENGTH: usize = 512;
+const MAX_INSTANCE_NAME_LENGTH: usize = 64;
+const MAX_TAG_LENGTH: usize = 64;
+const MAX_TAGS: usize = 16;
 
 pub async fn status() -> Result<CrowdSecConsoleStatusResponse> {
     let output = CrowdSecCommand::cscli(&["capi", "status", "-o", "json"])?
@@ -54,6 +60,82 @@ pub async fn status() -> Result<CrowdSecConsoleStatusResponse> {
         output.stdout(),
         output.stderr(),
     ))
+}
+
+pub async fn enroll(
+    enrollment_key: &str,
+    name: Option<&str>,
+    tags: Option<&[String]>,
+) -> Result<CrowdSecConsoleStatusResponse> {
+    validate_enrollment_key(enrollment_key)?;
+    validate_instance_name(name)?;
+    validate_tags(tags)?;
+
+    let mut arguments = vec!["console", "enroll"];
+    if let Some(name) = name {
+        arguments.extend(["--name", name]);
+    }
+    if let Some(tags) = tags {
+        for tag in tags {
+            arguments.extend(["--tags", tag]);
+        }
+    }
+    arguments.push(enrollment_key);
+
+    CrowdSecCommand::cscli(&arguments)?.execute().await?;
+    status().await
+}
+
+fn validate_enrollment_key(enrollment_key: &str) -> Result<()> {
+    if enrollment_key.is_empty()
+        || enrollment_key.len() > MAX_ENROLLMENT_KEY_LENGTH
+        || enrollment_key.chars().any(char::is_control)
+    {
+        return Err(FwcError::crowdsec(
+            INVALID_COMMAND,
+            "Invalid CrowdSec enrollment key",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_instance_name(name: Option<&str>) -> Result<()> {
+    if let Some(name) = name {
+        if !is_valid_console_identifier(name, MAX_INSTANCE_NAME_LENGTH) {
+            return Err(FwcError::crowdsec(
+                INVALID_COMMAND,
+                "Invalid CrowdSec Console instance name",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_tags(tags: Option<&[String]>) -> Result<()> {
+    if let Some(tags) = tags {
+        if tags.len() > MAX_TAGS
+            || tags
+                .iter()
+                .any(|tag| !is_valid_console_identifier(tag, MAX_TAG_LENGTH))
+        {
+            return Err(FwcError::crowdsec(
+                INVALID_COMMAND,
+                "Invalid CrowdSec Console tags",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn is_valid_console_identifier(value: &str, maximum_length: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= maximum_length
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+        })
 }
 
 fn console_status(succeeded: bool, stdout: &str, stderr: &str) -> CrowdSecConsoleStatusResponse {

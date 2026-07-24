@@ -157,12 +157,28 @@ async fn crowdsec_console_status(cfg: web::Data<Arc<Config>>) -> Result<HttpResp
 
 #[post("/crowdsec/console/enroll")]
 async fn enroll_crowdsec_console(
-    _request: web::Json<CrowdSecConsoleEnrollRequest>,
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecConsoleEnrollRequest>,
 ) -> Result<HttpResponse> {
-    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
-        "code": "CROWDSEC_CONSOLE_NOT_IMPLEMENTED",
-        "message": "CrowdSec Console enrollment is not implemented yet"
-    })))
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let enroll_result = console::enroll(
+            &request.enrollment_key,
+            request.name.as_deref(),
+            request.tags.as_deref(),
+        )
+        .await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        enroll_result?
+    };
+
+    Ok(HttpResponse::Ok()
+        .json(crate::crowdsec::models::CrowdSecConsoleEnrollResponse { status: response }))
 }
 
 #[post("/crowdsec/console/disable")]

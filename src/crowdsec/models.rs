@@ -248,7 +248,7 @@ pub struct CrowdSecConsoleStatusResponse {
     pub message: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecConsoleEnrollRequest {
     pub enrollment_key: String,
