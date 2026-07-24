@@ -22,7 +22,7 @@
 
 use std::sync::Arc;
 
-use actix_web::{get, post, web, HttpResponse};
+use actix_web::{delete, get, post, web, HttpResponse};
 use log::debug;
 
 use crate::{
@@ -30,10 +30,11 @@ use crate::{
     crowdsec::{
         bouncer, collections, console, install,
         models::{
-            CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
+            CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
             CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
             CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
-            CrowdSecConsoleEnrollRequest, CrowdSecInstallRequest, CrowdSecUninstallRequest,
+            CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecInstallRequest,
+            CrowdSecUninstallRequest,
         },
         status, uninstall,
     },
@@ -178,6 +179,40 @@ async fn enroll_crowdsec_console(
 
     Ok(HttpResponse::Ok()
         .json(crate::crowdsec::models::CrowdSecConsoleEnrollResponse { status: response }))
+}
+
+#[get("/crowdsec/decisions")]
+async fn crowdsec_decisions() -> Result<HttpResponse> {
+    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
+        "code": "CROWDSEC_DECISIONS_NOT_IMPLEMENTED",
+        "message": "CrowdSec decision listing is not implemented yet"
+    })))
+}
+
+#[delete("/crowdsec/decisions/{id}")]
+async fn delete_crowdsec_decision(_id: web::Path<String>) -> Result<HttpResponse> {
+    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
+        "code": "CROWDSEC_DECISIONS_NOT_IMPLEMENTED",
+        "message": "CrowdSec decision deletion is not implemented yet"
+    })))
+}
+
+#[post("/crowdsec/decisions/flush")]
+async fn flush_crowdsec_decisions(
+    _request: web::Json<CrowdSecDecisionsFlushRequest>,
+) -> Result<HttpResponse> {
+    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
+        "code": "CROWDSEC_DECISIONS_NOT_IMPLEMENTED",
+        "message": "CrowdSec decision flush is not implemented yet"
+    })))
+}
+
+#[get("/crowdsec/alerts")]
+async fn crowdsec_alerts(_query: web::Query<CrowdSecAlertsQuery>) -> Result<HttpResponse> {
+    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
+        "code": "CROWDSEC_ALERTS_NOT_IMPLEMENTED",
+        "message": "CrowdSec alert listing is not implemented yet"
+    })))
 }
 
 #[post("/crowdsec/install")]
