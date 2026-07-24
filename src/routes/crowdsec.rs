@@ -28,7 +28,7 @@ use log::debug;
 use crate::{
     config::Config,
     crowdsec::{
-        bouncer, collections, console, install,
+        bouncer, collections, console, decisions, install,
         models::{
             CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
             CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
@@ -182,11 +182,20 @@ async fn enroll_crowdsec_console(
 }
 
 #[get("/crowdsec/decisions")]
-async fn crowdsec_decisions() -> Result<HttpResponse> {
-    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
-        "code": "CROWDSEC_DECISIONS_NOT_IMPLEMENTED",
-        "message": "CrowdSec decision listing is not implemented yet"
-    })))
+async fn crowdsec_decisions(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let decisions_result = decisions::list().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        decisions_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[delete("/crowdsec/decisions/{id}")]
