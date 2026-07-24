@@ -233,6 +233,34 @@ pub struct CrowdSecCollectionOperationResponse {
     pub message: String,
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecConsoleState {
+    NotConfigured,
+    PendingApproval,
+    Connected,
+    Error,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecConsoleStatusResponse {
+    pub state: CrowdSecConsoleState,
+    pub message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecConsoleEnrollRequest {
+    pub enrollment_key: String,
+    pub name: Option<String>,
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecConsoleEnrollResponse {
+    pub status: CrowdSecConsoleStatusResponse,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecApiStatus {

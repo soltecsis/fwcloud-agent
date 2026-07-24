@@ -23,6 +23,7 @@
 pub mod bouncer;
 pub mod collections;
 pub mod command;
+pub mod console;
 pub mod errors;
 pub mod install;
 pub mod models;

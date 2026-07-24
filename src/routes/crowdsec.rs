@@ -28,12 +28,12 @@ use log::debug;
 use crate::{
     config::Config,
     crowdsec::{
-        bouncer, collections, install,
+        bouncer, collections, console, install,
         models::{
             CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
             CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
-            CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery, CrowdSecInstallRequest,
-            CrowdSecUninstallRequest,
+            CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
+            CrowdSecConsoleEnrollRequest, CrowdSecInstallRequest, CrowdSecUninstallRequest,
         },
         status, uninstall,
     },
@@ -135,6 +135,49 @@ async fn update_crowdsec_collections(
     };
 
     Ok(HttpResponse::Ok().json(response))
+}
+
+#[get("/crowdsec/console/status")]
+async fn crowdsec_console_status(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let status_result = console::status().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        status_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/console/enroll")]
+async fn enroll_crowdsec_console(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecConsoleEnrollRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let enroll_result = console::enroll(
+            &request.enrollment_key,
+            request.name.as_deref(),
+            request.tags.as_deref(),
+        )
+        .await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        enroll_result?
+    };
+
+    Ok(HttpResponse::Ok()
+        .json(crate::crowdsec::models::CrowdSecConsoleEnrollResponse { status: response }))
 }
 
 #[post("/crowdsec/install")]
