@@ -25,8 +25,11 @@ use serde_json::Value;
 use crate::{
     crowdsec::{
         command::CrowdSecCommand,
-        errors::{COMMAND_FAILED, DECISIONS_INVALID},
-        models::{CrowdSecDecision, CrowdSecDecisionsQuery, CrowdSecDecisionsResponse},
+        errors::{COMMAND_FAILED, DECISIONS_CONFIRMATION_REQUIRED, DECISIONS_INVALID},
+        models::{
+            CrowdSecDecision, CrowdSecDecisionOperation, CrowdSecDecisionOperationResponse,
+            CrowdSecDecisionsQuery, CrowdSecDecisionsResponse,
+        },
     },
     errors::{FwcError, Result},
 };
@@ -48,6 +51,72 @@ pub async fn list(query: &CrowdSecDecisionsQuery) -> Result<CrowdSecDecisionsRes
             .take(limit as usize)
             .collect(),
     })
+}
+
+pub async fn delete(id: &str) -> Result<CrowdSecDecisionOperationResponse> {
+    validate_decision_id(id)?;
+    let deleted_count = if decision_exists(id).await? {
+        execute_delete_command(&["decisions", "delete", "--id", id]).await?;
+        1
+    } else {
+        0
+    };
+
+    Ok(CrowdSecDecisionOperationResponse {
+        operation: CrowdSecDecisionOperation::Delete,
+        decision_id: Some(id.to_string()),
+        deleted_count,
+        message: if deleted_count > 0 {
+            "CrowdSec decision is deleted".to_string()
+        } else {
+            "CrowdSec decision was not found".to_string()
+        },
+    })
+}
+
+pub fn require_flush_confirmation(confirm: bool) -> Result<()> {
+    if confirm {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            DECISIONS_CONFIRMATION_REQUIRED,
+            "CrowdSec decision flush requires confirm: true",
+        ))
+    }
+}
+
+pub async fn flush() -> Result<CrowdSecDecisionOperationResponse> {
+    let deleted_count = all_decisions().await?.len() as u64;
+    execute_delete_command(&["decisions", "delete", "--all"]).await?;
+
+    Ok(CrowdSecDecisionOperationResponse {
+        operation: CrowdSecDecisionOperation::Flush,
+        decision_id: None,
+        deleted_count,
+        message: "All CrowdSec decisions are deleted".to_string(),
+    })
+}
+
+async fn execute_delete_command(arguments: &[&str]) -> Result<()> {
+    CrowdSecCommand::cscli(arguments)?.execute().await?;
+    Ok(())
+}
+
+async fn decision_exists(id: &str) -> Result<bool> {
+    Ok(all_decisions()
+        .await?
+        .into_iter()
+        .any(|decision| decision.id == id))
+}
+
+async fn all_decisions() -> Result<Vec<CrowdSecDecision>> {
+    let output = CrowdSecCommand::cscli(&["decisions", "list", "--all", "-o", "json"])?
+        .execute()
+        .await?;
+    let value = serde_json::from_str::<Value>(output.stdout())
+        .map_err(|_| FwcError::crowdsec(COMMAND_FAILED, "Unable to read CrowdSec decision list"))?;
+
+    Ok(decisions_from_json(&value))
 }
 
 fn list_arguments<'a>(query: &'a CrowdSecDecisionsQuery, limit: &'a str) -> Result<Vec<&'a str>> {
@@ -191,6 +260,22 @@ fn list_limit(requested_limit: Option<u32>) -> Result<u32> {
         Err(FwcError::crowdsec(
             DECISIONS_INVALID,
             "CrowdSec decision limit must be between 1 and 100",
+        ))
+    }
+}
+
+fn validate_decision_id(id: &str) -> Result<()> {
+    let valid = !id.is_empty()
+        && id.len() <= 19
+        && id.bytes().all(|character| character.is_ascii_digit())
+        && id.parse::<u64>().is_ok();
+
+    if valid {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            DECISIONS_INVALID,
+            "Invalid CrowdSec decision ID",
         ))
     }
 }

@@ -202,21 +202,45 @@ async fn crowdsec_decisions(
 }
 
 #[delete("/crowdsec/decisions/{id}")]
-async fn delete_crowdsec_decision(_id: web::Path<String>) -> Result<HttpResponse> {
-    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
-        "code": "CROWDSEC_DECISIONS_NOT_IMPLEMENTED",
-        "message": "CrowdSec decision deletion is not implemented yet"
-    })))
+async fn delete_crowdsec_decision(
+    cfg: web::Data<Arc<Config>>,
+    id: web::Path<String>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let delete_result = decisions::delete(&id).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        delete_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[post("/crowdsec/decisions/flush")]
 async fn flush_crowdsec_decisions(
-    _request: web::Json<CrowdSecDecisionsFlushRequest>,
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecDecisionsFlushRequest>,
 ) -> Result<HttpResponse> {
-    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
-        "code": "CROWDSEC_DECISIONS_NOT_IMPLEMENTED",
-        "message": "CrowdSec decision flush is not implemented yet"
-    })))
+    decisions::require_flush_confirmation(request.confirm)?;
+
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let flush_result = decisions::flush().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        flush_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[get("/crowdsec/alerts")]

@@ -295,7 +295,18 @@ pub struct CrowdSecDecisionsFlushRequest {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecDecisionOperation {
+    Delete,
+    Flush,
+}
+
+#[derive(Debug, Serialize)]
 pub struct CrowdSecDecisionOperationResponse {
+    pub operation: CrowdSecDecisionOperation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_id: Option<String>,
+    pub deleted_count: u64,
     pub message: String,
 }
 
