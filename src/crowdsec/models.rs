@@ -281,6 +281,11 @@ pub struct CrowdSecDecisionsResponse {
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecDecisionsQuery {
     pub limit: Option<u32>,
+    pub scope: Option<String>,
+    pub value: Option<String>,
+    pub decision_type: Option<String>,
+    pub origin: Option<String>,
+    pub scenario: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

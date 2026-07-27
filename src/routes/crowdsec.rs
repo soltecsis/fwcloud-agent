@@ -192,7 +192,7 @@ async fn crowdsec_decisions(
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let decisions_result = decisions::list(query.limit).await;
+        let decisions_result = decisions::list(&query).await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         decisions_result?
