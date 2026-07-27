@@ -30,11 +30,11 @@ use crate::{
     crowdsec::{
         alerts, bouncer, collections, console, decisions, install,
         models::{
-            CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
-            CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
-            CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
-            CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
-            CrowdSecInstallRequest, CrowdSecUninstallRequest,
+            CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerRegisterRequest,
+            CrowdSecBouncerUninstallRequest, CrowdSecCollectionInstallRequest,
+            CrowdSecCollectionRemoveRequest, CrowdSecCollectionUpdateRequest,
+            CrowdSecCollectionsQuery, CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest,
+            CrowdSecDecisionsQuery, CrowdSecInstallRequest, CrowdSecUninstallRequest,
         },
         status, uninstall,
     },
@@ -261,6 +261,32 @@ async fn crowdsec_alerts(
     };
 
     Ok(HttpResponse::Ok().json(response))
+}
+
+#[get("/crowdsec/bouncers")]
+async fn crowdsec_bouncers() -> Result<HttpResponse> {
+    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
+        "code": "CROWDSEC_BOUNCERS_NOT_IMPLEMENTED",
+        "message": "CrowdSec bouncer listing is not implemented yet"
+    })))
+}
+
+#[post("/crowdsec/bouncers/register")]
+async fn register_crowdsec_bouncer(
+    _request: web::Json<CrowdSecBouncerRegisterRequest>,
+) -> Result<HttpResponse> {
+    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
+        "code": "CROWDSEC_BOUNCERS_NOT_IMPLEMENTED",
+        "message": "CrowdSec bouncer registration is not implemented yet"
+    })))
+}
+
+#[delete("/crowdsec/bouncers/{name}")]
+async fn remove_crowdsec_bouncer(_name: web::Path<String>) -> Result<HttpResponse> {
+    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
+        "code": "CROWDSEC_BOUNCERS_NOT_IMPLEMENTED",
+        "message": "CrowdSec bouncer removal is not implemented yet"
+    })))
 }
 
 #[post("/crowdsec/install")]
