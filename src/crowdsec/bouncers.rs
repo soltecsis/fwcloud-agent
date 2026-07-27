@@ -36,11 +36,15 @@ use tokio::{fs, process::Command, time::timeout};
 use crate::{
     crowdsec::{
         command::CrowdSecCommand,
-        errors::{COMMAND_FAILED, FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
+        errors::{
+            BOUNCER_CONFLICT, BOUNCER_INVALID, COMMAND_FAILED, FIREWALL_INTEGRATION_INVALID,
+            OPERATION_TIMEOUT,
+        },
         models::{
             CrowdSecBouncer, CrowdSecBouncerInstallResponse, CrowdSecBouncerInstallStep,
-            CrowdSecBouncerUninstallResponse, CrowdSecBouncerUninstallStep,
-            CrowdSecBouncersResponse, CrowdSecStepResult, CrowdSecStepStatus,
+            CrowdSecBouncerRegisterResponse, CrowdSecBouncerUninstallResponse,
+            CrowdSecBouncerUninstallStep, CrowdSecBouncersResponse, CrowdSecStepResult,
+            CrowdSecStepStatus,
         },
         packages,
     },
@@ -155,6 +159,47 @@ pub async fn list() -> Result<CrowdSecBouncersResponse> {
     })
 }
 
+pub async fn register(name: &str) -> Result<CrowdSecBouncerRegisterResponse> {
+    validate_bouncer_name(name)?;
+
+    if name == FWCLOUD_BOUNCER_NAME {
+        return Err(FwcError::crowdsec(
+            BOUNCER_CONFLICT,
+            "The FWCloud bouncer name is reserved",
+        ));
+    }
+
+    if list()
+        .await?
+        .bouncers
+        .iter()
+        .any(|bouncer| bouncer.name == name)
+    {
+        return Err(FwcError::crowdsec(
+            BOUNCER_CONFLICT,
+            "CrowdSec bouncer is already registered",
+        ));
+    }
+
+    debug!("Registering CrowdSec bouncer: {}", name);
+    let output = CrowdSecCommand::cscli(&["bouncers", "add", name, "-o", "raw"])?
+        .execute()
+        .await?;
+    let api_key = output.stdout().trim().to_string();
+
+    if !valid_api_key(&api_key) {
+        return Err(FwcError::crowdsec(
+            COMMAND_FAILED,
+            "CrowdSec bouncer did not return a valid API key",
+        ));
+    }
+
+    Ok(CrowdSecBouncerRegisterResponse {
+        name: name.to_string(),
+        api_key,
+    })
+}
+
 fn bouncers_from_json(value: &Value) -> Vec<CrowdSecBouncer> {
     value
         .as_array()
@@ -186,6 +231,22 @@ fn value_as_string(value: Option<&Value>) -> Option<String> {
         Value::Number(value) => Some(value.to_string()),
         _ => None,
     }
+}
+
+fn validate_bouncer_name(name: &str) -> Result<()> {
+    if name.is_empty()
+        || name.len() > 128
+        || !name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
+    {
+        return Err(FwcError::crowdsec(
+            BOUNCER_INVALID,
+            "Invalid CrowdSec bouncer name",
+        ));
+    }
+
+    Ok(())
 }
 
 async fn blacklist_ipset_status(name: &'static str) -> Result<CrowdSecIpSetStatus> {
