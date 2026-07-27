@@ -22,18 +22,19 @@
 
 use std::sync::Arc;
 
-use actix_web::{get, post, web, HttpResponse};
+use actix_web::{delete, get, post, web, HttpResponse};
 use log::debug;
 
 use crate::{
     config::Config,
     crowdsec::{
-        bouncer, collections, console, install,
+        alerts, bouncer, collections, console, decisions, install,
         models::{
-            CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
+            CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
             CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
             CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
-            CrowdSecConsoleEnrollRequest, CrowdSecInstallRequest, CrowdSecUninstallRequest,
+            CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
+            CrowdSecInstallRequest, CrowdSecUninstallRequest,
         },
         status, uninstall,
     },
@@ -178,6 +179,88 @@ async fn enroll_crowdsec_console(
 
     Ok(HttpResponse::Ok()
         .json(crate::crowdsec::models::CrowdSecConsoleEnrollResponse { status: response }))
+}
+
+#[get("/crowdsec/decisions")]
+async fn crowdsec_decisions(
+    cfg: web::Data<Arc<Config>>,
+    query: web::Query<CrowdSecDecisionsQuery>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let decisions_result = decisions::list(&query).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        decisions_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[delete("/crowdsec/decisions/{id}")]
+async fn delete_crowdsec_decision(
+    cfg: web::Data<Arc<Config>>,
+    id: web::Path<String>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let delete_result = decisions::delete(&id).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        delete_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/decisions/flush")]
+async fn flush_crowdsec_decisions(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecDecisionsFlushRequest>,
+) -> Result<HttpResponse> {
+    decisions::require_flush_confirmation(request.confirm)?;
+
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let flush_result = decisions::flush().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        flush_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[get("/crowdsec/alerts")]
+async fn crowdsec_alerts(
+    cfg: web::Data<Arc<Config>>,
+    query: web::Query<CrowdSecAlertsQuery>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let alerts_result = alerts::list(&query).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        alerts_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[post("/crowdsec/install")]

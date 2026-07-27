@@ -261,6 +261,84 @@ pub struct CrowdSecConsoleEnrollResponse {
     pub status: CrowdSecConsoleStatusResponse,
 }
 
+#[derive(Debug, Serialize)]
+pub struct CrowdSecDecision {
+    pub id: String,
+    pub scope: String,
+    pub value: String,
+    pub decision_type: String,
+    pub origin: Option<String>,
+    pub scenario: Option<String>,
+    pub expires_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecDecisionsResponse {
+    pub decisions: Vec<CrowdSecDecision>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecDecisionsQuery {
+    pub limit: Option<u32>,
+    pub scope: Option<String>,
+    pub value: Option<String>,
+    pub decision_type: Option<String>,
+    pub origin: Option<String>,
+    pub scenario: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecDecisionsFlushRequest {
+    pub confirm: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecDecisionOperation {
+    Delete,
+    Flush,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecDecisionOperationResponse {
+    pub operation: CrowdSecDecisionOperation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_id: Option<String>,
+    pub deleted_count: u64,
+    pub message: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecAlertsQuery {
+    pub limit: Option<u32>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub scenario: Option<String>,
+    #[serde(rename = "type")]
+    pub decision_type: Option<String>,
+    pub scope: Option<String>,
+    pub value: Option<String>,
+    pub ip: Option<String>,
+    pub range: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecAlert {
+    pub id: String,
+    pub created_at: Option<String>,
+    pub source_ip: Option<String>,
+    pub scenario: Option<String>,
+    pub decision_type: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecAlertsResponse {
+    pub alerts: Vec<CrowdSecAlert>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecApiStatus {

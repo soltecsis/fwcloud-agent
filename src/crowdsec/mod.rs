@@ -20,10 +20,12 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+pub mod alerts;
 pub mod bouncer;
 pub mod collections;
 pub mod command;
 pub mod console;
+pub mod decisions;
 pub mod errors;
 pub mod install;
 pub mod models;
