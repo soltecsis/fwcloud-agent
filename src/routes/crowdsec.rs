@@ -301,11 +301,23 @@ async fn register_crowdsec_bouncer(
 }
 
 #[delete("/crowdsec/bouncers/{name}")]
-async fn remove_crowdsec_bouncer(_name: web::Path<String>) -> Result<HttpResponse> {
-    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
-        "code": "CROWDSEC_BOUNCERS_NOT_IMPLEMENTED",
-        "message": "CrowdSec bouncer removal is not implemented yet"
-    })))
+async fn remove_crowdsec_bouncer(
+    cfg: web::Data<Arc<Config>>,
+    name: web::Path<String>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let remove_result = bouncers::remove(&name).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        remove_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[post("/crowdsec/install")]

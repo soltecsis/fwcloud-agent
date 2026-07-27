@@ -37,14 +37,14 @@ use crate::{
     crowdsec::{
         command::CrowdSecCommand,
         errors::{
-            BOUNCER_CONFLICT, BOUNCER_INVALID, COMMAND_FAILED, FIREWALL_INTEGRATION_INVALID,
-            OPERATION_TIMEOUT,
+            BOUNCER_CONFLICT, BOUNCER_INVALID, BOUNCER_NOT_FOUND, COMMAND_FAILED,
+            FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT,
         },
         models::{
             CrowdSecBouncer, CrowdSecBouncerInstallResponse, CrowdSecBouncerInstallStep,
-            CrowdSecBouncerRegisterResponse, CrowdSecBouncerUninstallResponse,
-            CrowdSecBouncerUninstallStep, CrowdSecBouncersResponse, CrowdSecStepResult,
-            CrowdSecStepStatus,
+            CrowdSecBouncerRegisterResponse, CrowdSecBouncerRemoveResponse,
+            CrowdSecBouncerUninstallResponse, CrowdSecBouncerUninstallStep,
+            CrowdSecBouncersResponse, CrowdSecStepResult, CrowdSecStepStatus,
         },
         packages,
     },
@@ -197,6 +197,39 @@ pub async fn register(name: &str) -> Result<CrowdSecBouncerRegisterResponse> {
     Ok(CrowdSecBouncerRegisterResponse {
         name: name.to_string(),
         api_key,
+    })
+}
+
+pub async fn remove(name: &str) -> Result<CrowdSecBouncerRemoveResponse> {
+    validate_bouncer_name(name)?;
+
+    if !list()
+        .await?
+        .bouncers
+        .iter()
+        .any(|bouncer| bouncer.name == name)
+    {
+        return Err(FwcError::crowdsec(
+            BOUNCER_NOT_FOUND,
+            "CrowdSec bouncer is not registered",
+        ));
+    }
+
+    if name == FWCLOUD_BOUNCER_NAME {
+        return Err(FwcError::crowdsec(
+            BOUNCER_CONFLICT,
+            "Use the FWCloud local bouncer uninstall operation",
+        ));
+    }
+
+    debug!("Removing CrowdSec bouncer: {}", name);
+    CrowdSecCommand::cscli(&["bouncers", "delete", name])?
+        .execute()
+        .await?;
+
+    Ok(CrowdSecBouncerRemoveResponse {
+        name: name.to_string(),
+        message: "CrowdSec bouncer is removed".to_string(),
     })
 }
 
