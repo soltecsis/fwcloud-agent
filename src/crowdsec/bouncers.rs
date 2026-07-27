@@ -30,16 +30,17 @@ use std::{
 
 use log::debug;
 use serde::Serialize;
+use serde_json::Value;
 use tokio::{fs, process::Command, time::timeout};
 
 use crate::{
     crowdsec::{
         command::CrowdSecCommand,
-        errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
+        errors::{COMMAND_FAILED, FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
         models::{
-            CrowdSecBouncerInstallResponse, CrowdSecBouncerInstallStep,
-            CrowdSecBouncerUninstallResponse, CrowdSecBouncerUninstallStep, CrowdSecStepResult,
-            CrowdSecStepStatus,
+            CrowdSecBouncer, CrowdSecBouncerInstallResponse, CrowdSecBouncerInstallStep,
+            CrowdSecBouncerUninstallResponse, CrowdSecBouncerUninstallStep,
+            CrowdSecBouncersResponse, CrowdSecStepResult, CrowdSecStepStatus,
         },
         packages,
     },
@@ -140,6 +141,51 @@ pub async fn status() -> Result<CrowdSecBouncerIntegrationStatus> {
         service_running,
         unmanaged_firewall_rules,
     ))
+}
+
+pub async fn list() -> Result<CrowdSecBouncersResponse> {
+    let output = CrowdSecCommand::cscli(&["bouncers", "list", "-o", "json"])?
+        .execute()
+        .await?;
+    let value = serde_json::from_str::<Value>(output.stdout())
+        .map_err(|_| FwcError::crowdsec(COMMAND_FAILED, "Unable to read CrowdSec bouncer list"))?;
+
+    Ok(CrowdSecBouncersResponse {
+        bouncers: bouncers_from_json(&value),
+    })
+}
+
+fn bouncers_from_json(value: &Value) -> Vec<CrowdSecBouncer> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(bouncer_from_json)
+        .collect()
+}
+
+fn bouncer_from_json(value: &Value) -> Option<CrowdSecBouncer> {
+    Some(CrowdSecBouncer {
+        name: value_as_string(value.get("name"))?,
+        bouncer_type: optional_string(value.get("type")),
+        revoked: value
+            .get("revoked")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        last_pull: optional_string(value.get("last_pull")),
+    })
+}
+
+fn optional_string(value: Option<&Value>) -> Option<String> {
+    value_as_string(value).filter(|value| !value.is_empty())
+}
+
+fn value_as_string(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
 }
 
 async fn blacklist_ipset_status(name: &'static str) -> Result<CrowdSecIpSetStatus> {

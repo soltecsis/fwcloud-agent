@@ -191,7 +191,7 @@ pub struct CrowdSecServiceStatus {
 #[derive(Debug, Serialize)]
 pub struct CrowdSecFirewallBouncerStatus {
     pub installed: bool,
-    pub integration: crate::crowdsec::bouncer::CrowdSecBouncerIntegrationStatus,
+    pub integration: crate::crowdsec::bouncers::CrowdSecBouncerIntegrationStatus,
 }
 
 #[derive(Debug, Serialize)]

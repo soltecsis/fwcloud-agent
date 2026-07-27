@@ -108,11 +108,11 @@ pub async fn install_firewall_bouncer_package() -> Result<bool> {
     let package_manager = detect_package_manager().await?;
     configure_repository(package_manager).await?;
 
-    if package_is_installed(package_manager, super::bouncer::FIREWALL_BOUNCER_PACKAGE).await? {
+    if package_is_installed(package_manager, super::bouncers::FIREWALL_BOUNCER_PACKAGE).await? {
         return Ok(false);
     }
 
-    install_package(package_manager, super::bouncer::FIREWALL_BOUNCER_PACKAGE).await?;
+    install_package(package_manager, super::bouncers::FIREWALL_BOUNCER_PACKAGE).await?;
     Ok(true)
 }
 
@@ -124,7 +124,7 @@ pub async fn package_status() -> Result<CrowdSecPackageStatus> {
         ipset_installed: package_is_installed(package_manager, "ipset").await?,
         firewall_bouncer_installed: package_is_installed(
             package_manager,
-            super::bouncer::FIREWALL_BOUNCER_PACKAGE,
+            super::bouncers::FIREWALL_BOUNCER_PACKAGE,
         )
         .await?,
     })

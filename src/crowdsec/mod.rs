@@ -21,7 +21,7 @@
 */
 
 pub mod alerts;
-pub mod bouncer;
+pub mod bouncers;
 pub mod collections;
 pub mod command;
 pub mod console;

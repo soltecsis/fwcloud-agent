@@ -27,7 +27,7 @@ use tokio::{process::Command, time::timeout};
 
 use crate::{
     crowdsec::{
-        bouncer,
+        bouncers,
         errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
         models::{CrowdSecFirewallBouncerStatus, CrowdSecServiceStatus, CrowdSecStatusResponse},
         packages,
@@ -40,7 +40,7 @@ const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub async fn status() -> Result<CrowdSecStatusResponse> {
     let packages = packages::package_status().await?;
-    let bouncer_status = bouncer::status().await?;
+    let bouncer_status = bouncers::status().await?;
 
     Ok(CrowdSecStatusResponse {
         crowdsec: CrowdSecServiceStatus {
