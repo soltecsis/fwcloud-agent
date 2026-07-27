@@ -20,6 +20,7 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+pub const ALERTS_INVALID: &str = "CROWDSEC_ALERTS_INVALID";
 pub const COMMAND_FAILED: &str = "CROWDSEC_COMMAND_FAILED";
 pub const COLLECTION_CONFLICT: &str = "CROWDSEC_COLLECTION_CONFLICT";
 pub const COLLECTION_INVALID: &str = "CROWDSEC_COLLECTION_INVALID";

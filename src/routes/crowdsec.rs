@@ -28,7 +28,7 @@ use log::debug;
 use crate::{
     config::Config,
     crowdsec::{
-        bouncer, collections, console, decisions, install,
+        alerts, bouncer, collections, console, decisions, install,
         models::{
             CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
             CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
@@ -244,11 +244,23 @@ async fn flush_crowdsec_decisions(
 }
 
 #[get("/crowdsec/alerts")]
-async fn crowdsec_alerts(_query: web::Query<CrowdSecAlertsQuery>) -> Result<HttpResponse> {
-    Ok(HttpResponse::NotImplemented().json(serde_json::json!({
-        "code": "CROWDSEC_ALERTS_NOT_IMPLEMENTED",
-        "message": "CrowdSec alert listing is not implemented yet"
-    })))
+async fn crowdsec_alerts(
+    cfg: web::Data<Arc<Config>>,
+    query: web::Query<CrowdSecAlertsQuery>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let alerts_result = alerts::list(&query).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        alerts_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[post("/crowdsec/install")]
