@@ -27,7 +27,7 @@ use tokio::{process::Command, time::timeout};
 
 use crate::{
     crowdsec::{
-        bouncer,
+        bouncers,
         errors::{COMMAND_FAILED, OPERATION_TIMEOUT, UNINSTALL_CONFIRMATION_REQUIRED},
         models::{
             CrowdSecDataRetention, CrowdSecStepResult, CrowdSecStepStatus,
@@ -55,7 +55,7 @@ pub async fn uninstall() -> Result<CrowdSecUninstallResponse> {
     info!("Uninstalling CrowdSec services and packages while preserving data");
 
     let mut steps = Vec::new();
-    let bouncer_uninstall = bouncer::uninstall().await?;
+    let bouncer_uninstall = bouncers::uninstall().await?;
     steps.push(bouncer_uninstall_step(&bouncer_uninstall));
     steps.push(disable_service(CrowdSecUninstallStep::CrowdSecService, "crowdsec.service").await?);
     steps.push(packages::uninstall_packages().await?);

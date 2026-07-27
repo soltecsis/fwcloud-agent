@@ -144,6 +144,38 @@ pub struct CrowdSecBouncerUninstallResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct CrowdSecBouncer {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub bouncer_type: Option<String>,
+    pub revoked: bool,
+    pub last_pull: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecBouncersResponse {
+    pub bouncers: Vec<CrowdSecBouncer>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecBouncerRegisterRequest {
+    pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct CrowdSecBouncerRegisterResponse {
+    pub name: String,
+    pub api_key: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecBouncerRemoveResponse {
+    pub name: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct CrowdSecPackageStatus {
     pub crowdsec_installed: bool,
     pub ipset_installed: bool,
@@ -159,7 +191,7 @@ pub struct CrowdSecServiceStatus {
 #[derive(Debug, Serialize)]
 pub struct CrowdSecFirewallBouncerStatus {
     pub installed: bool,
-    pub integration: crate::crowdsec::bouncer::CrowdSecBouncerIntegrationStatus,
+    pub integration: crate::crowdsec::bouncers::CrowdSecBouncerIntegrationStatus,
 }
 
 #[derive(Debug, Serialize)]

@@ -28,13 +28,13 @@ use log::debug;
 use crate::{
     config::Config,
     crowdsec::{
-        alerts, bouncer, collections, console, decisions, install,
+        alerts, bouncers, collections, console, decisions, install,
         models::{
-            CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerUninstallRequest,
-            CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
-            CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
-            CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
-            CrowdSecInstallRequest, CrowdSecUninstallRequest,
+            CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerRegisterRequest,
+            CrowdSecBouncerUninstallRequest, CrowdSecCollectionInstallRequest,
+            CrowdSecCollectionRemoveRequest, CrowdSecCollectionUpdateRequest,
+            CrowdSecCollectionsQuery, CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest,
+            CrowdSecDecisionsQuery, CrowdSecInstallRequest, CrowdSecUninstallRequest,
         },
         status, uninstall,
     },
@@ -263,6 +263,63 @@ async fn crowdsec_alerts(
     Ok(HttpResponse::Ok().json(response))
 }
 
+#[get("/crowdsec/bouncers")]
+async fn crowdsec_bouncers(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let bouncers_result = bouncers::list().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        bouncers_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/bouncers/register")]
+async fn register_crowdsec_bouncer(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecBouncerRegisterRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let register_result = bouncers::register(&request.name).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        register_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[delete("/crowdsec/bouncers/{name}")]
+async fn remove_crowdsec_bouncer(
+    cfg: web::Data<Arc<Config>>,
+    name: web::Path<String>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let remove_result = bouncers::remove(&name).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        remove_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
 #[post("/crowdsec/install")]
 async fn install_crowdsec(
     cfg: web::Data<Arc<Config>>,
@@ -316,7 +373,7 @@ async fn install_crowdsec_bouncer(
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let install_result = bouncer::install().await;
+        let install_result = bouncers::install().await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         install_result?
@@ -338,7 +395,7 @@ async fn uninstall_crowdsec_bouncer(
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let uninstall_result = bouncer::uninstall().await;
+        let uninstall_result = bouncers::uninstall().await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         uninstall_result?
