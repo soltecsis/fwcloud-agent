@@ -161,13 +161,7 @@ pub async fn list() -> Result<CrowdSecBouncersResponse> {
 
 pub async fn register(name: &str) -> Result<CrowdSecBouncerRegisterResponse> {
     validate_bouncer_name(name)?;
-
-    if name == FWCLOUD_BOUNCER_NAME {
-        return Err(FwcError::crowdsec(
-            BOUNCER_CONFLICT,
-            "The FWCloud bouncer name is reserved",
-        ));
-    }
+    reject_fwcloud_bouncer(name, "The FWCloud bouncer name is reserved")?;
 
     if list()
         .await?
@@ -185,19 +179,8 @@ pub async fn register(name: &str) -> Result<CrowdSecBouncerRegisterResponse> {
     let output = CrowdSecCommand::cscli(&["bouncers", "add", name, "-o", "raw"])?
         .execute()
         .await?;
-    let api_key = output.stdout().trim().to_string();
 
-    if !valid_api_key(&api_key) {
-        return Err(FwcError::crowdsec(
-            COMMAND_FAILED,
-            "CrowdSec bouncer did not return a valid API key",
-        ));
-    }
-
-    Ok(CrowdSecBouncerRegisterResponse {
-        name: name.to_string(),
-        api_key,
-    })
+    bouncer_register_response(name, output.stdout())
 }
 
 pub async fn remove(name: &str) -> Result<CrowdSecBouncerRemoveResponse> {
@@ -215,12 +198,7 @@ pub async fn remove(name: &str) -> Result<CrowdSecBouncerRemoveResponse> {
         ));
     }
 
-    if name == FWCLOUD_BOUNCER_NAME {
-        return Err(FwcError::crowdsec(
-            BOUNCER_CONFLICT,
-            "Use the FWCloud local bouncer uninstall operation",
-        ));
-    }
+    reject_fwcloud_bouncer(name, "Use the FWCloud local bouncer uninstall operation")?;
 
     debug!("Removing CrowdSec bouncer: {}", name);
     CrowdSecCommand::cscli(&["bouncers", "delete", name])?
@@ -280,6 +258,30 @@ fn validate_bouncer_name(name: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn reject_fwcloud_bouncer(name: &str, message: &'static str) -> Result<()> {
+    if name == FWCLOUD_BOUNCER_NAME {
+        Err(FwcError::crowdsec(BOUNCER_CONFLICT, message))
+    } else {
+        Ok(())
+    }
+}
+
+fn bouncer_register_response(name: &str, output: &str) -> Result<CrowdSecBouncerRegisterResponse> {
+    let api_key = output.trim().to_string();
+
+    if !valid_api_key(&api_key) {
+        return Err(FwcError::crowdsec(
+            COMMAND_FAILED,
+            "CrowdSec bouncer did not return a valid API key",
+        ));
+    }
+
+    Ok(CrowdSecBouncerRegisterResponse {
+        name: name.to_string(),
+        api_key,
+    })
 }
 
 async fn blacklist_ipset_status(name: &'static str) -> Result<CrowdSecIpSetStatus> {
@@ -1028,10 +1030,15 @@ fn set_only_configuration_contents(
 #[cfg(test)]
 mod tests {
     use super::{
-        configuration_is_set_only, firewall_rules_contain_unmanaged_crowdsec, integration_status,
-        set_only_configuration_contents, BouncerConfigurationState,
-        CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig, CrowdSecIpSetStatus,
-        IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
+        bouncer_register_response, bouncers_from_json, configuration_is_set_only,
+        firewall_rules_contain_unmanaged_crowdsec, integration_status, reject_fwcloud_bouncer,
+        set_only_configuration_contents, validate_bouncer_name, BouncerConfigurationState,
+        CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse,
+        CrowdSecIpSetStatus, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
+    };
+    use crate::{
+        crowdsec::errors::{BOUNCER_CONFLICT, BOUNCER_INVALID, COMMAND_FAILED},
+        errors::FwcError,
     };
 
     fn ipset_status(name: &'static str, exists: bool) -> CrowdSecIpSetStatus {
@@ -1074,5 +1081,76 @@ mod tests {
         );
         assert!(status.managed_configuration);
         assert!(!serde_json::to_string(&status).unwrap().contains("api_key"));
+    }
+
+    #[test]
+    fn validates_optional_bouncer_names() {
+        assert!(validate_bouncer_name("nginx-prod_01.example").is_ok());
+
+        for name in ["", "invalid name", "invalid/name", "invalid\nname"] {
+            let error = validate_bouncer_name(name).unwrap_err();
+            assert!(matches!(
+                error,
+                FwcError::CrowdSec {
+                    code: BOUNCER_INVALID,
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn protects_the_fwcloud_bouncer_from_generic_operations() {
+        let error = reject_fwcloud_bouncer(
+            FWCLOUD_BOUNCER_NAME,
+            "Use the FWCloud local bouncer uninstall operation",
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: BOUNCER_CONFLICT,
+                ..
+            }
+        ));
+        assert!(reject_fwcloud_bouncer("nginx-prod", "unused").is_ok());
+    }
+
+    #[test]
+    fn returns_a_generated_key_only_from_the_registration_response() {
+        let response = bouncer_register_response("nginx-prod", "generated-key\n").unwrap();
+
+        assert_eq!(response.name, "nginx-prod");
+        assert_eq!(response.api_key, "generated-key");
+        assert!(bouncer_register_response("nginx-prod", "\n").is_err());
+        let error = match bouncer_register_response("nginx-prod", "invalid\nkey") {
+            Err(error) => error,
+            Ok(_) => panic!("an API key containing a control character must be rejected"),
+        };
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: COMMAND_FAILED,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn bouncer_lists_do_not_serialize_api_keys() {
+        let response = CrowdSecBouncersResponse {
+            bouncers: bouncers_from_json(&serde_json::json!([{
+                "name": "nginx-prod",
+                "type": "",
+                "api_key": "generated-key",
+                "revoked": false,
+                "last_pull": "2026-07-27T10:00:00Z"
+            }])),
+        };
+
+        let serialized = serde_json::to_string(&response).unwrap();
+        assert!(!serialized.contains("api_key"));
+        assert!(!serialized.contains("generated-key"));
+        assert!(response.bouncers[0].bouncer_type.is_none());
     }
 }
