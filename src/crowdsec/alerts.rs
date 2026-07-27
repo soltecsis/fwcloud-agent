@@ -192,3 +192,33 @@ fn value_as_string(value: Option<&Value>) -> Option<String> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{list_limit, validate_optional_duration, validate_optional_scenario};
+    use crate::{crowdsec::errors::ALERTS_INVALID, errors::FwcError};
+
+    #[test]
+    fn alert_list_limit_is_bounded() {
+        assert_eq!(list_limit(None).unwrap(), 50);
+        assert_eq!(list_limit(Some(1)).unwrap(), 1);
+        assert_eq!(list_limit(Some(100)).unwrap(), 100);
+
+        let error = list_limit(Some(101)).unwrap_err();
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: ALERTS_INVALID,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn alert_filters_reject_control_characters() {
+        assert!(validate_optional_duration(Some("4h")).is_ok());
+        assert!(validate_optional_duration(Some("4h\n")).is_err());
+        assert!(validate_optional_scenario(Some("crowdsecurity/ssh-bf")).is_ok());
+        assert!(validate_optional_scenario(Some("ssh\n-bf")).is_err());
+    }
+}

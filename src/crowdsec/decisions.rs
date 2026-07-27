@@ -268,7 +268,7 @@ fn validate_decision_id(id: &str) -> Result<()> {
     let valid = !id.is_empty()
         && id.len() <= 19
         && id.bytes().all(|character| character.is_ascii_digit())
-        && id.parse::<u64>().is_ok();
+        && id.parse::<u64>().is_ok_and(|id| id > 0);
 
     if valid {
         Ok(())
@@ -387,5 +387,52 @@ fn value_as_string(value: Option<&Value>) -> Option<String> {
         Value::String(value) => Some(value.to_string()),
         Value::Number(value) => Some(value.to_string()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{list_limit, require_flush_confirmation, validate_decision_id};
+    use crate::{
+        crowdsec::errors::{DECISIONS_CONFIRMATION_REQUIRED, DECISIONS_INVALID},
+        errors::FwcError,
+    };
+
+    #[test]
+    fn flush_requires_explicit_confirmation() {
+        assert!(require_flush_confirmation(true).is_ok());
+
+        let error = require_flush_confirmation(false).unwrap_err();
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: DECISIONS_CONFIRMATION_REQUIRED,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn decision_list_limit_is_bounded() {
+        assert_eq!(list_limit(None).unwrap(), 50);
+        assert_eq!(list_limit(Some(1)).unwrap(), 1);
+        assert_eq!(list_limit(Some(100)).unwrap(), 100);
+
+        let error = list_limit(Some(101)).unwrap_err();
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: DECISIONS_INVALID,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn decision_id_must_be_a_positive_integer() {
+        assert!(validate_decision_id("123").is_ok());
+        assert!(validate_decision_id("0").is_err());
+        assert!(validate_decision_id("invalid").is_err());
+        assert!(validate_decision_id("1;rm").is_err());
     }
 }
