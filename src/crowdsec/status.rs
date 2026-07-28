@@ -47,10 +47,21 @@ const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const DECISION_COUNT_LIMIT: u32 = 100;
 
 pub async fn status() -> Result<CrowdSecStatusResponse> {
-    let packages = packages::package_status().await?;
-    let bouncer_status = bouncers::status().await?;
-    let crowdsec_running =
-        packages.crowdsec_installed && service_is_running("crowdsec.service").await?;
+    let (packages, package_status_error) = match packages::package_status().await {
+        Ok(packages) => (packages, None),
+        Err(_) => (
+            unavailable_package_status(),
+            Some("Unable to determine CrowdSec package status"),
+        ),
+    };
+    let (bouncer_status, bouncer_status_error) = match bouncers::status().await {
+        Ok(status) => (status, None),
+        Err(_) => (
+            unavailable_bouncer_status(),
+            Some("Unable to determine CrowdSec Firewall Bouncer status"),
+        ),
+    };
+    let (crowdsec_running, service_status_error) = crowdsec_service_status(&packages).await;
     let lapi_status = local_api_status().await;
     let community_blocklist_status = community_blocklist_status().await;
     let active_decisions = active_decision_count().await;
@@ -63,6 +74,9 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
         &bouncer_status,
         &active_decisions,
         &installed_collections,
+        package_status_error,
+        service_status_error,
+        bouncer_status_error,
     );
 
     Ok(CrowdSecStatusResponse {
@@ -85,6 +99,43 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
     })
 }
 
+fn unavailable_package_status() -> CrowdSecPackageStatus {
+    CrowdSecPackageStatus {
+        crowdsec_installed: false,
+        ipset_installed: false,
+        firewall_bouncer_installed: false,
+    }
+}
+
+fn unavailable_bouncer_status() -> bouncers::CrowdSecBouncerIntegrationStatus {
+    bouncers::CrowdSecBouncerIntegrationStatus {
+        state: bouncers::CrowdSecBouncerIntegrationState::Error,
+        ipv4_blacklist: bouncers::CrowdSecIpSetStatus {
+            name: bouncers::IPSET_V4_BLACKLIST,
+            exists: false,
+        },
+        ipv6_blacklist: bouncers::CrowdSecIpSetStatus {
+            name: bouncers::IPSET_V6_BLACKLIST,
+            exists: false,
+        },
+        managed_configuration: false,
+        unmanaged_firewall_rules: false,
+        service_running: false,
+        message: "Unable to determine CrowdSec Firewall Bouncer status".to_string(),
+    }
+}
+
+async fn crowdsec_service_status(packages: &CrowdSecPackageStatus) -> (bool, Option<&'static str>) {
+    if !packages.crowdsec_installed {
+        return (false, None);
+    }
+
+    match service_is_running("crowdsec.service").await {
+        Ok(running) => (running, None),
+        Err(_) => (false, Some("Unable to determine CrowdSec service status")),
+    }
+}
+
 fn status_warnings(
     packages: &CrowdSecPackageStatus,
     crowdsec_running: bool,
@@ -93,13 +144,26 @@ fn status_warnings(
     integration: &bouncers::CrowdSecBouncerIntegrationStatus,
     active_decisions: &CrowdSecStatusCount,
     installed_collections: &CrowdSecStatusCount,
+    package_status_error: Option<&str>,
+    service_status_error: Option<&str>,
+    bouncer_status_error: Option<&str>,
 ) -> Vec<CrowdSecStatusWarning> {
     let mut warnings = Vec::new();
 
-    if !packages.crowdsec_installed {
+    if let Some(message) = package_status_error {
+        warnings.push(CrowdSecStatusWarning {
+            component: "packages".to_string(),
+            message: message.to_string(),
+        });
+    } else if !packages.crowdsec_installed {
         warnings.push(CrowdSecStatusWarning {
             component: "crowdsec".to_string(),
             message: "CrowdSec package is not installed".to_string(),
+        });
+    } else if let Some(message) = service_status_error {
+        warnings.push(CrowdSecStatusWarning {
+            component: "crowdsec".to_string(),
+            message: message.to_string(),
         });
     } else if !crowdsec_running {
         warnings.push(CrowdSecStatusWarning {
@@ -108,21 +172,26 @@ fn status_warnings(
         });
     }
 
-    if !packages.firewall_bouncer_installed {
+    if package_status_error.is_none() && !packages.firewall_bouncer_installed {
         warnings.push(CrowdSecStatusWarning {
             component: "firewall_bouncer".to_string(),
             message: "CrowdSec Firewall Bouncer package is not installed".to_string(),
         });
     }
 
-    if !packages.ipset_installed {
+    if package_status_error.is_none() && !packages.ipset_installed {
         warnings.push(CrowdSecStatusWarning {
             component: "ipset".to_string(),
             message: "IPSet package is not installed".to_string(),
         });
     }
 
-    if integration.state != bouncers::CrowdSecBouncerIntegrationState::Ready {
+    if let Some(message) = bouncer_status_error {
+        warnings.push(CrowdSecStatusWarning {
+            component: "firewall_bouncer".to_string(),
+            message: message.to_string(),
+        });
+    } else if integration.state != bouncers::CrowdSecBouncerIntegrationState::Ready {
         warnings.push(CrowdSecStatusWarning {
             component: "firewall_bouncer".to_string(),
             message: integration.message.clone(),
@@ -327,4 +396,116 @@ async fn service_is_running(service: &str) -> Result<bool> {
     })?;
 
     Ok(output.status.success())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        crowdsec_version_from_output, status_warnings, unavailable_bouncer_status,
+        unavailable_package_status,
+    };
+    use crate::crowdsec::{
+        bouncers::{
+            CrowdSecBouncerIntegrationState, CrowdSecBouncerIntegrationStatus, CrowdSecIpSetStatus,
+            IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
+        },
+        models::{
+            CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus, CrowdSecHealthState,
+            CrowdSecHealthStatus, CrowdSecServiceStatus, CrowdSecStatusCount,
+            CrowdSecStatusResponse,
+        },
+    };
+
+    fn ready_health() -> CrowdSecHealthStatus {
+        CrowdSecHealthStatus {
+            state: CrowdSecHealthState::Ready,
+            message: "ready".to_string(),
+        }
+    }
+
+    fn ready_count() -> CrowdSecStatusCount {
+        CrowdSecStatusCount {
+            count: Some(0),
+            limit: None,
+            truncated: false,
+            state: CrowdSecHealthState::Ready,
+            message: "ready".to_string(),
+        }
+    }
+
+    fn ready_bouncer_status() -> CrowdSecBouncerIntegrationStatus {
+        CrowdSecBouncerIntegrationStatus {
+            state: CrowdSecBouncerIntegrationState::Ready,
+            ipv4_blacklist: CrowdSecIpSetStatus {
+                name: IPSET_V4_BLACKLIST,
+                exists: true,
+            },
+            ipv6_blacklist: CrowdSecIpSetStatus {
+                name: IPSET_V6_BLACKLIST,
+                exists: true,
+            },
+            managed_configuration: false,
+            unmanaged_firewall_rules: false,
+            service_running: true,
+            message: "ready".to_string(),
+        }
+    }
+
+    #[test]
+    fn reads_the_version_written_by_crowdsec_logger() {
+        let output = "2026/07/28 10:00:00 version: v1.7.0\nCodename: test";
+
+        assert_eq!(
+            crowdsec_version_from_output(output).as_deref(),
+            Some("v1.7.0")
+        );
+    }
+
+    #[test]
+    fn represents_partial_health_failures_as_warnings() {
+        let packages = unavailable_package_status();
+        let bouncer = unavailable_bouncer_status();
+        let warnings = status_warnings(
+            &packages,
+            false,
+            &ready_health(),
+            &ready_health(),
+            &bouncer,
+            &ready_count(),
+            &ready_count(),
+            Some("Unable to determine CrowdSec package status"),
+            None,
+            Some("Unable to determine CrowdSec Firewall Bouncer status"),
+        );
+
+        assert_eq!(warnings.len(), 2);
+        assert_eq!(warnings[0].component, "packages");
+        assert_eq!(warnings[1].component, "firewall_bouncer");
+    }
+
+    #[test]
+    fn status_contract_does_not_include_credential_fields() {
+        let response = CrowdSecStatusResponse {
+            crowdsec: CrowdSecServiceStatus {
+                installed: true,
+                running: true,
+                version: Some("v1.7.0".to_string()),
+            },
+            ipset_installed: true,
+            lapi: ready_health(),
+            community_blocklist: ready_health(),
+            firewall_bouncer: CrowdSecFirewallBouncerStatus {
+                installed: true,
+                backend: CrowdSecFirewallBackend::Iptables,
+                integration: ready_bouncer_status(),
+            },
+            active_decisions: ready_count(),
+            installed_collections: ready_count(),
+            warnings: vec![],
+        };
+
+        let serialized = serde_json::to_string(&response).unwrap();
+        assert!(!serialized.contains("api_key"));
+        assert!(!serialized.contains("enrollment_key"));
+    }
 }
