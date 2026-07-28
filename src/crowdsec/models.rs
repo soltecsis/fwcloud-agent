@@ -208,6 +208,8 @@ pub struct CrowdSecHealthStatus {
 #[derive(Debug, Serialize)]
 pub struct CrowdSecStatusCount {
     pub count: Option<u64>,
+    pub limit: Option<u64>,
+    pub truncated: bool,
     pub state: CrowdSecHealthState,
     pub message: String,
 }

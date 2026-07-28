@@ -27,15 +27,15 @@ use tokio::{process::Command, time::timeout};
 
 use crate::{
     crowdsec::{
-        bouncers,
+        bouncers, collections,
         command::CrowdSecCommand,
-        console,
+        console, decisions,
         errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
         models::{
-            CrowdSecConsoleState, CrowdSecConsoleStatusResponse, CrowdSecFirewallBackend,
-            CrowdSecFirewallBouncerStatus, CrowdSecHealthState, CrowdSecHealthStatus,
-            CrowdSecPackageStatus, CrowdSecServiceStatus, CrowdSecStatusCount,
-            CrowdSecStatusResponse, CrowdSecStatusWarning,
+            CrowdSecConsoleState, CrowdSecConsoleStatusResponse, CrowdSecDecisionsQuery,
+            CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus, CrowdSecHealthState,
+            CrowdSecHealthStatus, CrowdSecPackageStatus, CrowdSecServiceStatus,
+            CrowdSecStatusCount, CrowdSecStatusResponse, CrowdSecStatusWarning,
         },
         packages,
     },
@@ -44,6 +44,7 @@ use crate::{
 
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+const DECISION_COUNT_LIMIT: u32 = 100;
 
 pub async fn status() -> Result<CrowdSecStatusResponse> {
     let packages = packages::package_status().await?;
@@ -52,12 +53,16 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
         packages.crowdsec_installed && service_is_running("crowdsec.service").await?;
     let lapi_status = local_api_status().await;
     let community_blocklist_status = community_blocklist_status().await;
+    let active_decisions = active_decision_count().await;
+    let installed_collections = installed_collection_count().await;
     let warnings = status_warnings(
         &packages,
         crowdsec_running,
         &lapi_status,
         &community_blocklist_status,
         &bouncer_status,
+        &active_decisions,
+        &installed_collections,
     );
 
     Ok(CrowdSecStatusResponse {
@@ -74,10 +79,8 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
             backend: CrowdSecFirewallBackend::Iptables,
             integration: bouncer_status,
         },
-        active_decisions: pending_count_status("Active decision count is not collected yet"),
-        installed_collections: pending_count_status(
-            "Installed collection count is not collected yet",
-        ),
+        active_decisions,
+        installed_collections,
         warnings,
     })
 }
@@ -88,6 +91,8 @@ fn status_warnings(
     lapi: &CrowdSecHealthStatus,
     community_blocklist: &CrowdSecHealthStatus,
     integration: &bouncers::CrowdSecBouncerIntegrationStatus,
+    active_decisions: &CrowdSecStatusCount,
+    installed_collections: &CrowdSecStatusCount,
 ) -> Vec<CrowdSecStatusWarning> {
     let mut warnings = Vec::new();
 
@@ -126,8 +131,30 @@ fn status_warnings(
 
     append_health_warning(&mut warnings, "lapi", lapi);
     append_health_warning(&mut warnings, "community_blocklist", community_blocklist);
+    append_count_warning(&mut warnings, "active_decisions", active_decisions);
+    append_count_warning(
+        &mut warnings,
+        "installed_collections",
+        installed_collections,
+    );
 
     warnings
+}
+
+fn append_count_warning(
+    warnings: &mut Vec<CrowdSecStatusWarning>,
+    component: &str,
+    count: &CrowdSecStatusCount,
+) {
+    if !matches!(
+        count.state,
+        CrowdSecHealthState::Ready | CrowdSecHealthState::Unknown
+    ) {
+        warnings.push(CrowdSecStatusWarning {
+            component: component.to_string(),
+            message: count.message.clone(),
+        });
+    }
 }
 
 fn append_health_warning(
@@ -197,6 +224,63 @@ fn health_error_status(message: &str) -> CrowdSecHealthStatus {
     }
 }
 
+async fn active_decision_count() -> CrowdSecStatusCount {
+    debug!(
+        "Counting local CrowdSec decisions with a maximum of {} entries",
+        DECISION_COUNT_LIMIT
+    );
+    let query = CrowdSecDecisionsQuery {
+        limit: Some(DECISION_COUNT_LIMIT),
+        ..Default::default()
+    };
+
+    match decisions::list(&query).await {
+        Ok(response) => {
+            let count = response.decisions.len() as u64;
+            let truncated = count == DECISION_COUNT_LIMIT as u64;
+            CrowdSecStatusCount {
+                count: Some(count),
+                limit: Some(DECISION_COUNT_LIMIT as u64),
+                truncated,
+                state: CrowdSecHealthState::Ready,
+                message: if truncated {
+                    format!("At least {count} local active CrowdSec decisions")
+                } else {
+                    format!("{count} local active CrowdSec decisions")
+                },
+            }
+        }
+        Err(_) => count_error_status("Unable to count local active CrowdSec decisions"),
+    }
+}
+
+async fn installed_collection_count() -> CrowdSecStatusCount {
+    debug!("Counting installed CrowdSec collections");
+    match collections::list(true).await {
+        Ok(response) => {
+            let count = response.collections.len() as u64;
+            CrowdSecStatusCount {
+                count: Some(count),
+                limit: None,
+                truncated: false,
+                state: CrowdSecHealthState::Ready,
+                message: format!("{count} CrowdSec collections are installed"),
+            }
+        }
+        Err(_) => count_error_status("Unable to count installed CrowdSec collections"),
+    }
+}
+
+fn count_error_status(message: &str) -> CrowdSecStatusCount {
+    CrowdSecStatusCount {
+        count: None,
+        limit: None,
+        truncated: false,
+        state: CrowdSecHealthState::Error,
+        message: message.to_string(),
+    }
+}
+
 async fn crowdsec_version(installed: bool) -> Option<String> {
     if !installed {
         return None;
@@ -220,14 +304,6 @@ fn crowdsec_version_from_output(output: &str) -> Option<String> {
         let version = version.trim();
         (!version.is_empty()).then(|| version.to_string())
     })
-}
-
-fn pending_count_status(message: &str) -> CrowdSecStatusCount {
-    CrowdSecStatusCount {
-        count: None,
-        state: CrowdSecHealthState::Unknown,
-        message: message.to_string(),
-    }
 }
 
 async fn service_is_running(service: &str) -> Result<bool> {
