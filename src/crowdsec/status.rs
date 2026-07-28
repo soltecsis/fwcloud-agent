@@ -34,7 +34,8 @@ use crate::{
         models::{
             CrowdSecConsoleState, CrowdSecConsoleStatusResponse, CrowdSecFirewallBackend,
             CrowdSecFirewallBouncerStatus, CrowdSecHealthState, CrowdSecHealthStatus,
-            CrowdSecServiceStatus, CrowdSecStatusCount, CrowdSecStatusResponse,
+            CrowdSecPackageStatus, CrowdSecServiceStatus, CrowdSecStatusCount,
+            CrowdSecStatusResponse, CrowdSecStatusWarning,
         },
         packages,
     },
@@ -47,13 +48,22 @@ const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 pub async fn status() -> Result<CrowdSecStatusResponse> {
     let packages = packages::package_status().await?;
     let bouncer_status = bouncers::status().await?;
+    let crowdsec_running =
+        packages.crowdsec_installed && service_is_running("crowdsec.service").await?;
     let lapi_status = local_api_status().await;
     let community_blocklist_status = community_blocklist_status().await;
+    let warnings = status_warnings(
+        &packages,
+        crowdsec_running,
+        &lapi_status,
+        &community_blocklist_status,
+        &bouncer_status,
+    );
 
     Ok(CrowdSecStatusResponse {
         crowdsec: CrowdSecServiceStatus {
             installed: packages.crowdsec_installed,
-            running: packages.crowdsec_installed && service_is_running("crowdsec.service").await?,
+            running: crowdsec_running,
             version: crowdsec_version(packages.crowdsec_installed).await,
         },
         ipset_installed: packages.ipset_installed,
@@ -68,8 +78,72 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
         installed_collections: pending_count_status(
             "Installed collection count is not collected yet",
         ),
-        warnings: vec![],
+        warnings,
     })
+}
+
+fn status_warnings(
+    packages: &CrowdSecPackageStatus,
+    crowdsec_running: bool,
+    lapi: &CrowdSecHealthStatus,
+    community_blocklist: &CrowdSecHealthStatus,
+    integration: &bouncers::CrowdSecBouncerIntegrationStatus,
+) -> Vec<CrowdSecStatusWarning> {
+    let mut warnings = Vec::new();
+
+    if !packages.crowdsec_installed {
+        warnings.push(CrowdSecStatusWarning {
+            component: "crowdsec".to_string(),
+            message: "CrowdSec package is not installed".to_string(),
+        });
+    } else if !crowdsec_running {
+        warnings.push(CrowdSecStatusWarning {
+            component: "crowdsec".to_string(),
+            message: "CrowdSec service is not running".to_string(),
+        });
+    }
+
+    if !packages.firewall_bouncer_installed {
+        warnings.push(CrowdSecStatusWarning {
+            component: "firewall_bouncer".to_string(),
+            message: "CrowdSec Firewall Bouncer package is not installed".to_string(),
+        });
+    }
+
+    if !packages.ipset_installed {
+        warnings.push(CrowdSecStatusWarning {
+            component: "ipset".to_string(),
+            message: "IPSet package is not installed".to_string(),
+        });
+    }
+
+    if integration.state != bouncers::CrowdSecBouncerIntegrationState::Ready {
+        warnings.push(CrowdSecStatusWarning {
+            component: "firewall_bouncer".to_string(),
+            message: integration.message.clone(),
+        });
+    }
+
+    append_health_warning(&mut warnings, "lapi", lapi);
+    append_health_warning(&mut warnings, "community_blocklist", community_blocklist);
+
+    warnings
+}
+
+fn append_health_warning(
+    warnings: &mut Vec<CrowdSecStatusWarning>,
+    component: &str,
+    health: &CrowdSecHealthStatus,
+) {
+    if !matches!(
+        health.state,
+        CrowdSecHealthState::Ready | CrowdSecHealthState::Unknown
+    ) {
+        warnings.push(CrowdSecStatusWarning {
+            component: component.to_string(),
+            message: health.message.clone(),
+        });
+    }
 }
 
 async fn local_api_status() -> CrowdSecHealthStatus {
