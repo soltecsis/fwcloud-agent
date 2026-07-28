@@ -186,19 +186,60 @@ pub struct CrowdSecPackageStatus {
 pub struct CrowdSecServiceStatus {
     pub installed: bool,
     pub running: bool,
+    pub version: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecHealthState {
+    Unknown,
+    Ready,
+    Unavailable,
+    Error,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecHealthStatus {
+    pub state: CrowdSecHealthState,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecStatusCount {
+    pub count: Option<u64>,
+    pub state: CrowdSecHealthState,
+    pub message: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecFirewallBackend {
+    Iptables,
 }
 
 #[derive(Debug, Serialize)]
 pub struct CrowdSecFirewallBouncerStatus {
     pub installed: bool,
+    pub backend: CrowdSecFirewallBackend,
     pub integration: crate::crowdsec::bouncers::CrowdSecBouncerIntegrationStatus,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecStatusWarning {
+    pub component: String,
+    pub message: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct CrowdSecStatusResponse {
     pub crowdsec: CrowdSecServiceStatus,
     pub ipset_installed: bool,
+    pub lapi: CrowdSecHealthStatus,
+    pub community_blocklist: CrowdSecHealthStatus,
     pub firewall_bouncer: CrowdSecFirewallBouncerStatus,
+    pub active_decisions: CrowdSecStatusCount,
+    pub installed_collections: CrowdSecStatusCount,
+    pub warnings: Vec<CrowdSecStatusWarning>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]

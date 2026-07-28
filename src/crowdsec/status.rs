@@ -29,7 +29,11 @@ use crate::{
     crowdsec::{
         bouncers,
         errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
-        models::{CrowdSecFirewallBouncerStatus, CrowdSecServiceStatus, CrowdSecStatusResponse},
+        models::{
+            CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus, CrowdSecHealthState,
+            CrowdSecHealthStatus, CrowdSecServiceStatus, CrowdSecStatusCount,
+            CrowdSecStatusResponse,
+        },
         packages,
     },
     errors::{FwcError, Result},
@@ -46,13 +50,39 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
         crowdsec: CrowdSecServiceStatus {
             installed: packages.crowdsec_installed,
             running: packages.crowdsec_installed && service_is_running("crowdsec.service").await?,
+            version: None,
         },
         ipset_installed: packages.ipset_installed,
+        lapi: pending_health_status("Local API status is not collected yet"),
+        community_blocklist: pending_health_status(
+            "Community Blocklist status is not collected yet",
+        ),
         firewall_bouncer: CrowdSecFirewallBouncerStatus {
             installed: packages.firewall_bouncer_installed,
+            backend: CrowdSecFirewallBackend::Iptables,
             integration: bouncer_status,
         },
+        active_decisions: pending_count_status("Active decision count is not collected yet"),
+        installed_collections: pending_count_status(
+            "Installed collection count is not collected yet",
+        ),
+        warnings: vec![],
     })
+}
+
+fn pending_health_status(message: &str) -> CrowdSecHealthStatus {
+    CrowdSecHealthStatus {
+        state: CrowdSecHealthState::Unknown,
+        message: message.to_string(),
+    }
+}
+
+fn pending_count_status(message: &str) -> CrowdSecStatusCount {
+    CrowdSecStatusCount {
+        count: None,
+        state: CrowdSecHealthState::Unknown,
+        message: message.to_string(),
+    }
 }
 
 async fn service_is_running(service: &str) -> Result<bool> {
