@@ -28,6 +28,7 @@ use tokio::{process::Command, time::timeout};
 use crate::{
     crowdsec::{
         bouncers,
+        command::CrowdSecCommand,
         errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
         models::{
             CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus, CrowdSecHealthState,
@@ -50,7 +51,7 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
         crowdsec: CrowdSecServiceStatus {
             installed: packages.crowdsec_installed,
             running: packages.crowdsec_installed && service_is_running("crowdsec.service").await?,
-            version: None,
+            version: crowdsec_version(packages.crowdsec_installed).await,
         },
         ipset_installed: packages.ipset_installed,
         lapi: pending_health_status("Local API status is not collected yet"),
@@ -67,6 +68,31 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
             "Installed collection count is not collected yet",
         ),
         warnings: vec![],
+    })
+}
+
+async fn crowdsec_version(installed: bool) -> Option<String> {
+    if !installed {
+        return None;
+    }
+
+    debug!("Reading CrowdSec version");
+    let output = CrowdSecCommand::cscli(&["version"])
+        .ok()?
+        .execute_allow_failure()
+        .await
+        .ok()?;
+
+    output.succeeded().then(|| {
+        crowdsec_version_from_output(&format!("{}\n{}", output.stdout(), output.stderr()))
+    })?
+}
+
+fn crowdsec_version_from_output(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let (_, version) = line.rsplit_once("version:")?;
+        let version = version.trim();
+        (!version.is_empty()).then(|| version.to_string())
     })
 }
 
