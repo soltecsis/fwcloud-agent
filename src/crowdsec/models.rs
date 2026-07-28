@@ -194,6 +194,7 @@ pub struct CrowdSecServiceStatus {
 pub enum CrowdSecHealthState {
     Unknown,
     Ready,
+    NotConfigured,
     Unavailable,
     Error,
 }

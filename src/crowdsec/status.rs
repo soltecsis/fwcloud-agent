@@ -29,11 +29,12 @@ use crate::{
     crowdsec::{
         bouncers,
         command::CrowdSecCommand,
+        console,
         errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
         models::{
-            CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus, CrowdSecHealthState,
-            CrowdSecHealthStatus, CrowdSecServiceStatus, CrowdSecStatusCount,
-            CrowdSecStatusResponse,
+            CrowdSecConsoleState, CrowdSecConsoleStatusResponse, CrowdSecFirewallBackend,
+            CrowdSecFirewallBouncerStatus, CrowdSecHealthState, CrowdSecHealthStatus,
+            CrowdSecServiceStatus, CrowdSecStatusCount, CrowdSecStatusResponse,
         },
         packages,
     },
@@ -46,6 +47,8 @@ const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 pub async fn status() -> Result<CrowdSecStatusResponse> {
     let packages = packages::package_status().await?;
     let bouncer_status = bouncers::status().await?;
+    let lapi_status = local_api_status().await;
+    let community_blocklist_status = community_blocklist_status().await;
 
     Ok(CrowdSecStatusResponse {
         crowdsec: CrowdSecServiceStatus {
@@ -54,10 +57,8 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
             version: crowdsec_version(packages.crowdsec_installed).await,
         },
         ipset_installed: packages.ipset_installed,
-        lapi: pending_health_status("Local API status is not collected yet"),
-        community_blocklist: pending_health_status(
-            "Community Blocklist status is not collected yet",
-        ),
+        lapi: lapi_status,
+        community_blocklist: community_blocklist_status,
         firewall_bouncer: CrowdSecFirewallBouncerStatus {
             installed: packages.firewall_bouncer_installed,
             backend: CrowdSecFirewallBackend::Iptables,
@@ -69,6 +70,57 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
         ),
         warnings: vec![],
     })
+}
+
+async fn local_api_status() -> CrowdSecHealthStatus {
+    debug!("Checking CrowdSec Local API reachability");
+    let Ok(command) = CrowdSecCommand::cscli(&["lapi", "status"]) else {
+        return health_error_status("Unable to prepare CrowdSec Local API status command");
+    };
+    let output = match command.execute_allow_failure().await {
+        Ok(output) => output,
+        Err(_) => return health_error_status("Unable to determine CrowdSec Local API status"),
+    };
+
+    if output.succeeded() {
+        CrowdSecHealthStatus {
+            state: CrowdSecHealthState::Ready,
+            message: "CrowdSec Local API is reachable".to_string(),
+        }
+    } else {
+        CrowdSecHealthStatus {
+            state: CrowdSecHealthState::Unavailable,
+            message: "CrowdSec Local API is unavailable".to_string(),
+        }
+    }
+}
+
+async fn community_blocklist_status() -> CrowdSecHealthStatus {
+    match console::status().await {
+        Ok(status) => health_status_from_console(status),
+        Err(_) => health_error_status("Unable to determine Community Blocklist status"),
+    }
+}
+
+fn health_status_from_console(status: CrowdSecConsoleStatusResponse) -> CrowdSecHealthStatus {
+    let state = match status.state {
+        CrowdSecConsoleState::NotConfigured => CrowdSecHealthState::NotConfigured,
+        CrowdSecConsoleState::PendingApproval => CrowdSecHealthState::Unknown,
+        CrowdSecConsoleState::Connected => CrowdSecHealthState::Ready,
+        CrowdSecConsoleState::Error => CrowdSecHealthState::Error,
+    };
+
+    CrowdSecHealthStatus {
+        state,
+        message: status.message,
+    }
+}
+
+fn health_error_status(message: &str) -> CrowdSecHealthStatus {
+    CrowdSecHealthStatus {
+        state: CrowdSecHealthState::Error,
+        message: message.to_string(),
+    }
 }
 
 async fn crowdsec_version(installed: bool) -> Option<String> {
@@ -94,13 +146,6 @@ fn crowdsec_version_from_output(output: &str) -> Option<String> {
         let version = version.trim();
         (!version.is_empty()).then(|| version.to_string())
     })
-}
-
-fn pending_health_status(message: &str) -> CrowdSecHealthStatus {
-    CrowdSecHealthStatus {
-        state: CrowdSecHealthState::Unknown,
-        message: message.to_string(),
-    }
 }
 
 fn pending_count_status(message: &str) -> CrowdSecStatusCount {
