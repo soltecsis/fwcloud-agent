@@ -374,12 +374,13 @@ impl OpenVPNStCollectorInner {
             .ok_or_else(|| format!("missing {field_name} field"))
     }
 
-    fn parse_v2_status_session(
+    fn parse_structured_status_session(
         line: &str,
         columns: &OpenVPNStatusClientListColumns,
         sample_timestamp: u64,
+        delimiter: char,
     ) -> std::result::Result<OpenVPNStatusSession, String> {
-        let fields = line.split(',').collect::<Vec<&str>>();
+        let fields = line.split(delimiter).collect::<Vec<&str>>();
         if fields.first() != Some(&"CLIENT_LIST") {
             return Err(String::from("invalid client list record"));
         }
@@ -441,14 +442,18 @@ impl OpenVPNStCollectorInner {
         })
     }
 
-    fn parse_v2_status(
+    fn parse_structured_status(
         lines: &[String],
+        delimiter: char,
     ) -> std::result::Result<(u64, Vec<OpenVPNStatusSession>), String> {
+        let time_prefix = format!("TIME{delimiter}");
+        let client_list_header_prefix = format!("HEADER{delimiter}CLIENT_LIST{delimiter}");
+        let client_list_prefix = format!("CLIENT_LIST{delimiter}");
         let current_update = lines
             .iter()
-            .find_map(|line| line.strip_prefix("TIME,"))
+            .find_map(|line| line.strip_prefix(&time_prefix))
             .and_then(|line| {
-                let fields = line.split(',').collect::<Vec<&str>>();
+                let fields = line.split(delimiter).collect::<Vec<&str>>();
                 fields
                     .get(1)
                     .and_then(|timestamp| timestamp.parse().ok())
@@ -461,9 +466,9 @@ impl OpenVPNStCollectorInner {
             .ok_or_else(|| String::from("missing or invalid update timestamp"))?;
         let header_index = lines
             .iter()
-            .position(|line| line.starts_with("HEADER,CLIENT_LIST,"))
+            .position(|line| line.starts_with(&client_list_header_prefix))
             .ok_or_else(|| String::from("missing client list header"))?;
-        let header = lines[header_index].split(',').collect::<Vec<&str>>();
+        let header = lines[header_index].split(delimiter).collect::<Vec<&str>>();
         let field_index = |field_name: &str| {
             header
                 .iter()
@@ -482,17 +487,33 @@ impl OpenVPNStCollectorInner {
         let mut sessions = vec![];
 
         for (index, line) in lines.iter().enumerate().skip(header_index + 1) {
-            if !line.starts_with("CLIENT_LIST") {
+            if !line.starts_with(&client_list_prefix) {
                 break;
             }
 
-            let session =
-                OpenVPNStCollectorInner::parse_v2_status_session(line, &columns, current_update)
-                    .map_err(|err| format!("invalid client entry in line {}: {err}", index + 1))?;
+            let session = OpenVPNStCollectorInner::parse_structured_status_session(
+                line,
+                &columns,
+                current_update,
+                delimiter,
+            )
+            .map_err(|err| format!("invalid client entry in line {}: {err}", index + 1))?;
             sessions.push(session);
         }
 
         Ok((current_update, sessions))
+    }
+
+    fn parse_v2_status(
+        lines: &[String],
+    ) -> std::result::Result<(u64, Vec<OpenVPNStatusSession>), String> {
+        OpenVPNStCollectorInner::parse_structured_status(lines, ',')
+    }
+
+    fn parse_v3_status(
+        lines: &[String],
+    ) -> std::result::Result<(u64, Vec<OpenVPNStatusSession>), String> {
+        OpenVPNStCollectorInner::parse_structured_status(lines, '\t')
     }
 
     fn collect_status_data(item: &mut OpenVPNStFile) -> std::io::Result<()> {
@@ -519,14 +540,8 @@ impl OpenVPNStCollectorInner {
                     .map_err(std::io::Error::other)?,
                 OpenVPNStatusFormat::V2 => OpenVPNStCollectorInner::parse_v2_status(&lines)
                     .map_err(std::io::Error::other)?,
-                OpenVPNStatusFormat::V3 => {
-                    debug!(
-                        "OpenVPN status file format {:?} detected in {}",
-                        status_format, item.st_file
-                    );
-                    fs::remove_file(&item.tmp_file)?;
-                    return Ok(());
-                }
+                OpenVPNStatusFormat::V3 => OpenVPNStCollectorInner::parse_v3_status(&lines)
+                    .map_err(std::io::Error::other)?,
             };
 
         // Skip the first sampling cycle, this way we avoid collect that of an OpenVPN status
@@ -1214,6 +1229,28 @@ mod tests {
 
         let (sample_timestamp, sessions) =
             OpenVPNStCollectorInner::parse_v2_status(&lines).unwrap();
+
+        assert_eq!(sample_timestamp, 1689951720);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].common_name, "client");
+        assert_eq!(sessions[0].real_address, "1.1.1.1:1194");
+        assert_eq!(sessions[0].bytes_received, 10);
+        assert_eq!(sessions[0].bytes_sent, 20);
+        assert_eq!(sessions[0].connected_since, 1689951660);
+    }
+
+    #[test]
+    fn should_parse_v3_status_file() {
+        let lines = vec![
+            String::from("TITLE\tOpenVPN 2.6.0"),
+            String::from("TIME\t2023-07-21 15:02:00\t1689951720"),
+            String::from("HEADER\tCLIENT_LIST\tCommon Name\tReal Address\tVirtual Address\tVirtual IPv6 Address\tBytes Received\tBytes Sent\tConnected Since\tConnected Since (time_t)\tUsername\tClient ID\tPeer ID\tData Channel Cipher"),
+            String::from("CLIENT_LIST\tclient\t1.1.1.1:1194\t10.0.0.2\t\t10\t20\t2023-07-21 15:01:00\t1689951660\tuser\t1\t2\tAES-256-GCM"),
+            String::from("HEADER\tROUTING_TABLE\tVirtual Address\tCommon Name\tReal Address\tLast Ref"),
+        ];
+
+        let (sample_timestamp, sessions) =
+            OpenVPNStCollectorInner::parse_v3_status(&lines).unwrap();
 
         assert_eq!(sample_timestamp, 1689951720);
         assert_eq!(sessions.len(), 1);
