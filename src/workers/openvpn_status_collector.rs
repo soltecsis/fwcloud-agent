@@ -186,6 +186,20 @@ struct OpenVPNStatusSession {
     sample_timestamp: u64,
 }
 
+impl OpenVPNStatusSession {
+    fn to_cache_record(&self) -> String {
+        format!(
+            "{},{},{},{},{},{}",
+            self.sample_timestamp,
+            self.common_name,
+            self.real_address,
+            self.bytes_received,
+            self.bytes_sent,
+            self.connected_since
+        )
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum OpenVPNStatusFormat {
     V1,
@@ -568,16 +582,7 @@ impl OpenVPNStCollectorInner {
             .open(&item.cache_file)?;
 
         for session in sessions {
-            writeln!(
-                writer,
-                "{},{},{},{},{},{}",
-                session.sample_timestamp,
-                session.common_name,
-                session.real_address,
-                session.bytes_received,
-                session.bytes_sent,
-                session.connected_since
-            )?;
+            writeln!(writer, "{}", session.to_cache_record())?;
         }
 
         // Update the last timestamp for the next iteration.
@@ -1259,5 +1264,41 @@ mod tests {
         assert_eq!(sessions[0].bytes_received, 10);
         assert_eq!(sessions[0].bytes_sent, 20);
         assert_eq!(sessions[0].connected_since, 1689951660);
+    }
+
+    #[test]
+    fn should_normalize_all_status_formats_to_the_same_cache_record() {
+        let v1 = vec![
+            String::from("OpenVPN CLIENT LIST"),
+            String::from("Updated,2023-07-21 15:02:00"),
+            String::from("Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since"),
+            String::from("client,1.1.1.1:1194,10,20,2023-07-21 15:01:00"),
+            String::from("ROUTING TABLE"),
+        ];
+        let v2 = vec![
+            String::from("TITLE,OpenVPN 2.6.0"),
+            String::from("TIME,2023-07-21 15:02:00,1689951720"),
+            String::from("HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,Virtual IPv6 Address,Bytes Received,Bytes Sent,Connected Since,Connected Since (time_t)"),
+            String::from("CLIENT_LIST,client,1.1.1.1:1194,10.0.0.2,,10,20,2023-07-21 15:01:00,1689951660"),
+            String::from("HEADER,ROUTING_TABLE,Virtual Address,Common Name,Real Address,Last Ref"),
+        ];
+        let v3 = vec![
+            String::from("TITLE\tOpenVPN 2.6.0"),
+            String::from("TIME\t2023-07-21 15:02:00\t1689951720"),
+            String::from("HEADER\tCLIENT_LIST\tCommon Name\tReal Address\tVirtual Address\tVirtual IPv6 Address\tBytes Received\tBytes Sent\tConnected Since\tConnected Since (time_t)"),
+            String::from("CLIENT_LIST\tclient\t1.1.1.1:1194\t10.0.0.2\t\t10\t20\t2023-07-21 15:01:00\t1689951660"),
+            String::from("HEADER\tROUTING_TABLE\tVirtual Address\tCommon Name\tReal Address\tLast Ref"),
+        ];
+
+        let (_, v1_sessions) = OpenVPNStCollectorInner::parse_v1_status(&v1).unwrap();
+        let (_, v2_sessions) = OpenVPNStCollectorInner::parse_v2_status(&v2).unwrap();
+        let (_, v3_sessions) = OpenVPNStCollectorInner::parse_v3_status(&v3).unwrap();
+
+        assert_eq!(v1_sessions, v2_sessions);
+        assert_eq!(v2_sessions, v3_sessions);
+        assert_eq!(
+            v1_sessions[0].to_cache_record(),
+            "1689951720,client,1.1.1.1:1194,10,20,1689951660"
+        );
     }
 }
