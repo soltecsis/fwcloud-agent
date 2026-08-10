@@ -276,6 +276,84 @@ impl OpenVPNStCollectorInner {
         None
     }
 
+    fn parse_v1_status_session(
+        line: &str,
+        sample_timestamp: u64,
+    ) -> std::result::Result<OpenVPNStatusSession, String> {
+        let mut fields = line.split(',');
+        let common_name = fields
+            .next()
+            .ok_or_else(|| String::from("missing common name"))?;
+        let real_address = fields
+            .next()
+            .ok_or_else(|| String::from("missing real address"))?;
+        let bytes_received = fields
+            .next()
+            .ok_or_else(|| String::from("missing received byte counter"))?
+            .parse()
+            .map_err(|_| String::from("invalid received byte counter"))?;
+        let bytes_sent = fields
+            .next()
+            .ok_or_else(|| String::from("missing sent byte counter"))?
+            .parse()
+            .map_err(|_| String::from("invalid sent byte counter"))?;
+        let connected_since = fields
+            .next()
+            .and_then(OpenVPNStCollectorInner::convert_to_seconds_since_unix_epoch)
+            .ok_or_else(|| String::from("invalid connected since datetime"))?;
+
+        if fields.next().is_some() {
+            return Err(String::from("unexpected client fields"));
+        }
+
+        Ok(OpenVPNStatusSession {
+            common_name: common_name.to_string(),
+            real_address: real_address.to_string(),
+            bytes_received,
+            bytes_sent,
+            connected_since,
+            sample_timestamp,
+        })
+    }
+
+    fn parse_v1_status(
+        lines: &[String],
+    ) -> std::result::Result<(u64, Vec<OpenVPNStatusSession>), String> {
+        let current_update = lines
+            .iter()
+            .find_map(|line| line.strip_prefix("Updated,"))
+            .and_then(OpenVPNStCollectorInner::convert_to_seconds_since_unix_epoch)
+            .ok_or_else(|| String::from("missing or invalid update timestamp"))?;
+        let client_header = "Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since";
+        let header_index = lines
+            .iter()
+            .position(|line| line == client_header)
+            .ok_or_else(|| String::from("missing client list header"))?;
+        let routing_table_index = lines
+            .iter()
+            .enumerate()
+            .skip(header_index + 1)
+            .find_map(|(index, line)| (line == "ROUTING TABLE").then_some(index))
+            .ok_or_else(|| String::from("missing routing table header"))?;
+
+        let sessions = lines[header_index + 1..routing_table_index]
+            .iter()
+            .enumerate()
+            .map(|(index, line)| {
+                OpenVPNStCollectorInner::parse_v1_status_session(line, current_update).map_err(
+                    |err| {
+                        format!(
+                            "invalid client entry in line {}: {err}",
+                            header_index + index + 2
+                        )
+                    },
+                )
+            })
+            .collect::<std::result::Result<Vec<OpenVPNStatusSession>, String>>()?;
+
+        Ok((current_update, sessions))
+    }
+
     fn collect_status_data(item: &mut OpenVPNStFile) -> std::io::Result<()> {
         if Path::new(&item.cache_file).is_file()
             && fs::metadata(&item.cache_file)?.len() > item.cache_max_size as u64
@@ -294,11 +372,34 @@ impl OpenVPNStCollectorInner {
         let status_format = OpenVPNStCollectorInner::detect_status_format(&lines)
             .ok_or_else(|| std::io::Error::other("Unrecognized OpenVPN status file format"))?;
 
-        if status_format != OpenVPNStatusFormat::V1 {
-            debug!(
-                "OpenVPN status file format {:?} detected in {}",
-                status_format, item.st_file
-            );
+        let (current_update, sessions) = match status_format {
+            OpenVPNStatusFormat::V1 => {
+                OpenVPNStCollectorInner::parse_v1_status(&lines).map_err(std::io::Error::other)?
+            }
+            OpenVPNStatusFormat::V2 | OpenVPNStatusFormat::V3 => {
+                debug!(
+                    "OpenVPN status file format {:?} detected in {}",
+                    status_format, item.st_file
+                );
+                fs::remove_file(&item.tmp_file)?;
+                return Ok(());
+            }
+        };
+
+        // Skip the first sampling cycle, this way we avoid collect that of an OpenVPN status
+        // file that doesn't change in time (for example, because the OpenVPN server is not running).
+        if item.last_update == 0 {
+            fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&item.cache_file)?;
+            item.last_update = current_update;
+            fs::remove_file(&item.tmp_file)?;
+            return Ok(());
+        }
+
+        if current_update == item.last_update {
+            debug!("No new OpenVPN status data found in file: {}", item.st_file);
             fs::remove_file(&item.tmp_file)?;
             return Ok(());
         }
@@ -308,94 +409,17 @@ impl OpenVPNStCollectorInner {
             .create(true)
             .open(&item.cache_file)?;
 
-        let mut current_update: u64 = 0;
-        for (n, line) in lines.iter().enumerate().skip(1) {
-
-            if n > 2 {
-                // End of the OpenVPN status data.
-                if &line[..] == "ROUTING TABLE" {
-                    break;
-                }
-
-                // Convert the Connected Since date string to timestamp.
-                let data: Vec<&str> = line.split(',').collect();
-                if data.len() < 5 {
-                    error!("Bad OpenVPN status file in line {n}: missing client fields");
-                    continue;
-                }
-
-                match OpenVPNStCollectorInner::convert_to_seconds_since_unix_epoch(data[4]) {
-                    Some(connected_since) => {
-                        let session = match (data[2].parse(), data[3].parse()) {
-                            (Ok(bytes_received), Ok(bytes_sent)) => OpenVPNStatusSession {
-                                common_name: data[0].to_string(),
-                                real_address: data[1].to_string(),
-                                bytes_received,
-                                bytes_sent,
-                                connected_since,
-                                sample_timestamp: current_update,
-                            },
-                            _ => {
-                                error!("Bad byte counters in OpenVPN status file in line {n}");
-                                continue;
-                            }
-                        };
-
-                        writeln!(
-                            writer,
-                            "{},{},{},{},{},{}",
-                            session.sample_timestamp,
-                            session.common_name,
-                            session.real_address,
-                            session.bytes_received,
-                            session.bytes_sent,
-                            session.connected_since
-                        )?;
-                    }
-                    None => {
-                        error!("Bad datetime string in OpenVPN status file in line {n}");
-                    }
-                }
-
-                continue;
-            }
-
-            // Line header for the status data: Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since
-            if n == 2 {
-                continue;
-            }
-
-            // If we arrive here we must be over the update info line.
-            if &line[0..8] != "Updated," {
-                error!(
-                    "Bad OpenVPN status file ({}): update line not found",
-                    item.st_file
-                );
-                break;
-            }
-
-            // Get the update timestamp of the current status file and compare it with the
-            // previous one in order to see if we have new data into it.
-            match OpenVPNStCollectorInner::convert_to_seconds_since_unix_epoch(&line[8..]) {
-                Some(ts) => {
-                    current_update = ts;
-                }
-                None => {
-                    error!("Bad datetime string in OpenVPN status file in Updated line");
-                    break;
-                }
-            }
-
-            // Skip the first sampling cycle, this way we avoid collect that of an OpenVPN status
-            // file that doesn't change in time (for example, because the OpenVPN server is not running).
-            if item.last_update == 0 {
-                break;
-            }
-
-            if current_update == item.last_update {
-                debug!("No new OpenVPN status data found in file: {}", item.st_file);
-                break;
-            }
+        for session in sessions {
+            writeln!(
+                writer,
+                "{},{},{},{},{},{}",
+                session.sample_timestamp,
+                session.common_name,
+                session.real_address,
+                session.bytes_received,
+                session.bytes_sent,
+                session.connected_since
+            )?;
         }
 
         // Update the last timestamp for the next iteration.
