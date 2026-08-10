@@ -186,6 +186,13 @@ struct OpenVPNStatusSession {
     sample_timestamp: u64,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum OpenVPNStatusFormat {
+    V1,
+    V2,
+    V3,
+}
+
 struct OpenVPNStCollectorInner {
     openvpn_status_files: Vec<OpenVPNStFile>,
 }
@@ -238,6 +245,37 @@ impl OpenVPNStCollectorInner {
         }
     }
 
+    fn detect_status_format(lines: &[String]) -> Option<OpenVPNStatusFormat> {
+        let first_line = lines.iter().find(|line| !line.trim().is_empty())?;
+
+        if first_line == "OpenVPN CLIENT LIST"
+            && lines.iter().any(|line| line.starts_with("Updated,"))
+            && lines.iter().any(|line| {
+                line == "Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since"
+            })
+        {
+            return Some(OpenVPNStatusFormat::V1);
+        }
+
+        if first_line.starts_with("TITLE,")
+            && lines
+                .iter()
+                .any(|line| line.starts_with("HEADER,CLIENT_LIST,"))
+        {
+            return Some(OpenVPNStatusFormat::V2);
+        }
+
+        if first_line.starts_with("TITLE\t")
+            && lines
+                .iter()
+                .any(|line| line.starts_with("HEADER\tCLIENT_LIST\t"))
+        {
+            return Some(OpenVPNStatusFormat::V3);
+        }
+
+        None
+    }
+
     fn collect_status_data(item: &mut OpenVPNStFile) -> std::io::Result<()> {
         if Path::new(&item.cache_file).is_file()
             && fs::metadata(&item.cache_file)?.len() > item.cache_max_size as u64
@@ -252,14 +290,26 @@ impl OpenVPNStCollectorInner {
         // Open temporary file for reading and data file for writing.
         let f = File::open(&item.tmp_file)?;
         let reader = BufReader::new(&f);
+        let lines = reader.lines().collect::<std::io::Result<Vec<String>>>()?;
+        let status_format = OpenVPNStCollectorInner::detect_status_format(&lines)
+            .ok_or_else(|| std::io::Error::other("Unrecognized OpenVPN status file format"))?;
+
+        if status_format != OpenVPNStatusFormat::V1 {
+            debug!(
+                "OpenVPN status file format {:?} detected in {}",
+                status_format, item.st_file
+            );
+            fs::remove_file(&item.tmp_file)?;
+            return Ok(());
+        }
+
         let mut writer = fs::OpenOptions::new()
             .append(true)
             .create(true)
             .open(&item.cache_file)?;
 
         let mut current_update: u64 = 0;
-        for (n, l) in reader.lines().enumerate().skip(1) {
-            let line = l?;
+        for (n, line) in lines.iter().enumerate().skip(1) {
 
             if n > 2 {
                 // End of the OpenVPN status data.
@@ -903,6 +953,44 @@ mod tests {
     fn should_return_none_with_an_invalid_datetime_string() {
         assert_eq!(
             OpenVPNStCollectorInner::convert_to_seconds_since_unix_epoch("Invalid datetime string"),
+            None
+        );
+    }
+
+    #[test]
+    fn should_detect_openvpn_status_file_formats() {
+        let v1 = vec![
+            String::from("OpenVPN CLIENT LIST"),
+            String::from("Updated,2026-08-10 10:00:00"),
+            String::from("Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since"),
+        ];
+        let v2 = vec![
+            String::from("TITLE,OpenVPN 2.6.0"),
+            String::from("HEADER,CLIENT_LIST,Common Name,Real Address"),
+        ];
+        let v3 = vec![
+            String::from("TITLE\tOpenVPN 2.6.0"),
+            String::from("HEADER\tCLIENT_LIST\tCommon Name\tReal Address"),
+        ];
+
+        assert_eq!(
+            OpenVPNStCollectorInner::detect_status_format(&v1),
+            Some(OpenVPNStatusFormat::V1)
+        );
+        assert_eq!(
+            OpenVPNStCollectorInner::detect_status_format(&v2),
+            Some(OpenVPNStatusFormat::V2)
+        );
+        assert_eq!(
+            OpenVPNStCollectorInner::detect_status_format(&v3),
+            Some(OpenVPNStatusFormat::V3)
+        );
+    }
+
+    #[test]
+    fn should_reject_unrecognized_openvpn_status_file_format() {
+        assert_eq!(
+            OpenVPNStCollectorInner::detect_status_format(&[String::from("invalid")]),
             None
         );
     }
