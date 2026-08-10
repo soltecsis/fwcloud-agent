@@ -1018,4 +1018,44 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn should_parse_v1_status_file() -> Result<()> {
+        let lines = fs::read_to_string("./tests/templates/openvpn-status.log_ts1")?
+            .lines()
+            .map(String::from)
+            .collect::<Vec<String>>();
+
+        let (sample_timestamp, sessions) =
+            OpenVPNStCollectorInner::parse_v1_status(&lines).map_err(std::io::Error::other)?;
+
+        assert_eq!(sample_timestamp, 1633366402);
+        assert_eq!(sessions.len(), 4);
+        assert_eq!(sessions[0].common_name, "FWCLOD-VPN-01");
+        assert_eq!(sessions[0].real_address, "1.1.1.1:43501");
+        assert_eq!(sessions[0].bytes_received, 22394454);
+        assert_eq!(sessions[0].bytes_sent, 22553788);
+        assert_eq!(sessions[0].connected_since, 1632487691);
+        assert_eq!(sessions[0].sample_timestamp, sample_timestamp);
+
+        Ok(())
+    }
+
+    #[test]
+    fn should_parse_v1_status_file_with_new_datetime_format() {
+        let lines = vec![
+            String::from("OpenVPN CLIENT LIST"),
+            String::from("Updated,2023-07-21 15:02:00"),
+            String::from("Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since"),
+            String::from("client,1.1.1.1:1194,10,20,2023-07-21 15:02:00"),
+            String::from("ROUTING TABLE"),
+        ];
+
+        let (sample_timestamp, sessions) =
+            OpenVPNStCollectorInner::parse_v1_status(&lines).unwrap();
+
+        assert_eq!(sample_timestamp, 1689951720);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].connected_since, 1689951720);
+    }
 }
