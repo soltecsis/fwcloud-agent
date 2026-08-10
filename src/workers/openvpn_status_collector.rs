@@ -176,6 +176,16 @@ impl OpenVPNStFile {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct OpenVPNStatusSession {
+    common_name: String,
+    real_address: String,
+    bytes_received: u64,
+    bytes_sent: u64,
+    connected_since: u64,
+    sample_timestamp: u64,
+}
+
 struct OpenVPNStCollectorInner {
     openvpn_status_files: Vec<OpenVPNStFile>,
 }
@@ -259,14 +269,37 @@ impl OpenVPNStCollectorInner {
 
                 // Convert the Connected Since date string to timestamp.
                 let data: Vec<&str> = line.split(',').collect();
+                if data.len() < 5 {
+                    error!("Bad OpenVPN status file in line {n}: missing client fields");
+                    continue;
+                }
+
                 match OpenVPNStCollectorInner::convert_to_seconds_since_unix_epoch(data[4]) {
                     Some(connected_since) => {
+                        let session = match (data[2].parse(), data[3].parse()) {
+                            (Ok(bytes_received), Ok(bytes_sent)) => OpenVPNStatusSession {
+                                common_name: data[0].to_string(),
+                                real_address: data[1].to_string(),
+                                bytes_received,
+                                bytes_sent,
+                                connected_since,
+                                sample_timestamp: current_update,
+                            },
+                            _ => {
+                                error!("Bad byte counters in OpenVPN status file in line {n}");
+                                continue;
+                            }
+                        };
+
                         writeln!(
                             writer,
-                            "{},{},{}",
-                            current_update,
-                            data[..4].join(","),
-                            connected_since
+                            "{},{},{},{},{},{}",
+                            session.sample_timestamp,
+                            session.common_name,
+                            session.real_address,
+                            session.bytes_received,
+                            session.bytes_sent,
+                            session.connected_since
                         )?;
                     }
                     None => {
