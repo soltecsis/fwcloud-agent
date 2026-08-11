@@ -545,18 +545,27 @@ impl OpenVPNStCollectorInner {
         let f = File::open(&item.tmp_file)?;
         let reader = BufReader::new(&f);
         let lines = reader.lines().collect::<std::io::Result<Vec<String>>>()?;
-        let status_format = OpenVPNStCollectorInner::detect_status_format(&lines)
-            .ok_or_else(|| std::io::Error::other("Unrecognized OpenVPN status file format"))?;
-
-        let (current_update, sessions) =
-            match status_format {
-                OpenVPNStatusFormat::V1 => OpenVPNStCollectorInner::parse_v1_status(&lines)
-                    .map_err(std::io::Error::other)?,
-                OpenVPNStatusFormat::V2 => OpenVPNStCollectorInner::parse_v2_status(&lines)
-                    .map_err(std::io::Error::other)?,
-                OpenVPNStatusFormat::V3 => OpenVPNStCollectorInner::parse_v3_status(&lines)
-                    .map_err(std::io::Error::other)?,
-            };
+        let status_format = match OpenVPNStCollectorInner::detect_status_format(&lines) {
+            Some(status_format) => status_format,
+            None => {
+                fs::remove_file(&item.tmp_file)?;
+                return Err(std::io::Error::other(
+                    "Unrecognized OpenVPN status file format",
+                ));
+            }
+        };
+        let parsed_status = match status_format {
+            OpenVPNStatusFormat::V1 => OpenVPNStCollectorInner::parse_v1_status(&lines),
+            OpenVPNStatusFormat::V2 => OpenVPNStCollectorInner::parse_v2_status(&lines),
+            OpenVPNStatusFormat::V3 => OpenVPNStCollectorInner::parse_v3_status(&lines),
+        };
+        let (current_update, sessions) = match parsed_status {
+            Ok(parsed_status) => parsed_status,
+            Err(err) => {
+                fs::remove_file(&item.tmp_file)?;
+                return Err(std::io::Error::other(err));
+            }
+        };
 
         // Skip the first sampling cycle, this way we avoid collect that of an OpenVPN status
         // file that doesn't change in time (for example, because the OpenVPN server is not running).
@@ -805,6 +814,23 @@ mod tests {
         }
 
         list
+    }
+
+    fn structured_status_file(
+        delimiter: char,
+        update: &str,
+        update_timestamp: u64,
+        bytes: u64,
+    ) -> String {
+        let separator = delimiter.to_string();
+        [
+            format!("TITLE{separator}OpenVPN 2.6.0"),
+            format!("TIME{separator}{update}{separator}{update_timestamp}"),
+            format!("HEADER{separator}CLIENT_LIST{separator}Common Name{separator}Real Address{separator}Virtual Address{separator}Virtual IPv6 Address{separator}Bytes Received{separator}Bytes Sent{separator}Connected Since{separator}Connected Since (time_t)"),
+            format!("CLIENT_LIST{separator}client{separator}1.1.1.1:1194{separator}10.0.0.2{separator}{separator}{bytes}{separator}20{separator}2023-07-21 15:01:00{separator}1689951660"),
+            format!("HEADER{separator}ROUTING_TABLE{separator}Virtual Address{separator}Common Name{separator}Real Address{separator}Last Ref"),
+        ]
+        .join("\n")
     }
 
     fn remove_collector_files(collector: &OpenVPNStCollectorInner) -> Result<()> {
@@ -1300,5 +1326,136 @@ mod tests {
             v1_sessions[0].to_cache_record(),
             "1689951720,client,1.1.1.1:1194,10,20,1689951660"
         );
+    }
+
+    #[test]
+    fn should_parse_structured_status_samples() {
+        let v2 = structured_status_file(',', "2023-07-21 15:02:00", 1689951720, 22394454)
+            .lines()
+            .map(String::from)
+            .collect::<Vec<String>>();
+        let v3 = structured_status_file('\t', "2023-07-21 15:02:00", 1689951720, 22394454)
+            .lines()
+            .map(String::from)
+            .collect::<Vec<String>>();
+
+        let (_, v2_sessions) = OpenVPNStCollectorInner::parse_v2_status(&v2).unwrap();
+        let (_, v3_sessions) = OpenVPNStCollectorInner::parse_v3_status(&v3).unwrap();
+
+        assert_eq!(v2_sessions, v3_sessions);
+        assert_eq!(
+            v2_sessions[0].to_cache_record(),
+            "1689951720,client,1.1.1.1:1194,22394454,20,1689951660"
+        );
+    }
+
+    #[test]
+    fn should_parse_structured_status_with_reordered_extended_columns() {
+        for delimiter in [',', '\t'] {
+            let separator = delimiter.to_string();
+            let lines = vec![
+                format!("TITLE{separator}OpenVPN 2.6.0"),
+                format!("TIME{separator}2023-07-21 15:02:00{separator}1689951720"),
+                format!("HEADER{separator}CLIENT_LIST{separator}Username{separator}Bytes Sent{separator}Common Name{separator}Connected Since (time_t){separator}Real Address{separator}Bytes Received{separator}Connected Since{separator}Peer ID{separator}Data Channel Cipher"),
+                format!("CLIENT_LIST{separator}fwcloud{separator}20{separator}client{separator}1689951660{separator}1.1.1.1:1194{separator}10{separator}2023-07-21 15:01:00{separator}2{separator}AES-256-GCM"),
+                format!("HEADER{separator}ROUTING_TABLE{separator}Virtual Address"),
+            ];
+
+            let (_, sessions) =
+                OpenVPNStCollectorInner::parse_structured_status(&lines, delimiter).unwrap();
+
+            assert_eq!(sessions.len(), 1);
+            assert_eq!(sessions[0].common_name, "client");
+            assert_eq!(sessions[0].real_address, "1.1.1.1:1194");
+            assert_eq!(sessions[0].bytes_received, 10);
+            assert_eq!(sessions[0].bytes_sent, 20);
+            assert_eq!(sessions[0].connected_since, 1689951660);
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn should_preserve_sampling_semantics_for_structured_status_formats() -> Result<()> {
+        for delimiter in [',', '\t'] {
+            let list = status_files_list_factory(1);
+            let mut collector = collector_factory(
+                vec![
+                    ("OPENVPN_STATUS_CACHE_MAX_SIZE", String::from("1")),
+                    ("OPENVPN_STATUS_FILES", list.join(",")),
+                ],
+                true,
+            );
+            let status_file = collector.openvpn_status_files[0].st_file.clone();
+            let cache_file = collector.openvpn_status_files[0].cache_file.clone();
+
+            fs::write(
+                &status_file,
+                structured_status_file(delimiter, "2023-07-21 15:02:00", 1689951720, 10),
+            )?;
+            collector.collect_all_files_data(true);
+            assert_eq!(fs::metadata(&cache_file)?.len(), 0);
+            assert_eq!(collector.openvpn_status_files[0].last_update, 1689951720);
+
+            fs::write(
+                &status_file,
+                structured_status_file(delimiter, "2023-07-21 15:03:00", 1689951780, 30),
+            )?;
+            collector.collect_all_files_data(true);
+            let cached_status = fs::read_to_string(&cache_file)?;
+            assert_eq!(
+                cached_status,
+                "1689951780,client,1.1.1.1:1194,30,20,1689951660\n"
+            );
+            assert_eq!(collector.openvpn_status_files[0].last_update, 1689951780);
+
+            collector.collect_all_files_data(true);
+            assert_eq!(fs::read_to_string(&cache_file)?, cached_status);
+
+            fs::write(
+                &status_file,
+                structured_status_file(delimiter, "2023-07-21 15:04:00", 1689951840, 50),
+            )?;
+            collector.collect_all_files_data(true);
+            assert_eq!(fs::read_to_string(&cache_file)?, cached_status);
+            assert_eq!(collector.openvpn_status_files[0].last_update, 1689951780);
+
+            remove_collector_files(&collector)?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn should_not_write_partial_cache_for_malformed_structured_status_files() -> Result<()> {
+        for delimiter in [',', '\t'] {
+            let list = status_files_list_factory(1);
+            let mut collector =
+                collector_factory(vec![("OPENVPN_STATUS_FILES", list.join(","))], true);
+            let status_file = collector.openvpn_status_files[0].st_file.clone();
+            let tmp_file = collector.openvpn_status_files[0].tmp_file.clone();
+            let cache_file = collector.openvpn_status_files[0].cache_file.clone();
+
+            fs::write(
+                &status_file,
+                structured_status_file(delimiter, "2023-07-21 15:02:00", 1689951720, 22394454),
+            )?;
+            collector.collect_all_files_data(true);
+            assert_eq!(collector.openvpn_status_files[0].last_update, 1689951720);
+
+            let malformed_status =
+                structured_status_file(delimiter, "2023-07-21 15:03:00", 1689951780, 22394454)
+                    .replace("22394454", "invalid");
+            fs::write(&status_file, malformed_status)?;
+            collector.collect_all_files_data(true);
+
+            assert_eq!(fs::metadata(&cache_file)?.len(), 0);
+            assert_eq!(collector.openvpn_status_files[0].last_update, 1689951720);
+            assert!(!Path::new(&tmp_file).is_file());
+
+            remove_collector_files(&collector)?;
+        }
+
+        Ok(())
     }
 }
