@@ -47,6 +47,7 @@ use crate::{
             CrowdSecBouncersResponse, CrowdSecStepResult, CrowdSecStepStatus,
         },
         packages,
+        progress::CrowdSecProgress,
     },
     errors::{FwcError, Result},
 };
@@ -314,16 +315,33 @@ pub async fn prepare_set_only_configuration() -> Result<String> {
 }
 
 pub async fn install() -> Result<CrowdSecBouncerInstallResponse> {
+    install_with_progress(None).await
+}
+
+pub async fn install_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecBouncerInstallResponse> {
     log::info!("Installing CrowdSec Firewall Bouncer in FWCloud IPSet-only mode");
 
+    emit_progress(progress, "Preparing FWCloud CrowdSec blacklist IPSet");
     ensure_blacklist_ipsets().await?;
+    emit_progress(progress, "Configuring FWCloud CrowdSec IPSet boot service");
     install_ipset_setup_service().await?;
+    emit_progress(
+        progress,
+        "Preparing CrowdSec Firewall Bouncer configuration",
+    );
     let api_key = prepare_set_only_configuration().await?;
-    let package_installed = packages::install_firewall_bouncer_package().await?;
+    emit_progress(progress, "Installing CrowdSec Firewall Bouncer package");
+    let package_installed =
+        packages::install_firewall_bouncer_package_with_progress(progress).await?;
+    emit_progress(progress, "Writing FWCloud IPSet-only bouncer configuration");
     write_set_only_configuration(&api_key).await?;
+    emit_progress(progress, "Enabling CrowdSec Firewall Bouncer service");
     enable_firewall_bouncer_service().await?;
 
     log::info!("CrowdSec Firewall Bouncer installation completed");
+    emit_progress(progress, "CrowdSec Firewall Bouncer installation completed");
 
     Ok(CrowdSecBouncerInstallResponse {
         steps: vec![
@@ -361,16 +379,43 @@ pub async fn install() -> Result<CrowdSecBouncerInstallResponse> {
     })
 }
 
+fn emit_progress(progress: Option<&CrowdSecProgress>, message: &str) {
+    if let Some(progress) = progress {
+        progress.message(message);
+    }
+}
+
 pub async fn uninstall() -> Result<CrowdSecBouncerUninstallResponse> {
+    uninstall_with_progress(None).await
+}
+
+pub async fn uninstall_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecBouncerUninstallResponse> {
     log::info!("Disabling FWCloud CrowdSec Firewall Bouncer while preserving packages and IPSet");
 
+    emit_progress(progress, "Stopping CrowdSec Firewall Bouncer service");
     let service_disabled = disable_systemd_service(FIREWALL_BOUNCER_SERVICE).await?;
+    emit_progress(
+        progress,
+        "Removing FWCloud CrowdSec Firewall Bouncer registration",
+    );
     let registration_removed = remove_bouncer_registration().await?;
+    emit_progress(
+        progress,
+        "Removing FWCloud CrowdSec Firewall Bouncer configuration",
+    );
     let configuration_removed = remove_managed_file(BOUNCER_CONFIG_OVERRIDE_PATH).await?;
+    emit_progress(progress, "Removing FWCloud CrowdSec IPSet boot service");
     let ipset_service_removed = remove_ipset_setup_service().await?;
+    emit_progress(progress, "Clearing FWCloud CrowdSec blacklist IPSet");
     let cleared_ipsets = clear_blacklist_ipsets().await?;
 
     log::info!("FWCloud CrowdSec Firewall Bouncer disabled");
+    emit_progress(
+        progress,
+        "FWCloud CrowdSec Firewall Bouncer uninstall completed",
+    );
 
     Ok(CrowdSecBouncerUninstallResponse {
         steps: vec![
