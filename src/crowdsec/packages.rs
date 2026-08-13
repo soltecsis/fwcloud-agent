@@ -20,10 +20,15 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::time::Duration;
+use std::{process::Stdio, time::Duration};
 
 use log::debug;
-use tokio::{fs, process::Command, time::timeout};
+use tokio::{
+    fs,
+    io::{AsyncBufReadExt, AsyncRead, BufReader},
+    process::Command,
+    time::timeout,
+};
 
 use crate::{
     crowdsec::{
@@ -32,6 +37,7 @@ use crate::{
             CrowdSecInstallStep, CrowdSecPackageStatus, CrowdSecStepResult, CrowdSecStepStatus,
             CrowdSecUninstallStep,
         },
+        progress::CrowdSecProgress,
         secrets::redact_sensitive_text,
     },
     errors::{FwcError, Result},
@@ -58,8 +64,14 @@ enum PackageManager {
 }
 
 pub async fn install_packages() -> Result<Vec<CrowdSecStepResult<CrowdSecInstallStep>>> {
+    install_packages_with_progress(None).await
+}
+
+pub async fn install_packages_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<Vec<CrowdSecStepResult<CrowdSecInstallStep>>> {
     let package_manager = detect_package_manager().await?;
-    configure_repository(package_manager).await?;
+    configure_repository(package_manager, progress).await?;
 
     let mut installed_packages = Vec::new();
     let mut already_installed_packages = Vec::new();
@@ -68,7 +80,7 @@ pub async fn install_packages() -> Result<Vec<CrowdSecStepResult<CrowdSecInstall
         if package_is_installed(package_manager, package).await? {
             already_installed_packages.push(*package);
         } else {
-            install_package(package_manager, package).await?;
+            install_package(package_manager, package, progress).await?;
             installed_packages.push(*package);
         }
     }
@@ -105,14 +117,25 @@ pub async fn install_packages() -> Result<Vec<CrowdSecStepResult<CrowdSecInstall
 }
 
 pub async fn install_firewall_bouncer_package() -> Result<bool> {
+    install_firewall_bouncer_package_with_progress(None).await
+}
+
+pub async fn install_firewall_bouncer_package_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<bool> {
     let package_manager = detect_package_manager().await?;
-    configure_repository(package_manager).await?;
+    configure_repository(package_manager, progress).await?;
 
     if package_is_installed(package_manager, super::bouncers::FIREWALL_BOUNCER_PACKAGE).await? {
         return Ok(false);
     }
 
-    install_package(package_manager, super::bouncers::FIREWALL_BOUNCER_PACKAGE).await?;
+    install_package(
+        package_manager,
+        super::bouncers::FIREWALL_BOUNCER_PACKAGE,
+        progress,
+    )
+    .await?;
     Ok(true)
 }
 
@@ -131,13 +154,19 @@ pub async fn package_status() -> Result<CrowdSecPackageStatus> {
 }
 
 pub async fn uninstall_packages() -> Result<CrowdSecStepResult<CrowdSecUninstallStep>> {
+    uninstall_packages_with_progress(None).await
+}
+
+pub async fn uninstall_packages_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecStepResult<CrowdSecUninstallStep>> {
     let package_manager = detect_package_manager().await?;
     let mut removed_packages = Vec::new();
     let mut absent_packages = Vec::new();
 
     for package in CROWDSEC_REMOVABLE_PACKAGES {
         if package_is_installed(package_manager, package).await? {
-            remove_package(package_manager, package).await?;
+            remove_package(package_manager, package, progress).await?;
             removed_packages.push(*package);
         } else {
             absent_packages.push(*package);
@@ -200,9 +229,12 @@ fn package_removal_message(removed_packages: &[&str], absent_packages: &[&str]) 
     }
 }
 
-async fn configure_repository(package_manager: PackageManager) -> Result<()> {
+async fn configure_repository(
+    package_manager: PackageManager,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<()> {
     match package_manager {
-        PackageManager::Apt => configure_apt_repository().await,
+        PackageManager::Apt => configure_apt_repository(progress).await,
         PackageManager::Dnf | PackageManager::Yum => {
             write_if_changed(RPM_REPOSITORY_PATH, CROWDSEC_RPM_REPOSITORY).await?;
             Ok(())
@@ -210,13 +242,13 @@ async fn configure_repository(package_manager: PackageManager) -> Result<()> {
     }
 }
 
-async fn configure_apt_repository() -> Result<()> {
+async fn configure_apt_repository(progress: Option<&CrowdSecProgress>) -> Result<()> {
     if apt_repository_is_configured().await {
-        return run_command("/usr/bin/apt-get", &["update"]).await;
+        return run_command("/usr/bin/apt-get", &["update"], progress).await;
     }
 
-    install_package(PackageManager::Apt, "curl").await?;
-    install_package(PackageManager::Apt, "gnupg").await?;
+    install_package(PackageManager::Apt, "curl", progress).await?;
+    install_package(PackageManager::Apt, "gnupg", progress).await?;
     fs::create_dir_all(APT_KEYRING_DIRECTORY).await?;
 
     run_command(
@@ -230,6 +262,7 @@ async fn configure_apt_repository() -> Result<()> {
             APT_KEYRING_TEMP_PATH,
             CROWDSEC_GPG_KEY_URL,
         ],
+        None,
     )
     .await?;
     run_command(
@@ -241,11 +274,12 @@ async fn configure_apt_repository() -> Result<()> {
             APT_KEYRING_PATH,
             APT_KEYRING_TEMP_PATH,
         ],
+        None,
     )
     .await?;
     fs::remove_file(APT_KEYRING_TEMP_PATH).await?;
     write_if_changed(APT_REPOSITORY_PATH, CROWDSEC_APT_REPOSITORY).await?;
-    run_command("/usr/bin/apt-get", &["update"]).await
+    run_command("/usr/bin/apt-get", &["update"], progress).await
 }
 
 async fn package_is_installed(package_manager: PackageManager, package: &str) -> Result<bool> {
@@ -257,7 +291,7 @@ async fn package_is_installed(package_manager: PackageManager, package: &str) ->
         PackageManager::Dnf | PackageManager::Yum => ("/usr/bin/rpm", vec!["--query", package]),
     };
 
-    let output = run_command_allow_failure(program, &arguments).await?;
+    let output = run_command_allow_failure(program, &arguments, None).await?;
 
     match package_manager {
         PackageManager::Apt => Ok(output.status.success()
@@ -266,28 +300,40 @@ async fn package_is_installed(package_manager: PackageManager, package: &str) ->
     }
 }
 
-async fn install_package(package_manager: PackageManager, package: &str) -> Result<()> {
+async fn install_package(
+    package_manager: PackageManager,
+    package: &str,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<()> {
     let (program, arguments): (&str, Vec<&str>) = match package_manager {
         PackageManager::Apt => ("/usr/bin/apt-get", vec!["install", "--yes", package]),
         PackageManager::Dnf => ("/usr/bin/dnf", vec!["install", "--assumeyes", package]),
         PackageManager::Yum => ("/usr/bin/yum", vec!["install", "--assumeyes", package]),
     };
 
-    run_command(program, &arguments).await
+    run_command(program, &arguments, progress).await
 }
 
-async fn remove_package(package_manager: PackageManager, package: &str) -> Result<()> {
+async fn remove_package(
+    package_manager: PackageManager,
+    package: &str,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<()> {
     let (program, arguments): (&str, Vec<&str>) = match package_manager {
         PackageManager::Apt => ("/usr/bin/apt-get", vec!["remove", "--yes", package]),
         PackageManager::Dnf => ("/usr/bin/dnf", vec!["remove", "--assumeyes", package]),
         PackageManager::Yum => ("/usr/bin/yum", vec!["remove", "--assumeyes", package]),
     };
 
-    run_command(program, &arguments).await
+    run_command(program, &arguments, progress).await
 }
 
-async fn run_command(program: &str, arguments: &[&str]) -> Result<()> {
-    let output = run_command_allow_failure(program, arguments).await?;
+async fn run_command(
+    program: &str,
+    arguments: &[&str],
+    progress: Option<&CrowdSecProgress>,
+) -> Result<()> {
+    let output = run_command_allow_failure(program, arguments, progress).await?;
 
     if output.status.success() {
         debug!(
@@ -314,16 +360,53 @@ async fn run_command(program: &str, arguments: &[&str]) -> Result<()> {
 async fn run_command_allow_failure(
     program: &str,
     arguments: &[&str],
+    progress: Option<&CrowdSecProgress>,
 ) -> Result<std::process::Output> {
     debug!(
         "Running CrowdSec package command: {} {:?}",
         program, arguments
     );
 
-    timeout(
-        COMMAND_TIMEOUT,
-        Command::new(program).args(arguments).output(),
-    )
+    let mut command = Command::new(program);
+    command
+        .args(arguments)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn().map_err(|error| {
+        debug!(
+            "Unable to run CrowdSec package command: {} {:?} ({})",
+            program, arguments, error
+        );
+        FwcError::crowdsec(COMMAND_FAILED, "Unable to run CrowdSec package command")
+    })?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    timeout(COMMAND_TIMEOUT, async {
+        let wait = child.wait();
+        let stdout = stream_command_output(stdout, progress);
+        let stderr = stream_command_output(stderr, progress);
+        let (status, stdout, stderr) = tokio::join!(wait, stdout, stderr);
+
+        Ok::<_, FwcError>(std::process::Output {
+            status: status.map_err(|_| {
+                FwcError::crowdsec(COMMAND_FAILED, "Unable to run CrowdSec package command")
+            })?,
+            stdout: stdout.map_err(|_| {
+                FwcError::crowdsec(
+                    COMMAND_FAILED,
+                    "Unable to read CrowdSec package command output",
+                )
+            })?,
+            stderr: stderr.map_err(|_| {
+                FwcError::crowdsec(
+                    COMMAND_FAILED,
+                    "Unable to read CrowdSec package command output",
+                )
+            })?,
+        })
+    })
     .await
     .map_err(|_| {
         debug!(
@@ -332,13 +415,30 @@ async fn run_command_allow_failure(
         );
         FwcError::crowdsec(OPERATION_TIMEOUT, "CrowdSec package command timed out")
     })?
-    .map_err(|error| {
-        debug!(
-            "Unable to run CrowdSec package command: {} {:?} ({})",
-            program, arguments, error
-        );
-        FwcError::crowdsec(COMMAND_FAILED, "Unable to run CrowdSec package command")
-    })
+}
+
+async fn stream_command_output<R>(
+    reader: Option<R>,
+    progress: Option<&CrowdSecProgress>,
+) -> std::io::Result<Vec<u8>>
+where
+    R: AsyncRead + Unpin,
+{
+    let Some(reader) = reader else {
+        return Ok(Vec::new());
+    };
+
+    let mut reader = BufReader::new(reader).lines();
+    let mut output = Vec::new();
+    while let Some(line) = reader.next_line().await? {
+        if let Some(progress) = progress {
+            progress.message(&line);
+        }
+        output.extend_from_slice(line.as_bytes());
+        output.push(b'\n');
+    }
+
+    Ok(output)
 }
 
 async fn write_if_changed(path: &str, contents: &str) -> Result<()> {
@@ -370,7 +470,20 @@ fn os_release_value(os_release: &str, key: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{package_manager_for_os_release, package_removal_message, PackageManager};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+        time::SystemTime,
+    };
+
+    use tokio::io::{duplex, AsyncWriteExt};
+    use uuid::Uuid;
+
+    use super::{
+        package_manager_for_os_release, package_removal_message, stream_command_output,
+        PackageManager,
+    };
+    use crate::{crowdsec::progress::CrowdSecProgress, utils::ws::WsData};
 
     #[test]
     fn selects_supported_package_managers() {
@@ -401,6 +514,39 @@ mod tests {
         assert_eq!(
             package_removal_message(&["crowdsec"], &["crowdsec-firewall-bouncer-iptables"]),
             "Removed CrowdSec packages: crowdsec; already absent: crowdsec-firewall-bouncer-iptables"
+        );
+    }
+
+    #[tokio::test]
+    async fn streams_and_redacts_package_command_output() {
+        let map = Arc::new(Mutex::new(HashMap::new()));
+        let id = Uuid::new_v4();
+        let data = Arc::new(Mutex::new(WsData {
+            created_at: SystemTime::now(),
+            lines: Vec::new(),
+            finished: false,
+        }));
+        map.lock().unwrap().insert(id, Arc::clone(&data));
+        let progress = CrowdSecProgress::from_ws_map(Arc::clone(&map), Some(id)).unwrap();
+        let (mut writer, reader) = duplex(1024);
+
+        writer
+            .write_all(b"Reading package lists...\napi_key: package-secret\n")
+            .await
+            .unwrap();
+        drop(writer);
+
+        let output = stream_command_output(Some(reader), Some(&progress))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "Reading package lists...\napi_key: package-secret\n"
+        );
+        assert_eq!(
+            data.lock().unwrap().lines,
+            vec!["Reading package lists...", "api_key: [REDACTED]"]
         );
     }
 }

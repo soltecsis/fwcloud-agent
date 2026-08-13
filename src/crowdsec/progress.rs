@@ -48,7 +48,7 @@ impl CrowdSecProgress {
         Self::from_ws_map(Arc::clone(&cfg.ws_map), ws_id)
     }
 
-    fn from_ws_map(ws_map: WsMap, ws_id: Option<Uuid>) -> Result<Self> {
+    pub(crate) fn from_ws_map(ws_map: WsMap, ws_id: Option<Uuid>) -> Result<Self> {
         let Some(ws_id) = ws_id else {
             return Ok(Self {
                 ws_id: None,
@@ -147,7 +147,10 @@ mod tests {
 
     #[test]
     fn rejects_an_unknown_websocket_identifier() {
-        let error = CrowdSecProgress::from_ws_map(ws_map(), Some(Uuid::new_v4())).unwrap_err();
+        let error = match CrowdSecProgress::from_ws_map(ws_map(), Some(Uuid::new_v4())) {
+            Ok(_) => panic!("Expected an unknown WebSocket identifier to be rejected"),
+            Err(error) => error,
+        };
 
         assert!(matches!(error, FwcError::WebSocketIdNotFound));
     }
