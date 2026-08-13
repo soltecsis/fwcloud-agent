@@ -85,6 +85,10 @@ impl CrowdSecProgress {
         debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
     }
 
+    pub fn is_active(&self) -> bool {
+        self.ws_data.is_some()
+    }
+
     pub fn finish(&mut self) {
         let Some(ws_id) = self.ws_id.take() else {
             return;
@@ -102,6 +106,9 @@ impl CrowdSecProgress {
             debug!("Removed CrowdSec websocket(id: {})", ws_id);
             debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
         }
+
+        self.ws_data = None;
+        self.ws_map = None;
     }
 }
 
@@ -143,6 +150,7 @@ mod tests {
 
         progress.message("CrowdSec installation started");
         progress.finish();
+        assert!(!progress.is_active());
     }
 
     #[test]
@@ -163,6 +171,8 @@ mod tests {
         map.lock().unwrap().insert(id, Arc::clone(&data));
         let mut progress = CrowdSecProgress::from_ws_map(Arc::clone(&map), Some(id)).unwrap();
 
+        assert!(progress.is_active());
+
         progress.message("api_key: secret-api-key\nEnrollment-Key=secret-enrollment-key");
         progress.finish();
 
@@ -173,6 +183,7 @@ mod tests {
         );
         assert!(data.finished);
         assert!(!map.lock().unwrap().contains_key(&id));
+        assert!(!progress.is_active());
     }
 
     #[test]

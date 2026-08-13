@@ -383,10 +383,12 @@ async fn run_command_allow_failure(
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
+    let stream_progress =
+        progress.filter(|progress| progress.is_active() && is_package_manager_command(program));
     timeout(COMMAND_TIMEOUT, async {
         let wait = child.wait();
-        let stdout = stream_command_output(stdout, progress);
-        let stderr = stream_command_output(stderr, progress);
+        let stdout = stream_command_output(stdout, stream_progress);
+        let stderr = stream_command_output(stderr, stream_progress);
         let (status, stdout, stderr) = tokio::join!(wait, stdout, stderr);
 
         Ok::<_, FwcError>(std::process::Output {
@@ -415,6 +417,13 @@ async fn run_command_allow_failure(
         );
         FwcError::crowdsec(OPERATION_TIMEOUT, "CrowdSec package command timed out")
     })?
+}
+
+fn is_package_manager_command(program: &str) -> bool {
+    matches!(
+        program,
+        "/usr/bin/apt-get" | "/usr/bin/dnf" | "/usr/bin/yum"
+    )
 }
 
 async fn stream_command_output<R>(
@@ -480,8 +489,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        package_manager_for_os_release, package_removal_message, stream_command_output,
-        PackageManager,
+        is_package_manager_command, package_manager_for_os_release, package_removal_message,
+        stream_command_output, PackageManager,
     };
     use crate::{crowdsec::progress::CrowdSecProgress, utils::ws::WsData};
 
@@ -548,5 +557,14 @@ mod tests {
             data.lock().unwrap().lines,
             vec!["Reading package lists...", "api_key: [REDACTED]"]
         );
+    }
+
+    #[test]
+    fn streams_only_package_manager_commands() {
+        assert!(is_package_manager_command("/usr/bin/apt-get"));
+        assert!(is_package_manager_command("/usr/bin/dnf"));
+        assert!(is_package_manager_command("/usr/bin/yum"));
+        assert!(!is_package_manager_command("/usr/bin/curl"));
+        assert!(!is_package_manager_command("/usr/bin/gpg"));
     }
 }
