@@ -30,6 +30,7 @@ pub mod errors;
 pub mod install;
 pub mod models;
 pub mod packages;
+pub mod progress;
 pub mod secrets;
 pub mod status;
 pub mod uninstall;

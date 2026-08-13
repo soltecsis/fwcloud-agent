@@ -21,6 +21,7 @@
 */
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,22 +44,28 @@ pub struct CrowdSecOperationRequest {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct CrowdSecInstallRequest {}
+pub struct CrowdSecInstallRequest {
+    pub ws_id: Option<Uuid>,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecUninstallRequest {
     pub confirm: bool,
+    pub ws_id: Option<Uuid>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct CrowdSecBouncerInstallRequest {}
+pub struct CrowdSecBouncerInstallRequest {
+    pub ws_id: Option<Uuid>,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecBouncerUninstallRequest {
     pub confirm: bool,
+    pub ws_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize)]

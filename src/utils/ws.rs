@@ -43,6 +43,7 @@ pub struct FwcAgentWs {
     id: Uuid,
     heart_beat_handler: Option<SpawnHandle>,
     pub data: Arc<Mutex<WsData>>,
+    map: Arc<Mutex<HashMap<Uuid, Arc<Mutex<WsData>>>>>,
 }
 
 impl FwcAgentWs {
@@ -57,6 +58,7 @@ impl FwcAgentWs {
                 lines: vec![],
                 finished: false,
             })),
+            map: Arc::clone(&map),
         };
 
         let data_clone = Arc::clone(&new_ws.data);
@@ -127,6 +129,13 @@ impl Actor for FwcAgentWs {
 
         self.heart_beat(ctx);
         self.send_lines(ctx);
+    }
+
+    fn stopped(&mut self, _ctx: &mut Self::Context) {
+        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+        self.map.lock().unwrap().remove(&self.id);
+        debug!("Removed websocket(id: {})", self.id);
+        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
     }
 }
 
