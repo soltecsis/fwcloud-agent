@@ -347,6 +347,7 @@ async fn uninstall_crowdsec(
     request: web::Json<CrowdSecUninstallRequest>,
 ) -> Result<HttpResponse> {
     uninstall::require_confirmation(request.confirm)?;
+    let progress = crate::crowdsec::progress::CrowdSecProgress::from_request(&cfg, request.ws_id)?;
 
     let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
@@ -354,7 +355,7 @@ async fn uninstall_crowdsec(
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let uninstall_result = uninstall::uninstall().await;
+        let uninstall_result = uninstall::uninstall_with_progress(Some(&progress)).await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         uninstall_result?
@@ -390,6 +391,7 @@ async fn uninstall_crowdsec_bouncer(
     request: web::Json<CrowdSecBouncerUninstallRequest>,
 ) -> Result<HttpResponse> {
     uninstall::require_confirmation(request.confirm)?;
+    let progress = crate::crowdsec::progress::CrowdSecProgress::from_request(&cfg, request.ws_id)?;
 
     let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
@@ -397,7 +399,7 @@ async fn uninstall_crowdsec_bouncer(
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let uninstall_result = bouncers::uninstall().await;
+        let uninstall_result = bouncers::uninstall_with_progress(Some(&progress)).await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         uninstall_result?

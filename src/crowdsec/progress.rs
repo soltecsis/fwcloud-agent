@@ -174,4 +174,20 @@ mod tests {
         assert!(data.finished);
         assert!(!map.lock().unwrap().contains_key(&id));
     }
+
+    #[test]
+    fn finishes_the_websocket_when_an_operation_exits_with_an_error() {
+        let map = ws_map();
+        let id = Uuid::new_v4();
+        let data = ws_data();
+        map.lock().unwrap().insert(id, Arc::clone(&data));
+
+        {
+            let progress = CrowdSecProgress::from_ws_map(Arc::clone(&map), Some(id)).unwrap();
+            progress.message("CrowdSec uninstall started");
+        }
+
+        assert!(data.lock().unwrap().finished);
+        assert!(!map.lock().unwrap().contains_key(&id));
+    }
 }

@@ -34,6 +34,7 @@ use crate::{
             CrowdSecUninstallResponse, CrowdSecUninstallStep,
         },
         packages,
+        progress::CrowdSecProgress,
     },
     errors::{FwcError, Result},
 };
@@ -52,20 +53,39 @@ pub fn require_confirmation(confirm: bool) -> Result<()> {
 }
 
 pub async fn uninstall() -> Result<CrowdSecUninstallResponse> {
+    uninstall_with_progress(None).await
+}
+
+pub async fn uninstall_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecUninstallResponse> {
     info!("Uninstalling CrowdSec services and packages while preserving data");
 
     let mut steps = Vec::new();
-    let bouncer_uninstall = bouncers::uninstall().await?;
+    emit_progress(progress, "Disabling FWCloud CrowdSec Firewall Bouncer");
+    let bouncer_uninstall = bouncers::uninstall_with_progress(progress).await?;
     steps.push(bouncer_uninstall_step(&bouncer_uninstall));
+    emit_progress(progress, "Disabling CrowdSec service");
     steps.push(disable_service(CrowdSecUninstallStep::CrowdSecService, "crowdsec.service").await?);
-    steps.push(packages::uninstall_packages().await?);
+    emit_progress(progress, "Removing CrowdSec packages while preserving data");
+    steps.push(packages::uninstall_packages_with_progress(progress).await?);
 
     info!("CrowdSec uninstall completed while preserving data");
+    emit_progress(
+        progress,
+        "CrowdSec uninstall completed while preserving data",
+    );
 
     Ok(CrowdSecUninstallResponse {
         data_retention: CrowdSecDataRetention::Preserve,
         steps,
     })
+}
+
+fn emit_progress(progress: Option<&CrowdSecProgress>, message: &str) {
+    if let Some(progress) = progress {
+        progress.message(message);
+    }
 }
 
 fn bouncer_uninstall_step(
