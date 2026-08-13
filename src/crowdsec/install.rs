@@ -34,6 +34,7 @@ use crate::{
             CrowdSecStepResult, CrowdSecStepStatus,
         },
         packages,
+        progress::CrowdSecProgress,
     },
     errors::{FwcError, Result},
 };
@@ -41,9 +42,17 @@ use crate::{
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub async fn install() -> Result<CrowdSecInstallResponse> {
+    install_with_progress(None).await
+}
+
+pub async fn install_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecInstallResponse> {
     log::info!("Installing CrowdSec packages and default collections");
 
-    let mut steps = packages::install_packages().await?;
+    emit_progress(progress, "Installing CrowdSec packages and dependencies");
+    let mut steps = packages::install_packages_with_progress(progress).await?;
+    emit_progress(progress, "Enabling CrowdSec service");
     enable_crowdsec_service().await?;
     steps.push(CrowdSecStepResult {
         step: CrowdSecInstallStep::CrowdSecService,
@@ -51,6 +60,7 @@ pub async fn install() -> Result<CrowdSecInstallResponse> {
         message: "CrowdSec service is enabled and running".to_string(),
     });
 
+    emit_progress(progress, "Updating CrowdSec Hub index");
     update_hub().await?;
     steps.push(CrowdSecStepResult {
         step: CrowdSecInstallStep::HubUpdate,
@@ -58,7 +68,8 @@ pub async fn install() -> Result<CrowdSecInstallResponse> {
         message: "CrowdSec Hub index is up to date".to_string(),
     });
 
-    install_default_collections().await?;
+    emit_progress(progress, "Installing CrowdSec default collections");
+    install_default_collections(progress).await?;
     steps.push(CrowdSecStepResult {
         step: CrowdSecInstallStep::DefaultCollections,
         status: CrowdSecStepStatus::Completed,
@@ -66,8 +77,10 @@ pub async fn install() -> Result<CrowdSecInstallResponse> {
             .to_string(),
     });
 
+    emit_progress(progress, "Restarting CrowdSec service");
     restart_crowdsec_service().await?;
     log::info!("CrowdSec installation completed");
+    emit_progress(progress, "CrowdSec installation completed");
 
     Ok(CrowdSecInstallResponse {
         data_retention: CrowdSecDataRetention::Preserve,
@@ -92,23 +105,41 @@ async fn update_hub() -> Result<()> {
     Ok(())
 }
 
-async fn install_default_collections() -> Result<()> {
+async fn install_default_collections(progress: Option<&CrowdSecProgress>) -> Result<()> {
     for collection in ["crowdsecurity/linux", "crowdsecurity/sshd"] {
         if collection_is_installed(collection).await? {
             debug!(
                 "CrowdSec default collection is already installed; preserving its local state: {}",
                 collection
             );
+            emit_progress(
+                progress,
+                &format!("CrowdSec collection is already installed: {collection}"),
+            );
             continue;
         }
 
         debug!("Installing CrowdSec default collection: {}", collection);
+        emit_progress(
+            progress,
+            &format!("Installing CrowdSec collection: {collection}"),
+        );
         CrowdSecCommand::cscli(&["collections", "install", collection])?
             .execute()
             .await?;
+        emit_progress(
+            progress,
+            &format!("CrowdSec collection installed: {collection}"),
+        );
     }
 
     Ok(())
+}
+
+fn emit_progress(progress: Option<&CrowdSecProgress>, message: &str) {
+    if let Some(progress) = progress {
+        progress.message(message);
+    }
 }
 
 async fn collection_is_installed(collection: &str) -> Result<bool> {
@@ -163,8 +194,15 @@ async fn run_systemctl(arguments: &[&str]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::json_collection_is_installed;
+    use super::{emit_progress, json_collection_is_installed};
+    use crate::{crowdsec::progress::CrowdSecProgress, utils::ws::WsData};
     use serde_json::json;
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+        time::SystemTime,
+    };
+    use uuid::Uuid;
 
     #[test]
     fn recognizes_installed_collections_in_json_output() {
@@ -183,5 +221,28 @@ mod tests {
             &collection_state,
             "crowdsecurity/sshd"
         ));
+    }
+
+    #[test]
+    fn installation_progress_messages_are_published_without_secrets() {
+        let map = Arc::new(Mutex::new(HashMap::new()));
+        let id = Uuid::new_v4();
+        let data = Arc::new(Mutex::new(WsData {
+            created_at: SystemTime::now(),
+            lines: Vec::new(),
+            finished: false,
+        }));
+        map.lock().unwrap().insert(id, Arc::clone(&data));
+        let progress = CrowdSecProgress::from_ws_map(map, Some(id)).unwrap();
+
+        emit_progress(
+            Some(&progress),
+            "Installing CrowdSec collection: crowdsecurity/sshd",
+        );
+
+        assert_eq!(
+            data.lock().unwrap().lines,
+            vec!["Installing CrowdSec collection: crowdsecurity/sshd"]
+        );
     }
 }

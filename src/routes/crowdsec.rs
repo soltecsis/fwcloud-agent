@@ -323,15 +323,16 @@ async fn remove_crowdsec_bouncer(
 #[post("/crowdsec/install")]
 async fn install_crowdsec(
     cfg: web::Data<Arc<Config>>,
-    _request: web::Json<CrowdSecInstallRequest>,
+    request: web::Json<CrowdSecInstallRequest>,
 ) -> Result<HttpResponse> {
+    let progress = crate::crowdsec::progress::CrowdSecProgress::from_request(&cfg, request.ws_id)?;
     let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let install_result = install::install().await;
+        let install_result = install::install_with_progress(Some(&progress)).await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         install_result?
@@ -365,15 +366,16 @@ async fn uninstall_crowdsec(
 #[post("/crowdsec/bouncer/install")]
 async fn install_crowdsec_bouncer(
     cfg: web::Data<Arc<Config>>,
-    _request: web::Json<CrowdSecBouncerInstallRequest>,
+    request: web::Json<CrowdSecBouncerInstallRequest>,
 ) -> Result<HttpResponse> {
+    let progress = crate::crowdsec::progress::CrowdSecProgress::from_request(&cfg, request.ws_id)?;
     let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let install_result = bouncers::install().await;
+        let install_result = bouncers::install_with_progress(Some(&progress)).await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         install_result?
