@@ -34,7 +34,7 @@ use crate::{
             CrowdSecStepResult, CrowdSecStepStatus,
         },
         packages,
-        progress::CrowdSecProgress,
+        progress::{CrowdSecProgress, CrowdSecProgressMessageType},
     },
     errors::{FwcError, Result},
 };
@@ -52,8 +52,10 @@ pub async fn install_with_progress(
 
     emit_progress(progress, "Installing CrowdSec packages and dependencies");
     let mut steps = packages::install_packages_with_progress(progress).await?;
+    emit_success(progress, "CrowdSec packages and dependencies are ready");
     emit_progress(progress, "Enabling CrowdSec service");
     enable_crowdsec_service().await?;
+    emit_success(progress, "CrowdSec service is enabled and running");
     steps.push(CrowdSecStepResult {
         step: CrowdSecInstallStep::CrowdSecService,
         status: CrowdSecStepStatus::Completed,
@@ -62,6 +64,7 @@ pub async fn install_with_progress(
 
     emit_progress(progress, "Updating CrowdSec Hub index");
     update_hub().await?;
+    emit_success(progress, "CrowdSec Hub index is up to date");
     steps.push(CrowdSecStepResult {
         step: CrowdSecInstallStep::HubUpdate,
         status: CrowdSecStepStatus::Completed,
@@ -70,6 +73,7 @@ pub async fn install_with_progress(
 
     emit_progress(progress, "Installing CrowdSec default collections");
     install_default_collections(progress).await?;
+    emit_success(progress, "CrowdSec default collections are ready");
     steps.push(CrowdSecStepResult {
         step: CrowdSecInstallStep::DefaultCollections,
         status: CrowdSecStepStatus::Completed,
@@ -79,8 +83,9 @@ pub async fn install_with_progress(
 
     emit_progress(progress, "Restarting CrowdSec service");
     restart_crowdsec_service().await?;
+    emit_success(progress, "CrowdSec service restarted");
     log::info!("CrowdSec installation completed");
-    emit_progress(progress, "CrowdSec installation completed");
+    emit_success(progress, "CrowdSec installation completed");
 
     Ok(CrowdSecInstallResponse {
         data_retention: CrowdSecDataRetention::Preserve,
@@ -112,7 +117,7 @@ async fn install_default_collections(progress: Option<&CrowdSecProgress>) -> Res
                 "CrowdSec default collection is already installed; preserving its local state: {}",
                 collection
             );
-            emit_progress(
+            emit_warning(
                 progress,
                 &format!("CrowdSec collection is already installed: {collection}"),
             );
@@ -127,7 +132,7 @@ async fn install_default_collections(progress: Option<&CrowdSecProgress>) -> Res
         CrowdSecCommand::cscli(&["collections", "install", collection])?
             .execute()
             .await?;
-        emit_progress(
+        emit_success(
             progress,
             &format!("CrowdSec collection installed: {collection}"),
         );
@@ -138,7 +143,19 @@ async fn install_default_collections(progress: Option<&CrowdSecProgress>) -> Res
 
 fn emit_progress(progress: Option<&CrowdSecProgress>, message: &str) {
     if let Some(progress) = progress {
-        progress.message(message);
+        progress.typed_message(CrowdSecProgressMessageType::Info, message);
+    }
+}
+
+fn emit_success(progress: Option<&CrowdSecProgress>, message: &str) {
+    if let Some(progress) = progress {
+        progress.typed_message(CrowdSecProgressMessageType::Success, message);
+    }
+}
+
+fn emit_warning(progress: Option<&CrowdSecProgress>, message: &str) {
+    if let Some(progress) = progress {
+        progress.typed_message(CrowdSecProgressMessageType::Warning, message);
     }
 }
 
@@ -195,7 +212,12 @@ async fn run_systemctl(arguments: &[&str]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{emit_progress, json_collection_is_installed};
-    use crate::{crowdsec::progress::CrowdSecProgress, utils::ws::WsData};
+    use crate::{
+        crowdsec::progress::{
+            CrowdSecProgress, CrowdSecProgressMessage, CrowdSecProgressMessageType,
+        },
+        utils::ws::WsData,
+    };
     use serde_json::json;
     use std::{
         collections::HashMap,
@@ -240,9 +262,13 @@ mod tests {
             "Installing CrowdSec collection: crowdsecurity/sshd",
         );
 
+        let message =
+            serde_json::from_str::<CrowdSecProgressMessage>(&data.lock().unwrap().lines[0])
+                .unwrap();
+        assert_eq!(message.message_type, CrowdSecProgressMessageType::Info);
         assert_eq!(
-            data.lock().unwrap().lines,
-            vec!["Installing CrowdSec collection: crowdsecurity/sshd"]
+            message.message,
+            "Installing CrowdSec collection: crowdsecurity/sshd"
         );
     }
 }

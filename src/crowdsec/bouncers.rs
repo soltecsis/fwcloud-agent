@@ -47,7 +47,7 @@ use crate::{
             CrowdSecBouncersResponse, CrowdSecStepResult, CrowdSecStepStatus,
         },
         packages,
-        progress::CrowdSecProgress,
+        progress::{CrowdSecProgress, CrowdSecProgressMessageType},
     },
     errors::{FwcError, Result},
 };
@@ -325,23 +325,45 @@ pub async fn install_with_progress(
 
     emit_progress(progress, "Preparing FWCloud CrowdSec blacklist IPSet");
     ensure_blacklist_ipsets().await?;
+    emit_success(progress, "FWCloud CrowdSec blacklist IPSet are ready");
     emit_progress(progress, "Configuring FWCloud CrowdSec IPSet boot service");
     install_ipset_setup_service().await?;
+    emit_success(progress, "FWCloud CrowdSec IPSet boot service is enabled");
     emit_progress(
         progress,
         "Preparing CrowdSec Firewall Bouncer configuration",
     );
     let api_key = prepare_set_only_configuration().await?;
+    emit_success(
+        progress,
+        "CrowdSec Firewall Bouncer is configured for FWCloud IPSet only",
+    );
     emit_progress(progress, "Installing CrowdSec Firewall Bouncer package");
     let package_installed =
         packages::install_firewall_bouncer_package_with_progress(progress).await?;
+    if package_installed {
+        emit_success(progress, "CrowdSec Firewall Bouncer package is installed");
+    } else {
+        emit_warning(
+            progress,
+            "CrowdSec Firewall Bouncer package is already installed",
+        );
+    }
     emit_progress(progress, "Writing FWCloud IPSet-only bouncer configuration");
     write_set_only_configuration(&api_key).await?;
+    emit_success(
+        progress,
+        "FWCloud IPSet-only bouncer configuration is written",
+    );
     emit_progress(progress, "Enabling CrowdSec Firewall Bouncer service");
     enable_firewall_bouncer_service().await?;
+    emit_success(
+        progress,
+        "CrowdSec Firewall Bouncer service is enabled and running",
+    );
 
     log::info!("CrowdSec Firewall Bouncer installation completed");
-    emit_progress(progress, "CrowdSec Firewall Bouncer installation completed");
+    emit_success(progress, "CrowdSec Firewall Bouncer installation completed");
 
     Ok(CrowdSecBouncerInstallResponse {
         steps: vec![
@@ -381,7 +403,19 @@ pub async fn install_with_progress(
 
 fn emit_progress(progress: Option<&CrowdSecProgress>, message: &str) {
     if let Some(progress) = progress {
-        progress.message(message);
+        progress.typed_message(CrowdSecProgressMessageType::Info, message);
+    }
+}
+
+fn emit_success(progress: Option<&CrowdSecProgress>, message: &str) {
+    if let Some(progress) = progress {
+        progress.typed_message(CrowdSecProgressMessageType::Success, message);
+    }
+}
+
+fn emit_warning(progress: Option<&CrowdSecProgress>, message: &str) {
+    if let Some(progress) = progress {
+        progress.typed_message(CrowdSecProgressMessageType::Warning, message);
     }
 }
 
@@ -396,23 +430,53 @@ pub async fn uninstall_with_progress(
 
     emit_progress(progress, "Stopping CrowdSec Firewall Bouncer service");
     let service_disabled = disable_systemd_service(FIREWALL_BOUNCER_SERVICE).await?;
+    emit_boolean_result(
+        progress,
+        service_disabled,
+        "CrowdSec Firewall Bouncer service is disabled and stopped",
+        "CrowdSec Firewall Bouncer service is already absent",
+    );
     emit_progress(
         progress,
         "Removing FWCloud CrowdSec Firewall Bouncer registration",
     );
     let registration_removed = remove_bouncer_registration().await?;
+    emit_boolean_result(
+        progress,
+        registration_removed,
+        "FWCloud CrowdSec Firewall Bouncer registration is removed",
+        "FWCloud CrowdSec Firewall Bouncer registration is already absent",
+    );
     emit_progress(
         progress,
         "Removing FWCloud CrowdSec Firewall Bouncer configuration",
     );
     let configuration_removed = remove_managed_file(BOUNCER_CONFIG_OVERRIDE_PATH).await?;
+    emit_boolean_result(
+        progress,
+        configuration_removed,
+        "FWCloud CrowdSec Firewall Bouncer configuration is removed",
+        "FWCloud CrowdSec Firewall Bouncer configuration is already absent",
+    );
     emit_progress(progress, "Removing FWCloud CrowdSec IPSet boot service");
     let ipset_service_removed = remove_ipset_setup_service().await?;
+    emit_boolean_result(
+        progress,
+        ipset_service_removed,
+        "FWCloud CrowdSec IPSet boot service is removed",
+        "FWCloud CrowdSec IPSet boot service is already absent",
+    );
     emit_progress(progress, "Clearing FWCloud CrowdSec blacklist IPSet");
     let cleared_ipsets = clear_blacklist_ipsets().await?;
+    emit_boolean_result(
+        progress,
+        cleared_ipsets,
+        "FWCloud CrowdSec blacklist IPSet are cleared and preserved",
+        "FWCloud CrowdSec blacklist IPSet are already absent",
+    );
 
     log::info!("FWCloud CrowdSec Firewall Bouncer disabled");
-    emit_progress(
+    emit_success(
         progress,
         "FWCloud CrowdSec Firewall Bouncer uninstall completed",
     );
@@ -451,6 +515,19 @@ pub async fn uninstall_with_progress(
             ),
         ],
     })
+}
+
+fn emit_boolean_result(
+    progress: Option<&CrowdSecProgress>,
+    completed: bool,
+    success_message: &str,
+    warning_message: &str,
+) {
+    if completed {
+        emit_success(progress, success_message);
+    } else {
+        emit_warning(progress, warning_message);
+    }
 }
 
 async fn write_set_only_configuration(api_key: &str) -> Result<()> {
@@ -1074,17 +1151,29 @@ fn set_only_configuration_contents(
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+        time::SystemTime,
+    };
+
     use super::{
         bouncer_register_response, bouncers_from_json, configuration_is_set_only,
-        firewall_rules_contain_unmanaged_crowdsec, integration_status, reject_fwcloud_bouncer,
-        set_only_configuration_contents, validate_bouncer_name, BouncerConfigurationState,
-        CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse,
-        CrowdSecIpSetStatus, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
+        emit_boolean_result, firewall_rules_contain_unmanaged_crowdsec, integration_status,
+        reject_fwcloud_bouncer, set_only_configuration_contents, validate_bouncer_name,
+        BouncerConfigurationState, CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig,
+        CrowdSecBouncersResponse, CrowdSecIpSetStatus, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST,
+        IPSET_V6_BLACKLIST,
     };
     use crate::{
-        crowdsec::errors::{BOUNCER_CONFLICT, BOUNCER_INVALID, COMMAND_FAILED},
+        crowdsec::{
+            errors::{BOUNCER_CONFLICT, BOUNCER_INVALID, COMMAND_FAILED},
+            progress::{CrowdSecProgress, CrowdSecProgressMessage, CrowdSecProgressMessageType},
+        },
         errors::FwcError,
+        utils::ws::WsData,
     };
+    use uuid::Uuid;
 
     fn ipset_status(name: &'static str, exists: bool) -> CrowdSecIpSetStatus {
         CrowdSecIpSetStatus { name, exists }
@@ -1197,5 +1286,27 @@ mod tests {
         assert!(!serialized.contains("api_key"));
         assert!(!serialized.contains("generated-key"));
         assert!(response.bouncers[0].bouncer_type.is_none());
+    }
+
+    #[test]
+    fn bouncer_uninstall_progress_classifies_completed_and_absent_resources() {
+        let map = Arc::new(Mutex::new(HashMap::new()));
+        let id = Uuid::new_v4();
+        let data = Arc::new(Mutex::new(WsData {
+            created_at: SystemTime::now(),
+            lines: Vec::new(),
+            finished: false,
+        }));
+        map.lock().unwrap().insert(id, Arc::clone(&data));
+        let progress = CrowdSecProgress::from_ws_map(map, Some(id)).unwrap();
+
+        emit_boolean_result(Some(&progress), true, "Bouncer removed", "Bouncer absent");
+        emit_boolean_result(Some(&progress), false, "Bouncer removed", "Bouncer absent");
+
+        let data = data.lock().unwrap();
+        let completed = serde_json::from_str::<CrowdSecProgressMessage>(&data.lines[0]).unwrap();
+        let absent = serde_json::from_str::<CrowdSecProgressMessage>(&data.lines[1]).unwrap();
+        assert_eq!(completed.message_type, CrowdSecProgressMessageType::Success);
+        assert_eq!(absent.message_type, CrowdSecProgressMessageType::Warning);
     }
 }

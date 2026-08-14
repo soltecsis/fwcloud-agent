@@ -34,7 +34,7 @@ use crate::{
             CrowdSecUninstallResponse, CrowdSecUninstallStep,
         },
         packages,
-        progress::CrowdSecProgress,
+        progress::{CrowdSecProgress, CrowdSecProgressMessageType},
     },
     errors::{FwcError, Result},
 };
@@ -64,14 +64,21 @@ pub async fn uninstall_with_progress(
     let mut steps = Vec::new();
     emit_progress(progress, "Disabling FWCloud CrowdSec Firewall Bouncer");
     let bouncer_uninstall = bouncers::uninstall_with_progress(progress).await?;
-    steps.push(bouncer_uninstall_step(&bouncer_uninstall));
+    let bouncer_step = bouncer_uninstall_step(&bouncer_uninstall);
+    emit_step_result(progress, &bouncer_step);
+    steps.push(bouncer_step);
     emit_progress(progress, "Disabling CrowdSec service");
-    steps.push(disable_service(CrowdSecUninstallStep::CrowdSecService, "crowdsec.service").await?);
+    let service_step =
+        disable_service(CrowdSecUninstallStep::CrowdSecService, "crowdsec.service").await?;
+    emit_step_result(progress, &service_step);
+    steps.push(service_step);
     emit_progress(progress, "Removing CrowdSec packages while preserving data");
-    steps.push(packages::uninstall_packages_with_progress(progress).await?);
+    let packages_step = packages::uninstall_packages_with_progress(progress).await?;
+    emit_step_result(progress, &packages_step);
+    steps.push(packages_step);
 
     info!("CrowdSec uninstall completed while preserving data");
-    emit_progress(
+    emit_success(
         progress,
         "CrowdSec uninstall completed while preserving data",
     );
@@ -84,7 +91,35 @@ pub async fn uninstall_with_progress(
 
 fn emit_progress(progress: Option<&CrowdSecProgress>, message: &str) {
     if let Some(progress) = progress {
-        progress.message(message);
+        progress.typed_message(CrowdSecProgressMessageType::Info, message);
+    }
+}
+
+fn emit_success(progress: Option<&CrowdSecProgress>, message: &str) {
+    if let Some(progress) = progress {
+        progress.typed_message(CrowdSecProgressMessageType::Success, message);
+    }
+}
+
+fn emit_warning(progress: Option<&CrowdSecProgress>, message: &str) {
+    if let Some(progress) = progress {
+        progress.typed_message(CrowdSecProgressMessageType::Warning, message);
+    }
+}
+
+fn emit_step_result(
+    progress: Option<&CrowdSecProgress>,
+    step: &CrowdSecStepResult<CrowdSecUninstallStep>,
+) {
+    match step.status {
+        CrowdSecStepStatus::Completed => emit_success(progress, &step.message),
+        CrowdSecStepStatus::Skipped => emit_warning(progress, &step.message),
+        CrowdSecStepStatus::Failed => {
+            if let Some(progress) = progress {
+                progress.typed_message(CrowdSecProgressMessageType::Error, &step.message);
+            }
+        }
+        CrowdSecStepStatus::Pending => {}
     }
 }
 
@@ -169,8 +204,23 @@ async fn run_systemctl_allow_failure(arguments: &[&str]) -> Result<std::process:
 
 #[cfg(test)]
 mod tests {
-    use super::require_confirmation;
-    use crate::{crowdsec::errors::UNINSTALL_CONFIRMATION_REQUIRED, errors::FwcError};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+        time::SystemTime,
+    };
+
+    use super::{emit_step_result, require_confirmation};
+    use crate::{
+        crowdsec::{
+            errors::UNINSTALL_CONFIRMATION_REQUIRED,
+            models::{CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallStep},
+            progress::{CrowdSecProgress, CrowdSecProgressMessage, CrowdSecProgressMessageType},
+        },
+        errors::FwcError,
+        utils::ws::WsData,
+    };
+    use uuid::Uuid;
 
     #[test]
     fn uninstall_requires_explicit_confirmation() {
@@ -184,5 +234,49 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn uninstall_progress_classifies_step_results() {
+        let map = Arc::new(Mutex::new(HashMap::new()));
+        let id = Uuid::new_v4();
+        let data = Arc::new(Mutex::new(WsData {
+            created_at: SystemTime::now(),
+            lines: Vec::new(),
+            finished: false,
+        }));
+        map.lock().unwrap().insert(id, Arc::clone(&data));
+        let progress = CrowdSecProgress::from_ws_map(map, Some(id)).unwrap();
+
+        for (status, message) in [
+            (CrowdSecStepStatus::Completed, "CrowdSec service removed"),
+            (CrowdSecStepStatus::Skipped, "CrowdSec service absent"),
+            (CrowdSecStepStatus::Failed, "CrowdSec service failed"),
+        ] {
+            emit_step_result(
+                Some(&progress),
+                &CrowdSecStepResult {
+                    step: CrowdSecUninstallStep::CrowdSecService,
+                    status,
+                    message: message.to_string(),
+                },
+            );
+        }
+
+        let data = data.lock().unwrap();
+        let messages = data
+            .lines
+            .iter()
+            .map(|line| serde_json::from_str::<CrowdSecProgressMessage>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            messages[0].message_type,
+            CrowdSecProgressMessageType::Success
+        );
+        assert_eq!(
+            messages[1].message_type,
+            CrowdSecProgressMessageType::Warning
+        );
+        assert_eq!(messages[2].message_type, CrowdSecProgressMessageType::Error);
     }
 }

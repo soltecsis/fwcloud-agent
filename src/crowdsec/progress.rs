@@ -26,6 +26,7 @@ use std::{
 };
 
 use log::debug;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
@@ -36,6 +37,21 @@ use crate::{
 };
 
 type WsMap = Arc<Mutex<HashMap<Uuid, Arc<Mutex<WsData>>>>>;
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecProgressMessageType {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub struct CrowdSecProgressMessage {
+    pub message_type: CrowdSecProgressMessageType,
+    pub message: String,
+}
 
 pub struct CrowdSecProgress {
     ws_id: Option<Uuid>,
@@ -85,6 +101,23 @@ impl CrowdSecProgress {
         debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
     }
 
+    pub fn typed_message(&self, message_type: CrowdSecProgressMessageType, message: &str) {
+        let Some(ws_data) = &self.ws_data else {
+            return;
+        };
+
+        let message = redact_sensitive_text(message);
+        let message = serde_json::to_string(&CrowdSecProgressMessage {
+            message_type,
+            message,
+        })
+        .expect("CrowdSec progress messages must be serializable");
+
+        debug!("Locking ws data mutex (thread id: {})", thread_id::get());
+        ws_data.lock().unwrap().lines.push(message);
+        debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
+    }
+
     pub fn is_active(&self) -> bool {
         self.ws_data.is_some()
     }
@@ -128,7 +161,7 @@ mod tests {
 
     use uuid::Uuid;
 
-    use super::CrowdSecProgress;
+    use super::{CrowdSecProgress, CrowdSecProgressMessage, CrowdSecProgressMessageType};
     use crate::errors::FwcError;
     use crate::utils::ws::WsData;
 
@@ -184,6 +217,26 @@ mod tests {
         assert!(data.finished);
         assert!(!map.lock().unwrap().contains_key(&id));
         assert!(!progress.is_active());
+    }
+
+    #[test]
+    fn publishes_typed_and_redacted_progress_messages() {
+        let map = ws_map();
+        let id = Uuid::new_v4();
+        let data = ws_data();
+        map.lock().unwrap().insert(id, Arc::clone(&data));
+        let progress = CrowdSecProgress::from_ws_map(map, Some(id)).unwrap();
+
+        progress.typed_message(
+            CrowdSecProgressMessageType::Success,
+            "api_key: secret-api-key",
+        );
+
+        let message =
+            serde_json::from_str::<CrowdSecProgressMessage>(&data.lock().unwrap().lines[0])
+                .unwrap();
+        assert_eq!(message.message_type, CrowdSecProgressMessageType::Success);
+        assert_eq!(message.message, "api_key: [REDACTED]");
     }
 
     #[test]
