@@ -430,23 +430,53 @@ pub async fn uninstall_with_progress(
 
     emit_progress(progress, "Stopping CrowdSec Firewall Bouncer service");
     let service_disabled = disable_systemd_service(FIREWALL_BOUNCER_SERVICE).await?;
+    emit_boolean_result(
+        progress,
+        service_disabled,
+        "CrowdSec Firewall Bouncer service is disabled and stopped",
+        "CrowdSec Firewall Bouncer service is already absent",
+    );
     emit_progress(
         progress,
         "Removing FWCloud CrowdSec Firewall Bouncer registration",
     );
     let registration_removed = remove_bouncer_registration().await?;
+    emit_boolean_result(
+        progress,
+        registration_removed,
+        "FWCloud CrowdSec Firewall Bouncer registration is removed",
+        "FWCloud CrowdSec Firewall Bouncer registration is already absent",
+    );
     emit_progress(
         progress,
         "Removing FWCloud CrowdSec Firewall Bouncer configuration",
     );
     let configuration_removed = remove_managed_file(BOUNCER_CONFIG_OVERRIDE_PATH).await?;
+    emit_boolean_result(
+        progress,
+        configuration_removed,
+        "FWCloud CrowdSec Firewall Bouncer configuration is removed",
+        "FWCloud CrowdSec Firewall Bouncer configuration is already absent",
+    );
     emit_progress(progress, "Removing FWCloud CrowdSec IPSet boot service");
     let ipset_service_removed = remove_ipset_setup_service().await?;
+    emit_boolean_result(
+        progress,
+        ipset_service_removed,
+        "FWCloud CrowdSec IPSet boot service is removed",
+        "FWCloud CrowdSec IPSet boot service is already absent",
+    );
     emit_progress(progress, "Clearing FWCloud CrowdSec blacklist IPSet");
     let cleared_ipsets = clear_blacklist_ipsets().await?;
+    emit_boolean_result(
+        progress,
+        cleared_ipsets,
+        "FWCloud CrowdSec blacklist IPSet are cleared and preserved",
+        "FWCloud CrowdSec blacklist IPSet are already absent",
+    );
 
     log::info!("FWCloud CrowdSec Firewall Bouncer disabled");
-    emit_progress(
+    emit_success(
         progress,
         "FWCloud CrowdSec Firewall Bouncer uninstall completed",
     );
@@ -485,6 +515,19 @@ pub async fn uninstall_with_progress(
             ),
         ],
     })
+}
+
+fn emit_boolean_result(
+    progress: Option<&CrowdSecProgress>,
+    completed: bool,
+    success_message: &str,
+    warning_message: &str,
+) {
+    if completed {
+        emit_success(progress, success_message);
+    } else {
+        emit_warning(progress, warning_message);
+    }
 }
 
 async fn write_set_only_configuration(api_key: &str) -> Result<()> {
