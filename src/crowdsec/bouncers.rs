@@ -47,7 +47,7 @@ use crate::{
             CrowdSecBouncersResponse, CrowdSecStepResult, CrowdSecStepStatus,
         },
         packages,
-        progress::CrowdSecProgress,
+        progress::{CrowdSecProgress, CrowdSecProgressMessageType},
     },
     errors::{FwcError, Result},
 };
@@ -325,23 +325,45 @@ pub async fn install_with_progress(
 
     emit_progress(progress, "Preparing FWCloud CrowdSec blacklist IPSet");
     ensure_blacklist_ipsets().await?;
+    emit_success(progress, "FWCloud CrowdSec blacklist IPSet are ready");
     emit_progress(progress, "Configuring FWCloud CrowdSec IPSet boot service");
     install_ipset_setup_service().await?;
+    emit_success(progress, "FWCloud CrowdSec IPSet boot service is enabled");
     emit_progress(
         progress,
         "Preparing CrowdSec Firewall Bouncer configuration",
     );
     let api_key = prepare_set_only_configuration().await?;
+    emit_success(
+        progress,
+        "CrowdSec Firewall Bouncer is configured for FWCloud IPSet only",
+    );
     emit_progress(progress, "Installing CrowdSec Firewall Bouncer package");
     let package_installed =
         packages::install_firewall_bouncer_package_with_progress(progress).await?;
+    if package_installed {
+        emit_success(progress, "CrowdSec Firewall Bouncer package is installed");
+    } else {
+        emit_warning(
+            progress,
+            "CrowdSec Firewall Bouncer package is already installed",
+        );
+    }
     emit_progress(progress, "Writing FWCloud IPSet-only bouncer configuration");
     write_set_only_configuration(&api_key).await?;
+    emit_success(
+        progress,
+        "FWCloud IPSet-only bouncer configuration is written",
+    );
     emit_progress(progress, "Enabling CrowdSec Firewall Bouncer service");
     enable_firewall_bouncer_service().await?;
+    emit_success(
+        progress,
+        "CrowdSec Firewall Bouncer service is enabled and running",
+    );
 
     log::info!("CrowdSec Firewall Bouncer installation completed");
-    emit_progress(progress, "CrowdSec Firewall Bouncer installation completed");
+    emit_success(progress, "CrowdSec Firewall Bouncer installation completed");
 
     Ok(CrowdSecBouncerInstallResponse {
         steps: vec![
@@ -381,7 +403,19 @@ pub async fn install_with_progress(
 
 fn emit_progress(progress: Option<&CrowdSecProgress>, message: &str) {
     if let Some(progress) = progress {
-        progress.message(message);
+        progress.typed_message(CrowdSecProgressMessageType::Info, message);
+    }
+}
+
+fn emit_success(progress: Option<&CrowdSecProgress>, message: &str) {
+    if let Some(progress) = progress {
+        progress.typed_message(CrowdSecProgressMessageType::Success, message);
+    }
+}
+
+fn emit_warning(progress: Option<&CrowdSecProgress>, message: &str) {
+    if let Some(progress) = progress {
+        progress.typed_message(CrowdSecProgressMessageType::Warning, message);
     }
 }
 
