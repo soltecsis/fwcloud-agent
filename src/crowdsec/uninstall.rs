@@ -204,8 +204,23 @@ async fn run_systemctl_allow_failure(arguments: &[&str]) -> Result<std::process:
 
 #[cfg(test)]
 mod tests {
-    use super::require_confirmation;
-    use crate::{crowdsec::errors::UNINSTALL_CONFIRMATION_REQUIRED, errors::FwcError};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+        time::SystemTime,
+    };
+
+    use super::{emit_step_result, require_confirmation};
+    use crate::{
+        crowdsec::{
+            errors::UNINSTALL_CONFIRMATION_REQUIRED,
+            models::{CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallStep},
+            progress::{CrowdSecProgress, CrowdSecProgressMessage, CrowdSecProgressMessageType},
+        },
+        errors::FwcError,
+        utils::ws::WsData,
+    };
+    use uuid::Uuid;
 
     #[test]
     fn uninstall_requires_explicit_confirmation() {
@@ -219,5 +234,49 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn uninstall_progress_classifies_step_results() {
+        let map = Arc::new(Mutex::new(HashMap::new()));
+        let id = Uuid::new_v4();
+        let data = Arc::new(Mutex::new(WsData {
+            created_at: SystemTime::now(),
+            lines: Vec::new(),
+            finished: false,
+        }));
+        map.lock().unwrap().insert(id, Arc::clone(&data));
+        let progress = CrowdSecProgress::from_ws_map(map, Some(id)).unwrap();
+
+        for (status, message) in [
+            (CrowdSecStepStatus::Completed, "CrowdSec service removed"),
+            (CrowdSecStepStatus::Skipped, "CrowdSec service absent"),
+            (CrowdSecStepStatus::Failed, "CrowdSec service failed"),
+        ] {
+            emit_step_result(
+                Some(&progress),
+                &CrowdSecStepResult {
+                    step: CrowdSecUninstallStep::CrowdSecService,
+                    status,
+                    message: message.to_string(),
+                },
+            );
+        }
+
+        let data = data.lock().unwrap();
+        let messages = data
+            .lines
+            .iter()
+            .map(|line| serde_json::from_str::<CrowdSecProgressMessage>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            messages[0].message_type,
+            CrowdSecProgressMessageType::Success
+        );
+        assert_eq!(
+            messages[1].message_type,
+            CrowdSecProgressMessageType::Warning
+        );
+        assert_eq!(messages[2].message_type, CrowdSecProgressMessageType::Error);
     }
 }
