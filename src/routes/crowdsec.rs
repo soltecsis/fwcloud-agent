@@ -34,8 +34,7 @@ use crate::{
             CrowdSecBouncerUninstallRequest, CrowdSecCollectionInstallRequest,
             CrowdSecCollectionRemoveRequest, CrowdSecCollectionUpdateRequest,
             CrowdSecCollectionsQuery, CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest,
-            CrowdSecDecisionsQuery, CrowdSecFirewallBackend, CrowdSecInstallRequest,
-            CrowdSecUninstallRequest,
+            CrowdSecDecisionsQuery, CrowdSecInstallRequest, CrowdSecUninstallRequest,
         },
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
         status, uninstall,
@@ -328,12 +327,6 @@ async fn install_crowdsec(
     request: web::Json<CrowdSecInstallRequest>,
 ) -> Result<HttpResponse> {
     let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
-    if request.backend != CrowdSecFirewallBackend::Iptables {
-        return Err(crate::errors::FwcError::crowdsec(
-            crate::crowdsec::errors::BOUNCER_INVALID,
-            "NFTables CrowdSec Firewall Bouncer support is not configured",
-        ));
-    }
     let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
@@ -387,8 +380,9 @@ async fn uninstall_crowdsec(
 #[post("/crowdsec/bouncer/install")]
 async fn install_crowdsec_bouncer(
     cfg: web::Data<Arc<Config>>,
-    request: web::Json<CrowdSecBouncerInstallRequest>,
+    body: web::Bytes,
 ) -> Result<HttpResponse> {
+    let request = bouncer_install_request(&body)?;
     let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
     let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
@@ -410,6 +404,19 @@ async fn install_crowdsec_bouncer(
     };
 
     Ok(HttpResponse::Ok().json(response))
+}
+
+fn bouncer_install_request(body: &[u8]) -> Result<CrowdSecBouncerInstallRequest> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(CrowdSecBouncerInstallRequest::default());
+    }
+
+    serde_json::from_slice(body).map_err(|_| {
+        crate::errors::FwcError::crowdsec(
+            crate::crowdsec::errors::BOUNCER_INVALID,
+            "Invalid CrowdSec Firewall Bouncer installation request",
+        )
+    })
 }
 
 #[post("/crowdsec/bouncer/uninstall")]
@@ -443,4 +450,22 @@ async fn uninstall_crowdsec_bouncer(
 
 fn emit_progress_error(progress: &CrowdSecProgress, message: &str) {
     progress.typed_message(CrowdSecProgressMessageType::Error, message);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bouncer_install_request;
+    use crate::crowdsec::models::CrowdSecFirewallBackend;
+
+    #[test]
+    fn bouncer_install_request_defaults_to_iptables_when_empty() {
+        let request = bouncer_install_request(b"").unwrap();
+
+        assert_eq!(request.backend, CrowdSecFirewallBackend::Iptables);
+    }
+
+    #[test]
+    fn bouncer_install_request_rejects_invalid_json() {
+        assert!(bouncer_install_request(b"{").is_err());
+    }
 }

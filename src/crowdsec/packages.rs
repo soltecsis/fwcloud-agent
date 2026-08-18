@@ -154,6 +154,25 @@ pub async fn install_firewall_bouncer_package_for_backend_with_progress(
     Ok(installed)
 }
 
+pub async fn install_nftables_runtime_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<bool> {
+    let package_manager = detect_package_manager().await?;
+    configure_repository(package_manager, progress).await?;
+
+    if package_is_installed(package_manager, super::bouncers::NFTABLES_RUNTIME_PACKAGE).await? {
+        return Ok(false);
+    }
+
+    install_package(
+        package_manager,
+        super::bouncers::NFTABLES_RUNTIME_PACKAGE,
+        progress,
+    )
+    .await?;
+    Ok(true)
+}
+
 pub async fn firewall_bouncer_package_is_installed(
     backend: CrowdSecFirewallBackend,
 ) -> Result<bool> {
@@ -185,9 +204,14 @@ pub async fn package_status() -> Result<CrowdSecPackageStatus> {
     Ok(CrowdSecPackageStatus {
         crowdsec_installed: package_is_installed(package_manager, "crowdsec").await?,
         ipset_installed: package_is_installed(package_manager, "ipset").await?,
-        firewall_bouncer_installed: package_is_installed(
+        iptables_firewall_bouncer_installed: package_is_installed(
             package_manager,
-            super::bouncers::FIREWALL_BOUNCER_PACKAGE,
+            super::bouncers::IPTABLES_FIREWALL_BOUNCER_PACKAGE,
+        )
+        .await?,
+        nftables_firewall_bouncer_installed: package_is_installed(
+            package_manager,
+            super::bouncers::NFTABLES_FIREWALL_BOUNCER_PACKAGE,
         )
         .await?,
     })

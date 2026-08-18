@@ -92,6 +92,8 @@ pub enum CrowdSecUninstallStep {
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecBouncerInstallStep {
     BlacklistIpSets,
+    NftablesRuntime,
+    NftablesBlacklistSets,
     IpSetSetupService,
     Configuration,
     Package,
@@ -188,7 +190,17 @@ pub struct CrowdSecBouncerRemoveResponse {
 pub struct CrowdSecPackageStatus {
     pub crowdsec_installed: bool,
     pub ipset_installed: bool,
-    pub firewall_bouncer_installed: bool,
+    pub iptables_firewall_bouncer_installed: bool,
+    pub nftables_firewall_bouncer_installed: bool,
+}
+
+impl CrowdSecPackageStatus {
+    pub const fn firewall_bouncer_installed(&self, backend: CrowdSecFirewallBackend) -> bool {
+        match backend {
+            CrowdSecFirewallBackend::Iptables => self.iptables_firewall_bouncer_installed,
+            CrowdSecFirewallBackend::Nftables => self.nftables_firewall_bouncer_installed,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -455,8 +467,8 @@ impl CrowdSecCapabilitiesResponse {
 mod tests {
     use super::{
         CrowdSecBouncerInstallRequest, CrowdSecCapabilitiesResponse, CrowdSecDataRetention,
-        CrowdSecFirewallBackend, CrowdSecOperationRequest, CrowdSecStepResult, CrowdSecStepStatus,
-        CrowdSecUninstallResponse, CrowdSecUninstallStep,
+        CrowdSecFirewallBackend, CrowdSecOperationRequest, CrowdSecPackageStatus,
+        CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
     };
 
     #[test]
@@ -505,5 +517,18 @@ mod tests {
                 .unwrap();
 
         assert_eq!(request.backend, CrowdSecFirewallBackend::Nftables);
+    }
+
+    #[test]
+    fn reports_the_selected_firewall_bouncer_package_status() {
+        let packages = CrowdSecPackageStatus {
+            crowdsec_installed: true,
+            ipset_installed: true,
+            iptables_firewall_bouncer_installed: false,
+            nftables_firewall_bouncer_installed: true,
+        };
+
+        assert!(!packages.firewall_bouncer_installed(CrowdSecFirewallBackend::Iptables));
+        assert!(packages.firewall_bouncer_installed(CrowdSecFirewallBackend::Nftables));
     }
 }
