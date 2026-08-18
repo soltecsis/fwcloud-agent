@@ -76,6 +76,7 @@ pub const NFTABLES_V6_TABLE: &str = "filter";
 pub const NFTABLES_V6_CHAIN: &str = "INPUT";
 
 const IPSET_COMMAND: &str = "/usr/sbin/ipset";
+const NFT_COMMAND: &str = "/usr/sbin/nft";
 const CSCLI_COMMAND: &str = "/usr/bin/cscli";
 const IPTABLES_SAVE_COMMAND: &str = "/usr/sbin/iptables-save";
 const IP6TABLES_SAVE_COMMAND: &str = "/usr/sbin/ip6tables-save";
@@ -789,6 +790,34 @@ pub async fn ensure_blacklist_ipsets() -> Result<[CrowdSecIpSetStatus; 2]> {
     Ok([ipv4_blacklist, ipv6_blacklist])
 }
 
+pub async fn validate_nftables_blacklist_sets() -> Result<()> {
+    let blacklist_sets = [
+        ("ip", NFTABLES_V4_TABLE, IPSET_V4_BLACKLIST, "ipv4_addr"),
+        ("ip6", NFTABLES_V6_TABLE, IPSET_V6_BLACKLIST, "ipv6_addr"),
+    ];
+
+    for (family, table, name, expected_type) in blacklist_sets {
+        let output = run_nft(&["--json", "list", "set", family, table, name]).await?;
+        let output_is_compatible = output.status.success()
+            && nftables_blacklist_set_is_compatible(
+                String::from_utf8_lossy(&output.stdout).as_ref(),
+                family,
+                table,
+                name,
+                expected_type,
+            );
+
+        if !output_is_compatible {
+            return Err(FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "FWCloud NFTables CrowdSec blacklist sets are missing or incompatible",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn install_ipset_setup_service() -> Result<()> {
     write_if_changed(IPSET_SETUP_SERVICE_PATH, IPSET_SETUP_SERVICE_CONTENT).await?;
     fs::create_dir_all(BOUNCER_IPSET_DROP_IN_DIRECTORY)
@@ -937,6 +966,56 @@ async fn run_ipset(arguments: &[&str]) -> Result<std::process::Output> {
             "Unable to run FWCloud CrowdSec IPSet command",
         )
     })
+}
+
+async fn run_nft(arguments: &[&str]) -> Result<std::process::Output> {
+    if !Path::new(NFT_COMMAND).is_file() {
+        return Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "NFTables is not available for CrowdSec Firewall Bouncer integration",
+        ));
+    }
+
+    debug!(
+        "Running CrowdSec NFTables command: {} {:?}",
+        NFT_COMMAND, arguments
+    );
+    timeout(
+        IPSET_COMMAND_TIMEOUT,
+        Command::new(NFT_COMMAND).args(arguments).output(),
+    )
+    .await
+    .map_err(|_| FwcError::crowdsec(OPERATION_TIMEOUT, "CrowdSec NFTables command timed out"))?
+    .map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to run FWCloud NFTables command",
+        )
+    })
+}
+
+fn nftables_blacklist_set_is_compatible(
+    output: &str,
+    family: &str,
+    table: &str,
+    name: &str,
+    expected_type: &str,
+) -> bool {
+    serde_json::from_str::<Value>(output)
+        .ok()
+        .and_then(|value| value.get("nftables")?.as_array().cloned())
+        .is_some_and(|entries| {
+            entries.iter().any(|entry| {
+                let Some(set) = entry.get("set") else {
+                    return false;
+                };
+
+                set.get("family").and_then(Value::as_str) == Some(family)
+                    && set.get("table").and_then(Value::as_str) == Some(table)
+                    && set.get("name").and_then(Value::as_str) == Some(name)
+                    && set.get("type").and_then(Value::as_str) == Some(expected_type)
+            })
+        })
 }
 
 async fn run_systemctl(arguments: &[&str], error_message: &'static str) -> Result<()> {
@@ -1274,11 +1353,12 @@ mod tests {
     use super::{
         bouncer_register_response, bouncers_from_json, configuration_is_set_only,
         emit_boolean_result, firewall_rules_contain_unmanaged_crowdsec, integration_status,
-        nftables_set_only_configuration_contents, reject_fwcloud_bouncer,
-        set_only_configuration_contents, validate_bouncer_name, BouncerConfigurationState,
-        CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse,
-        CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig, FWCLOUD_BOUNCER_NAME,
-        IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
+        nftables_blacklist_set_is_compatible, nftables_set_only_configuration_contents,
+        reject_fwcloud_bouncer, set_only_configuration_contents, validate_bouncer_name,
+        BouncerConfigurationState, CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig,
+        CrowdSecBouncersResponse, CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig,
+        FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE,
+        NFTABLES_V6_TABLE,
     };
     use crate::{
         crowdsec::{
@@ -1317,6 +1397,52 @@ mod tests {
         assert!(configuration.contains("  ipv4:\n    enabled: true\n    set-only: true\n"));
         assert!(configuration.contains("    table: filter\n    chain: INPUT\n"));
         assert!(configuration.contains("  ipv6:\n    enabled: true\n    set-only: true\n"));
+    }
+
+    #[test]
+    fn recognizes_compatible_nftables_blacklist_sets() {
+        let ipv4_set = r#"{
+            "nftables": [{
+                "set": {
+                    "family": "ip",
+                    "table": "filter",
+                    "name": "crowdsec-blacklists",
+                    "type": "ipv4_addr"
+                }
+            }]
+        }"#;
+        let ipv6_set = r#"{
+            "nftables": [{
+                "set": {
+                    "family": "ip6",
+                    "table": "filter",
+                    "name": "crowdsec6-blacklists",
+                    "type": "ipv6_addr"
+                }
+            }]
+        }"#;
+
+        assert!(nftables_blacklist_set_is_compatible(
+            ipv4_set,
+            "ip",
+            NFTABLES_V4_TABLE,
+            IPSET_V4_BLACKLIST,
+            "ipv4_addr",
+        ));
+        assert!(nftables_blacklist_set_is_compatible(
+            ipv6_set,
+            "ip6",
+            NFTABLES_V6_TABLE,
+            IPSET_V6_BLACKLIST,
+            "ipv6_addr",
+        ));
+        assert!(!nftables_blacklist_set_is_compatible(
+            ipv4_set,
+            "ip",
+            NFTABLES_V4_TABLE,
+            IPSET_V4_BLACKLIST,
+            "ipv6_addr",
+        ));
     }
 
     #[test]
