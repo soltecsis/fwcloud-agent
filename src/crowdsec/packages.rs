@@ -34,8 +34,8 @@ use crate::{
     crowdsec::{
         errors::{COMMAND_FAILED, OPERATION_TIMEOUT, UNSUPPORTED_OS},
         models::{
-            CrowdSecInstallStep, CrowdSecPackageStatus, CrowdSecStepResult, CrowdSecStepStatus,
-            CrowdSecUninstallStep,
+            CrowdSecFirewallBackend, CrowdSecInstallStep, CrowdSecPackageStatus,
+            CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallStep,
         },
         progress::CrowdSecProgress,
         secrets::redact_sensitive_text,
@@ -44,7 +44,11 @@ use crate::{
 };
 
 const CROWDSEC_PACKAGES: &[&str] = &["crowdsec", "ipset"];
-const CROWDSEC_REMOVABLE_PACKAGES: &[&str] = &["crowdsec-firewall-bouncer-iptables", "crowdsec"];
+const CROWDSEC_REMOVABLE_PACKAGES: &[&str] = &[
+    "crowdsec-firewall-bouncer-iptables",
+    "crowdsec-firewall-bouncer-nftables",
+    "crowdsec",
+];
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 const OS_RELEASE_PATH: &str = "/etc/os-release";
 const APT_KEYRING_DIRECTORY: &str = "/etc/apt/keyrings";
@@ -123,19 +127,55 @@ pub async fn install_firewall_bouncer_package() -> Result<bool> {
 pub async fn install_firewall_bouncer_package_with_progress(
     progress: Option<&CrowdSecProgress>,
 ) -> Result<bool> {
+    install_firewall_bouncer_package_for_backend_with_progress(
+        CrowdSecFirewallBackend::Iptables,
+        progress,
+    )
+    .await
+}
+
+pub async fn install_firewall_bouncer_package_for_backend_with_progress(
+    backend: CrowdSecFirewallBackend,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<bool> {
     let package_manager = detect_package_manager().await?;
     configure_repository(package_manager, progress).await?;
+    let mut installed = false;
 
-    if package_is_installed(package_manager, super::bouncers::FIREWALL_BOUNCER_PACKAGE).await? {
+    for package in super::bouncers::firewall_bouncer_packages(backend) {
+        if package_is_installed(package_manager, package).await? {
+            continue;
+        }
+
+        install_package(package_manager, package, progress).await?;
+        installed = true;
+    }
+
+    Ok(installed)
+}
+
+pub async fn firewall_bouncer_package_is_installed(
+    backend: CrowdSecFirewallBackend,
+) -> Result<bool> {
+    let package_manager = detect_package_manager().await?;
+    package_is_installed(
+        package_manager,
+        super::bouncers::firewall_bouncer_package(backend),
+    )
+    .await
+}
+
+pub async fn uninstall_firewall_bouncer_package(
+    backend: CrowdSecFirewallBackend,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<bool> {
+    let package_manager = detect_package_manager().await?;
+    let package = super::bouncers::firewall_bouncer_package(backend);
+    if !package_is_installed(package_manager, package).await? {
         return Ok(false);
     }
 
-    install_package(
-        package_manager,
-        super::bouncers::FIREWALL_BOUNCER_PACKAGE,
-        progress,
-    )
-    .await?;
+    remove_package(package_manager, package, progress).await?;
     Ok(true)
 }
 
@@ -492,7 +532,14 @@ mod tests {
         is_package_manager_command, package_manager_for_os_release, package_removal_message,
         stream_command_output, PackageManager,
     };
-    use crate::{crowdsec::progress::CrowdSecProgress, utils::ws::WsData};
+    use crate::{
+        crowdsec::{
+            bouncers::{firewall_bouncer_package, firewall_bouncer_packages},
+            models::CrowdSecFirewallBackend,
+            progress::CrowdSecProgress,
+        },
+        utils::ws::WsData,
+    };
 
     #[test]
     fn selects_supported_package_managers() {
@@ -523,6 +570,22 @@ mod tests {
         assert_eq!(
             package_removal_message(&["crowdsec"], &["crowdsec-firewall-bouncer-iptables"]),
             "Removed CrowdSec packages: crowdsec; already absent: crowdsec-firewall-bouncer-iptables"
+        );
+    }
+
+    #[test]
+    fn maps_each_backend_to_its_bouncer_package() {
+        assert_eq!(
+            firewall_bouncer_package(CrowdSecFirewallBackend::Iptables),
+            "crowdsec-firewall-bouncer-iptables"
+        );
+        assert_eq!(
+            firewall_bouncer_package(CrowdSecFirewallBackend::Nftables),
+            "crowdsec-firewall-bouncer-nftables"
+        );
+        assert_eq!(
+            firewall_bouncer_packages(CrowdSecFirewallBackend::Nftables),
+            &["nftables", "crowdsec-firewall-bouncer-nftables"]
         );
     }
 

@@ -44,7 +44,8 @@ use crate::{
             CrowdSecBouncer, CrowdSecBouncerInstallResponse, CrowdSecBouncerInstallStep,
             CrowdSecBouncerRegisterResponse, CrowdSecBouncerRemoveResponse,
             CrowdSecBouncerUninstallResponse, CrowdSecBouncerUninstallStep,
-            CrowdSecBouncersResponse, CrowdSecStepResult, CrowdSecStepStatus,
+            CrowdSecBouncersResponse, CrowdSecFirewallBackend, CrowdSecStepResult,
+            CrowdSecStepStatus,
         },
         packages,
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
@@ -52,7 +53,10 @@ use crate::{
     errors::{FwcError, Result},
 };
 
-pub const FIREWALL_BOUNCER_PACKAGE: &str = "crowdsec-firewall-bouncer-iptables";
+pub const IPTABLES_FIREWALL_BOUNCER_PACKAGE: &str = "crowdsec-firewall-bouncer-iptables";
+pub const NFTABLES_FIREWALL_BOUNCER_PACKAGE: &str = "crowdsec-firewall-bouncer-nftables";
+pub const NFTABLES_RUNTIME_PACKAGE: &str = "nftables";
+pub const FIREWALL_BOUNCER_PACKAGE: &str = IPTABLES_FIREWALL_BOUNCER_PACKAGE;
 pub const FIREWALL_BOUNCER_SERVICE: &str = "crowdsec-firewall-bouncer.service";
 pub const FWCLOUD_BOUNCER_NAME: &str = "fwcloud";
 pub const BOUNCER_CONFIG_DIRECTORY: &str = "/etc/crowdsec/bouncers";
@@ -78,6 +82,33 @@ const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
 const IPSET_SETUP_SERVICE_CONTENT: &str = "[Unit]\nDescription=Create FWCloud CrowdSec blacklist IPSet\nBefore=crowdsec-firewall-bouncer.service\n\n[Service]\nType=oneshot\nExecStart=/usr/sbin/ipset create crowdsec-blacklists hash:ip timeout 0 maxelem 150000 -exist\nExecStart=/usr/sbin/ipset create crowdsec6-blacklists hash:ip family inet6 timeout 0 maxelem 150000 -exist\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n";
 const BOUNCER_IPSET_DROP_IN_CONTENT: &str =
     "[Unit]\nRequires=fwcloud-crowdsec-ipsets.service\nAfter=fwcloud-crowdsec-ipsets.service\n";
+
+pub const fn firewall_bouncer_package(backend: CrowdSecFirewallBackend) -> &'static str {
+    match backend {
+        CrowdSecFirewallBackend::Iptables => IPTABLES_FIREWALL_BOUNCER_PACKAGE,
+        CrowdSecFirewallBackend::Nftables => NFTABLES_FIREWALL_BOUNCER_PACKAGE,
+    }
+}
+
+pub const fn firewall_bouncer_packages(
+    backend: CrowdSecFirewallBackend,
+) -> &'static [&'static str] {
+    match backend {
+        CrowdSecFirewallBackend::Iptables => &[IPTABLES_FIREWALL_BOUNCER_PACKAGE],
+        CrowdSecFirewallBackend::Nftables => {
+            &[NFTABLES_RUNTIME_PACKAGE, NFTABLES_FIREWALL_BOUNCER_PACKAGE]
+        }
+    }
+}
+
+pub const fn non_selected_firewall_backend(
+    backend: CrowdSecFirewallBackend,
+) -> CrowdSecFirewallBackend {
+    match backend {
+        CrowdSecFirewallBackend::Iptables => CrowdSecFirewallBackend::Nftables,
+        CrowdSecFirewallBackend::Nftables => CrowdSecFirewallBackend::Iptables,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -315,13 +346,29 @@ pub async fn prepare_set_only_configuration() -> Result<String> {
 }
 
 pub async fn install() -> Result<CrowdSecBouncerInstallResponse> {
-    install_with_progress(None).await
+    install_with_backend_and_progress(CrowdSecFirewallBackend::Iptables, None).await
 }
 
 pub async fn install_with_progress(
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecBouncerInstallResponse> {
+    install_with_backend_and_progress(CrowdSecFirewallBackend::Iptables, progress).await
+}
+
+pub async fn install_with_backend_and_progress(
+    backend: CrowdSecFirewallBackend,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecBouncerInstallResponse> {
+    if backend != CrowdSecFirewallBackend::Iptables {
+        return Err(FwcError::crowdsec(
+            BOUNCER_INVALID,
+            "NFTables CrowdSec Firewall Bouncer support is not configured",
+        ));
+    }
+
     log::info!("Installing CrowdSec Firewall Bouncer in FWCloud IPSet-only mode");
+
+    reconcile_non_selected_bouncer_backend(backend, progress).await?;
 
     emit_progress(progress, "Preparing FWCloud CrowdSec blacklist IPSet");
     ensure_blacklist_ipsets().await?;
@@ -399,6 +446,28 @@ pub async fn install_with_progress(
             },
         ],
     })
+}
+
+async fn reconcile_non_selected_bouncer_backend(
+    backend: CrowdSecFirewallBackend,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<()> {
+    let non_selected_backend = non_selected_firewall_backend(backend);
+    if !packages::firewall_bouncer_package_is_installed(non_selected_backend).await? {
+        return Ok(());
+    }
+
+    emit_progress(
+        progress,
+        "Removing the non-selected CrowdSec Firewall Bouncer backend",
+    );
+    disable_systemd_service(FIREWALL_BOUNCER_SERVICE).await?;
+    packages::uninstall_firewall_bouncer_package(non_selected_backend, progress).await?;
+    emit_success(
+        progress,
+        "The non-selected CrowdSec Firewall Bouncer backend is removed",
+    );
+    Ok(())
 }
 
 fn emit_progress(progress: Option<&CrowdSecProgress>, message: &str) {

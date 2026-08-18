@@ -34,7 +34,8 @@ use crate::{
             CrowdSecBouncerUninstallRequest, CrowdSecCollectionInstallRequest,
             CrowdSecCollectionRemoveRequest, CrowdSecCollectionUpdateRequest,
             CrowdSecCollectionsQuery, CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest,
-            CrowdSecDecisionsQuery, CrowdSecInstallRequest, CrowdSecUninstallRequest,
+            CrowdSecDecisionsQuery, CrowdSecFirewallBackend, CrowdSecInstallRequest,
+            CrowdSecUninstallRequest,
         },
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
         status, uninstall,
@@ -327,6 +328,12 @@ async fn install_crowdsec(
     request: web::Json<CrowdSecInstallRequest>,
 ) -> Result<HttpResponse> {
     let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
+    if request.backend != CrowdSecFirewallBackend::Iptables {
+        return Err(crate::errors::FwcError::crowdsec(
+            crate::crowdsec::errors::BOUNCER_INVALID,
+            "NFTables CrowdSec Firewall Bouncer support is not configured",
+        ));
+    }
     let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
@@ -389,7 +396,8 @@ async fn install_crowdsec_bouncer(
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let install_result = bouncers::install_with_progress(Some(&progress)).await;
+        let install_result =
+            bouncers::install_with_backend_and_progress(request.backend, Some(&progress)).await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         match install_result {
