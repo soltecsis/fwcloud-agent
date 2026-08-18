@@ -70,6 +70,10 @@ pub const BOUNCER_IPSET_DROP_IN_PATH: &str =
     "/etc/systemd/system/crowdsec-firewall-bouncer.service.d/fwcloud-ipsets.conf";
 pub const IPSET_V4_BLACKLIST: &str = "crowdsec-blacklists";
 pub const IPSET_V6_BLACKLIST: &str = "crowdsec6-blacklists";
+pub const NFTABLES_V4_TABLE: &str = "filter";
+pub const NFTABLES_V4_CHAIN: &str = "INPUT";
+pub const NFTABLES_V6_TABLE: &str = "filter";
+pub const NFTABLES_V6_CHAIN: &str = "INPUT";
 
 const IPSET_COMMAND: &str = "/usr/sbin/ipset";
 const CSCLI_COMMAND: &str = "/usr/bin/cscli";
@@ -152,6 +156,27 @@ impl Default for CrowdSecBouncerSetOnlyConfig {
             mode: "ipset",
             blacklists_ipv4: IPSET_V4_BLACKLIST,
             blacklists_ipv6: IPSET_V6_BLACKLIST,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CrowdSecNftablesSetOnlyConfig {
+    pub mode: &'static str,
+    pub ipv4_table: &'static str,
+    pub ipv4_chain: &'static str,
+    pub ipv6_table: &'static str,
+    pub ipv6_chain: &'static str,
+}
+
+impl Default for CrowdSecNftablesSetOnlyConfig {
+    fn default() -> Self {
+        Self {
+            mode: "nftables",
+            ipv4_table: NFTABLES_V4_TABLE,
+            ipv4_chain: NFTABLES_V4_CHAIN,
+            ipv6_table: NFTABLES_V6_TABLE,
+            ipv6_chain: NFTABLES_V6_CHAIN,
         }
     }
 }
@@ -331,7 +356,6 @@ pub async fn prepare_set_only_configuration() -> Result<String> {
     let api_key = existing_bouncer_api_key()
         .await?
         .unwrap_or(generate_bouncer_api_key().await?);
-    let configuration = CrowdSecBouncerSetOnlyConfig::default();
 
     fs::create_dir_all(BOUNCER_CONFIG_DIRECTORY)
         .await
@@ -341,7 +365,6 @@ pub async fn prepare_set_only_configuration() -> Result<String> {
                 "Unable to create CrowdSec Firewall Bouncer configuration directory",
             )
         })?;
-    write_bouncer_configuration(&configuration, &api_key)?;
     Ok(api_key)
 }
 
@@ -397,7 +420,7 @@ pub async fn install_with_backend_and_progress(
         );
     }
     emit_progress(progress, "Writing FWCloud IPSet-only bouncer configuration");
-    write_set_only_configuration(&api_key).await?;
+    write_set_only_configuration(backend, &api_key).await?;
     emit_success(
         progress,
         "FWCloud IPSet-only bouncer configuration is written",
@@ -599,9 +622,10 @@ fn emit_boolean_result(
     }
 }
 
-async fn write_set_only_configuration(api_key: &str) -> Result<()> {
-    let configuration = CrowdSecBouncerSetOnlyConfig::default();
-
+async fn write_set_only_configuration(
+    backend: CrowdSecFirewallBackend,
+    api_key: &str,
+) -> Result<()> {
     fs::create_dir_all(BOUNCER_CONFIG_DIRECTORY)
         .await
         .map_err(|_| {
@@ -610,7 +634,16 @@ async fn write_set_only_configuration(api_key: &str) -> Result<()> {
                 "Unable to create CrowdSec Firewall Bouncer configuration directory",
             )
         })?;
-    write_bouncer_configuration(&configuration, api_key)
+    let contents = match backend {
+        CrowdSecFirewallBackend::Iptables => {
+            set_only_configuration_contents(&CrowdSecBouncerSetOnlyConfig::default(), api_key)
+        }
+        CrowdSecFirewallBackend::Nftables => nftables_set_only_configuration_contents(
+            &CrowdSecNftablesSetOnlyConfig::default(),
+            api_key,
+        ),
+    };
+    write_bouncer_configuration(&contents)
 }
 
 async fn bouncer_configuration_state() -> Result<BouncerConfigurationState> {
@@ -1162,10 +1195,7 @@ fn valid_api_key(api_key: &str) -> bool {
         && !api_key.contains('\r')
 }
 
-fn write_bouncer_configuration(
-    configuration: &CrowdSecBouncerSetOnlyConfig,
-    api_key: &str,
-) -> Result<()> {
+fn write_bouncer_configuration(contents: &str) -> Result<()> {
     let temporary_path = format!("{}.tmp", BOUNCER_CONFIG_OVERRIDE_PATH);
     let _ = std_fs::remove_file(&temporary_path);
     let mut configuration_file = OpenOptions::new()
@@ -1189,7 +1219,7 @@ fn write_bouncer_configuration(
         },
     )?;
     configuration_file
-        .write_all(set_only_configuration_contents(configuration, api_key).as_bytes())
+        .write_all(contents.as_bytes())
         .and_then(|_| configuration_file.sync_all())
         .map_err(|_| {
             FwcError::crowdsec(
@@ -1218,6 +1248,21 @@ fn set_only_configuration_contents(
     )
 }
 
+fn nftables_set_only_configuration_contents(
+    configuration: &CrowdSecNftablesSetOnlyConfig,
+    api_key: &str,
+) -> String {
+    format!(
+        "mode: {}\napi_url: http://127.0.0.1:8080/\napi_key: {}\ndisable_ipv6: false\nnftables:\n  ipv4:\n    enabled: true\n    set-only: true\n    table: {}\n    chain: {}\n  ipv6:\n    enabled: true\n    set-only: true\n    table: {}\n    chain: {}\n",
+        configuration.mode,
+        api_key,
+        configuration.ipv4_table,
+        configuration.ipv4_chain,
+        configuration.ipv6_table,
+        configuration.ipv6_chain,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -1229,10 +1274,11 @@ mod tests {
     use super::{
         bouncer_register_response, bouncers_from_json, configuration_is_set_only,
         emit_boolean_result, firewall_rules_contain_unmanaged_crowdsec, integration_status,
-        reject_fwcloud_bouncer, set_only_configuration_contents, validate_bouncer_name,
-        BouncerConfigurationState, CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig,
-        CrowdSecBouncersResponse, CrowdSecIpSetStatus, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST,
-        IPSET_V6_BLACKLIST,
+        nftables_set_only_configuration_contents, reject_fwcloud_bouncer,
+        set_only_configuration_contents, validate_bouncer_name, BouncerConfigurationState,
+        CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse,
+        CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig, FWCLOUD_BOUNCER_NAME,
+        IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
     };
     use crate::{
         crowdsec::{
@@ -1257,6 +1303,20 @@ mod tests {
         assert!(!configuration_is_set_only(
             &configuration.replace("mode: ipset", "mode: iptables")
         ));
+    }
+
+    #[test]
+    fn generates_nftables_set_only_configuration() {
+        let configuration = nftables_set_only_configuration_contents(
+            &CrowdSecNftablesSetOnlyConfig::default(),
+            "secret",
+        );
+
+        assert!(configuration.contains("mode: nftables\n"));
+        assert!(configuration.contains("api_key: secret\n"));
+        assert!(configuration.contains("  ipv4:\n    enabled: true\n    set-only: true\n"));
+        assert!(configuration.contains("    table: filter\n    chain: INPUT\n"));
+        assert!(configuration.contains("  ipv6:\n    enabled: true\n    set-only: true\n"));
     }
 
     #[test]
