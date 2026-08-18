@@ -111,7 +111,7 @@ actix-web = { version = "4.14.1", features = ["openssl"] }
 actix-service = "2.0.3"
 actix-multipart = "0.8.0"
 tokio = { version = "1.53.1", features = ["full"] }
-futures = "0.3.33"
+futures = "0.3.34"
 openssl = { version = "0.10.81", features = ["vendored"] }
 thiserror = "2.0.20"
 dotenvy = "0.15.7"
@@ -125,7 +125,7 @@ regex = "1.13.1"
 log = "0.4.33"
 env_logger = "0.11.11"
 sanitize-filename = "0.6.0"
-uuid = { version = "1.24.0", features = ["serde", "v4"] }
+uuid = { version = "1.24.1", features = ["serde", "v4"] }
 thread-id = "5.1.0"
 subprocess = "1.2.1"
 sha2 = "0.11.0"
