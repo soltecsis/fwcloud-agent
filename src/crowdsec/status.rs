@@ -424,8 +424,8 @@ mod tests {
         },
         models::{
             CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus, CrowdSecHealthState,
-            CrowdSecHealthStatus, CrowdSecServiceStatus, CrowdSecStatusCount,
-            CrowdSecStatusResponse,
+            CrowdSecHealthStatus, CrowdSecPackageStatus, CrowdSecServiceStatus,
+            CrowdSecStatusCount, CrowdSecStatusResponse,
         },
     };
 
@@ -495,6 +495,31 @@ mod tests {
         assert_eq!(warnings.len(), 2);
         assert_eq!(warnings[0].component, "packages");
         assert_eq!(warnings[1].component, "firewall_bouncer");
+    }
+
+    #[test]
+    fn does_not_require_ipset_for_the_nftables_bouncer() {
+        let packages = CrowdSecPackageStatus {
+            crowdsec_installed: true,
+            ipset_installed: false,
+            iptables_firewall_bouncer_installed: false,
+            nftables_firewall_bouncer_installed: true,
+        };
+        let warnings = status_warnings(
+            &packages,
+            CrowdSecFirewallBackend::Nftables,
+            true,
+            &ready_health(),
+            &ready_health(),
+            &ready_bouncer_status(),
+            &ready_count(),
+            &ready_count(),
+            None,
+            None,
+            None,
+        );
+
+        assert!(warnings.iter().all(|warning| warning.component != "ipset"));
     }
 
     #[test]

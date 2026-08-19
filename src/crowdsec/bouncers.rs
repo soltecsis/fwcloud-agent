@@ -189,15 +189,14 @@ enum BouncerConfigurationState {
 }
 
 pub async fn active_backend() -> Result<CrowdSecFirewallBackend> {
-    if let Some(backend) = configured_backend().await? {
-        return Ok(backend);
-    }
+    let configured_backend = configured_backend().await?;
+    Ok(select_active_backend(configured_backend))
+}
 
-    if packages::firewall_bouncer_package_is_installed(CrowdSecFirewallBackend::Nftables).await? {
-        Ok(CrowdSecFirewallBackend::Nftables)
-    } else {
-        Ok(CrowdSecFirewallBackend::Iptables)
-    }
+fn select_active_backend(
+    configured_backend: Option<CrowdSecFirewallBackend>,
+) -> CrowdSecFirewallBackend {
+    configured_backend.unwrap_or(CrowdSecFirewallBackend::Iptables)
 }
 
 pub async fn status(backend: CrowdSecFirewallBackend) -> Result<CrowdSecBouncerIntegrationStatus> {
@@ -1622,12 +1621,12 @@ mod tests {
         bouncer_register_response, bouncers_from_json, configuration_backend,
         configuration_is_set_only, emit_boolean_result, firewall_rules_contain_unmanaged_crowdsec,
         integration_status, nftables_blacklist_set_is_compatible,
-        nftables_set_only_configuration_contents, reject_fwcloud_bouncer,
-        set_only_configuration_contents, validate_bouncer_name, BouncerConfigurationState,
-        CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse,
-        CrowdSecFirewallBackend, CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig,
-        FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE,
-        NFTABLES_V6_TABLE,
+        nftables_set_only_configuration_contents, non_selected_firewall_backend,
+        reject_fwcloud_bouncer, select_active_backend, set_only_configuration_contents,
+        validate_bouncer_name, BouncerConfigurationState, CrowdSecBouncerIntegrationState,
+        CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse, CrowdSecFirewallBackend,
+        CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig, FWCLOUD_BOUNCER_NAME,
+        IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
     };
     use crate::{
         crowdsec::{
@@ -1677,6 +1676,38 @@ mod tests {
         assert_eq!(
             configuration_backend(&configuration),
             Some(CrowdSecFirewallBackend::Nftables)
+        );
+        assert!(!configuration_is_set_only(
+            &configuration.replace("  ipv6:\n", ""),
+            CrowdSecFirewallBackend::Nftables,
+        ));
+    }
+
+    #[test]
+    fn selects_the_configured_backend_before_package_detection() {
+        assert_eq!(
+            select_active_backend(Some(CrowdSecFirewallBackend::Iptables)),
+            CrowdSecFirewallBackend::Iptables
+        );
+        assert_eq!(
+            select_active_backend(Some(CrowdSecFirewallBackend::Nftables)),
+            CrowdSecFirewallBackend::Nftables
+        );
+        assert_eq!(
+            select_active_backend(None),
+            CrowdSecFirewallBackend::Iptables
+        );
+    }
+
+    #[test]
+    fn selects_the_opposite_backend_for_reconciliation() {
+        assert_eq!(
+            non_selected_firewall_backend(CrowdSecFirewallBackend::Iptables),
+            CrowdSecFirewallBackend::Nftables
+        );
+        assert_eq!(
+            non_selected_firewall_backend(CrowdSecFirewallBackend::Nftables),
+            CrowdSecFirewallBackend::Iptables
         );
     }
 

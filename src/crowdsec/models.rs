@@ -466,9 +466,10 @@ impl CrowdSecCapabilitiesResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        CrowdSecBouncerInstallRequest, CrowdSecCapabilitiesResponse, CrowdSecDataRetention,
-        CrowdSecFirewallBackend, CrowdSecOperationRequest, CrowdSecPackageStatus,
-        CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
+        CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep, CrowdSecCapabilitiesResponse,
+        CrowdSecDataRetention, CrowdSecFirewallBackend, CrowdSecOperationRequest,
+        CrowdSecPackageStatus, CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse,
+        CrowdSecUninstallStep,
     };
 
     #[test]
@@ -530,5 +531,17 @@ mod tests {
 
         assert!(!packages.firewall_bouncer_installed(CrowdSecFirewallBackend::Iptables));
         assert!(packages.firewall_bouncer_installed(CrowdSecFirewallBackend::Nftables));
+    }
+
+    #[test]
+    fn serializes_nftables_bouncer_install_steps() {
+        assert_eq!(
+            serde_json::to_value(CrowdSecBouncerInstallStep::NftablesRuntime).unwrap(),
+            "nftables_runtime"
+        );
+        assert_eq!(
+            serde_json::to_value(CrowdSecBouncerInstallStep::NftablesBlacklistSets).unwrap(),
+            "nftables_blacklist_sets"
+        );
     }
 }
