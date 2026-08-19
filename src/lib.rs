@@ -52,6 +52,11 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
         "Starting fwcloud-agent application (version: {})",
         env!("CARGO_PKG_VERSION")
     );
+
+    for warning in &config.startup_warnings {
+        info!("{}", warning);
+    }
+
     info!("Listening on: {}:{}", config.bind_ip, config.bind_port);
 
     OpenVPNStatusSamplingConfig::load_or_create(config.etc_dir)?;

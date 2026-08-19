@@ -5,6 +5,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2.2.2] - 2026-08-19
+## Changed
+- OpenVPN status sampling configuration now stores and validates parameters independently for each status file.
+- The OpenVPN status collector now recognizes status file formats 1, 2, and 3 while preserving the normalized session data returned to API consumers.
+
+## Fixed
+- Normalized OpenVPN status cache records to avoid stale or duplicate session data.
+- Removed redundant debug logging when the legacy OpenVPN status log file is missing.
+- Updated Rust packages to the latest version.
+
+
 ## [2.2.1] - 2026-07-07
 ## Added
 - OpenVPN API calls for client configuration directory management, including directory creation with owner, group and permissions, and removal of empty directories.
