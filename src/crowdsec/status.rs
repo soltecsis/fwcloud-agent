@@ -54,7 +54,14 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
             Some("Unable to determine CrowdSec package status"),
         ),
     };
-    let (bouncer_status, bouncer_status_error) = match bouncers::status().await {
+    let (bouncer_backend, bouncer_backend_error) = match bouncers::active_backend().await {
+        Ok(backend) => (backend, None),
+        Err(_) => (
+            CrowdSecFirewallBackend::Iptables,
+            Some("Unable to determine CrowdSec Firewall Bouncer backend"),
+        ),
+    };
+    let (bouncer_status, bouncer_status_error) = match bouncers::status(bouncer_backend).await {
         Ok(status) => (status, None),
         Err(_) => (
             unavailable_bouncer_status(),
@@ -68,6 +75,7 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
     let installed_collections = installed_collection_count().await;
     let warnings = status_warnings(
         &packages,
+        bouncer_backend,
         crowdsec_running,
         &lapi_status,
         &community_blocklist_status,
@@ -76,7 +84,7 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
         &installed_collections,
         package_status_error,
         service_status_error,
-        bouncer_status_error,
+        bouncer_backend_error.or(bouncer_status_error),
     );
 
     Ok(CrowdSecStatusResponse {
@@ -89,8 +97,8 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
         lapi: lapi_status,
         community_blocklist: community_blocklist_status,
         firewall_bouncer: CrowdSecFirewallBouncerStatus {
-            installed: packages.firewall_bouncer_installed,
-            backend: CrowdSecFirewallBackend::Iptables,
+            installed: packages.firewall_bouncer_installed(bouncer_backend),
+            backend: bouncer_backend,
             integration: bouncer_status,
         },
         active_decisions,
@@ -103,7 +111,8 @@ fn unavailable_package_status() -> CrowdSecPackageStatus {
     CrowdSecPackageStatus {
         crowdsec_installed: false,
         ipset_installed: false,
-        firewall_bouncer_installed: false,
+        iptables_firewall_bouncer_installed: false,
+        nftables_firewall_bouncer_installed: false,
     }
 }
 
@@ -138,6 +147,7 @@ async fn crowdsec_service_status(packages: &CrowdSecPackageStatus) -> (bool, Opt
 
 fn status_warnings(
     packages: &CrowdSecPackageStatus,
+    bouncer_backend: CrowdSecFirewallBackend,
     crowdsec_running: bool,
     lapi: &CrowdSecHealthStatus,
     community_blocklist: &CrowdSecHealthStatus,
@@ -172,14 +182,17 @@ fn status_warnings(
         });
     }
 
-    if package_status_error.is_none() && !packages.firewall_bouncer_installed {
+    if package_status_error.is_none() && !packages.firewall_bouncer_installed(bouncer_backend) {
         warnings.push(CrowdSecStatusWarning {
             component: "firewall_bouncer".to_string(),
             message: "CrowdSec Firewall Bouncer package is not installed".to_string(),
         });
     }
 
-    if package_status_error.is_none() && !packages.ipset_installed {
+    if package_status_error.is_none()
+        && bouncer_backend == CrowdSecFirewallBackend::Iptables
+        && !packages.ipset_installed
+    {
         warnings.push(CrowdSecStatusWarning {
             component: "ipset".to_string(),
             message: "IPSet package is not installed".to_string(),
@@ -411,8 +424,8 @@ mod tests {
         },
         models::{
             CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus, CrowdSecHealthState,
-            CrowdSecHealthStatus, CrowdSecServiceStatus, CrowdSecStatusCount,
-            CrowdSecStatusResponse,
+            CrowdSecHealthStatus, CrowdSecPackageStatus, CrowdSecServiceStatus,
+            CrowdSecStatusCount, CrowdSecStatusResponse,
         },
     };
 
@@ -467,6 +480,7 @@ mod tests {
         let bouncer = unavailable_bouncer_status();
         let warnings = status_warnings(
             &packages,
+            CrowdSecFirewallBackend::Iptables,
             false,
             &ready_health(),
             &ready_health(),
@@ -481,6 +495,31 @@ mod tests {
         assert_eq!(warnings.len(), 2);
         assert_eq!(warnings[0].component, "packages");
         assert_eq!(warnings[1].component, "firewall_bouncer");
+    }
+
+    #[test]
+    fn does_not_require_ipset_for_the_nftables_bouncer() {
+        let packages = CrowdSecPackageStatus {
+            crowdsec_installed: true,
+            ipset_installed: false,
+            iptables_firewall_bouncer_installed: false,
+            nftables_firewall_bouncer_installed: true,
+        };
+        let warnings = status_warnings(
+            &packages,
+            CrowdSecFirewallBackend::Nftables,
+            true,
+            &ready_health(),
+            &ready_health(),
+            &ready_bouncer_status(),
+            &ready_count(),
+            &ready_count(),
+            None,
+            None,
+            None,
+        );
+
+        assert!(warnings.iter().all(|warning| warning.component != "ipset"));
     }
 
     #[test]

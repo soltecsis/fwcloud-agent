@@ -58,6 +58,8 @@ pub struct CrowdSecUninstallRequest {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecBouncerInstallRequest {
+    #[serde(default)]
+    pub backend: CrowdSecFirewallBackend,
     pub ws_id: Option<Uuid>,
 }
 
@@ -90,6 +92,8 @@ pub enum CrowdSecUninstallStep {
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecBouncerInstallStep {
     BlacklistIpSets,
+    NftablesRuntime,
+    NftablesBlacklistSets,
     IpSetSetupService,
     Configuration,
     Package,
@@ -186,7 +190,17 @@ pub struct CrowdSecBouncerRemoveResponse {
 pub struct CrowdSecPackageStatus {
     pub crowdsec_installed: bool,
     pub ipset_installed: bool,
-    pub firewall_bouncer_installed: bool,
+    pub iptables_firewall_bouncer_installed: bool,
+    pub nftables_firewall_bouncer_installed: bool,
+}
+
+impl CrowdSecPackageStatus {
+    pub const fn firewall_bouncer_installed(&self, backend: CrowdSecFirewallBackend) -> bool {
+        match backend {
+            CrowdSecFirewallBackend::Iptables => self.iptables_firewall_bouncer_installed,
+            CrowdSecFirewallBackend::Nftables => self.nftables_firewall_bouncer_installed,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -221,10 +235,12 @@ pub struct CrowdSecStatusCount {
     pub message: String,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecFirewallBackend {
+    #[default]
     Iptables,
+    Nftables,
 }
 
 #[derive(Debug, Serialize)]
@@ -450,8 +466,10 @@ impl CrowdSecCapabilitiesResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecOperationRequest,
-        CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
+        CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep, CrowdSecCapabilitiesResponse,
+        CrowdSecDataRetention, CrowdSecFirewallBackend, CrowdSecOperationRequest,
+        CrowdSecPackageStatus, CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse,
+        CrowdSecUninstallStep,
     };
 
     #[test]
@@ -484,5 +502,46 @@ mod tests {
         assert_eq!(response["data_retention"], "preserve");
         assert_eq!(response["steps"][0]["step"], "packages");
         assert_eq!(response["steps"][0]["status"], "completed");
+    }
+
+    #[test]
+    fn bouncer_install_request_defaults_to_iptables_backend() {
+        let request = serde_json::from_str::<CrowdSecBouncerInstallRequest>(r#"{}"#).unwrap();
+
+        assert_eq!(request.backend, CrowdSecFirewallBackend::Iptables);
+    }
+
+    #[test]
+    fn bouncer_install_request_accepts_the_nftables_backend() {
+        let request =
+            serde_json::from_str::<CrowdSecBouncerInstallRequest>(r#"{"backend":"nftables"}"#)
+                .unwrap();
+
+        assert_eq!(request.backend, CrowdSecFirewallBackend::Nftables);
+    }
+
+    #[test]
+    fn reports_the_selected_firewall_bouncer_package_status() {
+        let packages = CrowdSecPackageStatus {
+            crowdsec_installed: true,
+            ipset_installed: true,
+            iptables_firewall_bouncer_installed: false,
+            nftables_firewall_bouncer_installed: true,
+        };
+
+        assert!(!packages.firewall_bouncer_installed(CrowdSecFirewallBackend::Iptables));
+        assert!(packages.firewall_bouncer_installed(CrowdSecFirewallBackend::Nftables));
+    }
+
+    #[test]
+    fn serializes_nftables_bouncer_install_steps() {
+        assert_eq!(
+            serde_json::to_value(CrowdSecBouncerInstallStep::NftablesRuntime).unwrap(),
+            "nftables_runtime"
+        );
+        assert_eq!(
+            serde_json::to_value(CrowdSecBouncerInstallStep::NftablesBlacklistSets).unwrap(),
+            "nftables_blacklist_sets"
+        );
     }
 }
