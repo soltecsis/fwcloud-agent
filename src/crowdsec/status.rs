@@ -54,19 +54,32 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
             Some("Unable to determine CrowdSec package status"),
         ),
     };
-    let (bouncer_backend, bouncer_backend_error) = match bouncers::active_backend().await {
+    let (pending_bouncer_backend, pending_bouncer_error) = match bouncers::pending_backend().await {
         Ok(backend) => (backend, None),
         Err(_) => (
-            CrowdSecFirewallBackend::Iptables,
-            Some("Unable to determine CrowdSec Firewall Bouncer backend"),
+            None,
+            Some("Unable to determine pending CrowdSec Firewall Bouncer backend"),
         ),
     };
-    let (bouncer_status, bouncer_status_error) = match bouncers::status(bouncer_backend).await {
-        Ok(status) => (status, None),
-        Err(_) => (
-            unavailable_bouncer_status(),
-            Some("Unable to determine CrowdSec Firewall Bouncer status"),
-        ),
+    let (bouncer_backend, bouncer_backend_error) = match pending_bouncer_backend {
+        Some(backend) => (backend, None),
+        None => match bouncers::active_backend().await {
+            Ok(backend) => (backend, None),
+            Err(_) => (
+                CrowdSecFirewallBackend::Iptables,
+                Some("Unable to determine CrowdSec Firewall Bouncer backend"),
+            ),
+        },
+    };
+    let (bouncer_status, bouncer_status_error) = match pending_bouncer_backend {
+        Some(backend) => (bouncers::pending_policy_status(backend), None),
+        None => match bouncers::status(bouncer_backend).await {
+            Ok(status) => (status, None),
+            Err(_) => (
+                unavailable_bouncer_status(),
+                Some("Unable to determine CrowdSec Firewall Bouncer status"),
+            ),
+        },
     };
     let (crowdsec_running, service_status_error) = crowdsec_service_status(&packages).await;
     let lapi_status = local_api_status().await;
@@ -84,7 +97,9 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
         &installed_collections,
         package_status_error,
         service_status_error,
-        bouncer_backend_error.or(bouncer_status_error),
+        pending_bouncer_error
+            .or(bouncer_backend_error)
+            .or(bouncer_status_error),
     );
 
     Ok(CrowdSecStatusResponse {
@@ -182,7 +197,10 @@ fn status_warnings(
         });
     }
 
-    if package_status_error.is_none() && !packages.firewall_bouncer_installed(bouncer_backend) {
+    if package_status_error.is_none()
+        && integration.state != bouncers::CrowdSecBouncerIntegrationState::PendingFirewallPolicy
+        && !packages.firewall_bouncer_installed(bouncer_backend)
+    {
         warnings.push(CrowdSecStatusWarning {
             component: "firewall_bouncer".to_string(),
             message: "CrowdSec Firewall Bouncer package is not installed".to_string(),
@@ -418,6 +436,7 @@ mod tests {
         unavailable_package_status,
     };
     use crate::crowdsec::{
+        bouncers,
         bouncers::{
             CrowdSecBouncerIntegrationState, CrowdSecBouncerIntegrationStatus, CrowdSecIpSetStatus,
             IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
@@ -520,6 +539,34 @@ mod tests {
         );
 
         assert!(warnings.iter().all(|warning| warning.component != "ipset"));
+    }
+
+    #[test]
+    fn reports_pending_nftables_policy_without_a_missing_package_warning() {
+        let packages = CrowdSecPackageStatus {
+            crowdsec_installed: true,
+            ipset_installed: false,
+            iptables_firewall_bouncer_installed: false,
+            nftables_firewall_bouncer_installed: false,
+        };
+        let pending = bouncers::pending_policy_status(CrowdSecFirewallBackend::Nftables);
+        let warnings = status_warnings(
+            &packages,
+            CrowdSecFirewallBackend::Nftables,
+            true,
+            &ready_health(),
+            &ready_health(),
+            &pending,
+            &ready_count(),
+            &ready_count(),
+            None,
+            None,
+            None,
+        );
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].component, "firewall_bouncer");
+        assert_eq!(warnings[0].message, pending.message);
     }
 
     #[test]
