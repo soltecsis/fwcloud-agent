@@ -109,6 +109,7 @@ pub enum CrowdSecBouncerUninstallStep {
     Service,
     Registration,
     Configuration,
+    NftablesStartupOrder,
     IpSetSetupService,
     BlacklistIpSets,
 }

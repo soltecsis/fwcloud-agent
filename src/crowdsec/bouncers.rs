@@ -545,6 +545,7 @@ async fn install_iptables_bouncer(
     log::info!("Installing CrowdSec Firewall Bouncer in FWCloud IPSet-only mode");
 
     reconcile_non_selected_bouncer_backend(CrowdSecFirewallBackend::Iptables, progress).await?;
+    remove_nftables_bouncer_drop_in().await?;
 
     emit_progress(progress, "Preparing FWCloud CrowdSec blacklist IPSet");
     ensure_blacklist_ipsets().await?;
@@ -834,6 +835,24 @@ pub async fn uninstall_with_progress(
         "FWCloud CrowdSec Firewall Bouncer configuration is removed",
         "FWCloud CrowdSec Firewall Bouncer configuration is already absent",
     );
+    emit_progress(
+        progress,
+        "Removing CrowdSec NFTables Firewall Bouncer startup order",
+    );
+    let nftables_startup_order_removed = remove_nftables_bouncer_drop_in().await?;
+    emit_boolean_result(
+        progress,
+        nftables_startup_order_removed,
+        "CrowdSec NFTables Firewall Bouncer startup order is removed",
+        "CrowdSec NFTables Firewall Bouncer startup order is already absent",
+    );
+    let pending_backend_removed = remove_managed_file(BOUNCER_PENDING_BACKEND_PATH).await?;
+    emit_boolean_result(
+        progress,
+        pending_backend_removed,
+        "Pending CrowdSec Firewall Bouncer backend is removed",
+        "Pending CrowdSec Firewall Bouncer backend is already absent",
+    );
     let (ipset_setup_step, blacklist_sets_step) = match backend {
         CrowdSecFirewallBackend::Iptables => {
             emit_progress(progress, "Removing FWCloud CrowdSec IPSet boot service");
@@ -911,6 +930,12 @@ pub async fn uninstall_with_progress(
                 configuration_removed,
                 "FWCloud CrowdSec Firewall Bouncer configuration is removed",
                 "FWCloud CrowdSec Firewall Bouncer configuration is already absent",
+            ),
+            boolean_step(
+                CrowdSecBouncerUninstallStep::NftablesStartupOrder,
+                nftables_startup_order_removed,
+                "CrowdSec NFTables Firewall Bouncer startup order is removed",
+                "CrowdSec NFTables Firewall Bouncer startup order is already absent",
             ),
             ipset_setup_step,
             blacklist_sets_step,
@@ -1297,6 +1322,20 @@ async fn install_nftables_bouncer_drop_in() -> Result<()> {
         "Unable to reload CrowdSec NFTables systemd configuration",
     )
     .await
+}
+
+async fn remove_nftables_bouncer_drop_in() -> Result<bool> {
+    let removed = remove_managed_file(BOUNCER_NFTABLES_DROP_IN_PATH).await?;
+    if !removed {
+        return Ok(false);
+    }
+
+    run_systemctl(
+        &["daemon-reload"],
+        "Unable to reload CrowdSec NFTables systemd configuration",
+    )
+    .await?;
+    Ok(true)
 }
 
 async fn enable_firewall_bouncer_service() -> Result<()> {
@@ -1846,8 +1885,8 @@ mod tests {
         validate_bouncer_name, BouncerConfigurationState, CrowdSecBouncerIntegrationState,
         CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse, CrowdSecFirewallBackend,
         CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig, NftablesBouncerServiceAction,
-        BOUNCER_NFTABLES_DROP_IN_CONTENT, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST,
-        IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
+        BOUNCER_NFTABLES_DROP_IN_CONTENT, BOUNCER_NFTABLES_DROP_IN_PATH, FWCLOUD_BOUNCER_NAME,
+        IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
     };
     use crate::{
         crowdsec::{
@@ -1909,6 +1948,14 @@ mod tests {
         assert_eq!(
             BOUNCER_NFTABLES_DROP_IN_CONTENT,
             "[Unit]\nAfter=fwcloud.service\n"
+        );
+    }
+
+    #[test]
+    fn uses_a_dedicated_nftables_bouncer_drop_in() {
+        assert_eq!(
+            BOUNCER_NFTABLES_DROP_IN_PATH,
+            "/etc/systemd/system/crowdsec-firewall-bouncer.service.d/fwcloud-nftables.conf"
         );
     }
 
