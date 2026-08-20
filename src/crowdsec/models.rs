@@ -45,6 +45,8 @@ pub struct CrowdSecOperationRequest {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecInstallRequest {
+    #[serde(default)]
+    pub backend: CrowdSecFirewallBackend,
     pub ws_id: Option<Uuid>,
 }
 
@@ -78,6 +80,7 @@ pub enum CrowdSecInstallStep {
     CrowdSecService,
     HubUpdate,
     DefaultCollections,
+    FirewallBouncer,
 }
 
 #[derive(Debug, Serialize)]
@@ -106,6 +109,7 @@ pub enum CrowdSecBouncerUninstallStep {
     Service,
     Registration,
     Configuration,
+    NftablesStartupOrder,
     IpSetSetupService,
     BlacklistIpSets,
 }
@@ -466,8 +470,9 @@ impl CrowdSecCapabilitiesResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep, CrowdSecCapabilitiesResponse,
-        CrowdSecDataRetention, CrowdSecFirewallBackend, CrowdSecOperationRequest,
+        CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep, CrowdSecBouncerUninstallStep,
+        CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecFirewallBackend,
+        CrowdSecInstallRequest, CrowdSecInstallStep, CrowdSecOperationRequest,
         CrowdSecPackageStatus, CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse,
         CrowdSecUninstallStep,
     };
@@ -521,6 +526,21 @@ mod tests {
     }
 
     #[test]
+    fn crowdsec_install_request_accepts_the_nftables_backend() {
+        let request =
+            serde_json::from_str::<CrowdSecInstallRequest>(r#"{"backend":"nftables"}"#).unwrap();
+
+        assert_eq!(request.backend, CrowdSecFirewallBackend::Nftables);
+    }
+
+    #[test]
+    fn crowdsec_install_request_defaults_to_iptables_backend() {
+        let request = serde_json::from_str::<CrowdSecInstallRequest>(r#"{}"#).unwrap();
+
+        assert_eq!(request.backend, CrowdSecFirewallBackend::Iptables);
+    }
+
+    #[test]
     fn reports_the_selected_firewall_bouncer_package_status() {
         let packages = CrowdSecPackageStatus {
             crowdsec_installed: true,
@@ -542,6 +562,14 @@ mod tests {
         assert_eq!(
             serde_json::to_value(CrowdSecBouncerInstallStep::NftablesBlacklistSets).unwrap(),
             "nftables_blacklist_sets"
+        );
+        assert_eq!(
+            serde_json::to_value(CrowdSecInstallStep::FirewallBouncer).unwrap(),
+            "firewall_bouncer"
+        );
+        assert_eq!(
+            serde_json::to_value(CrowdSecBouncerUninstallStep::NftablesStartupOrder).unwrap(),
+            "nftables_startup_order"
         );
     }
 }

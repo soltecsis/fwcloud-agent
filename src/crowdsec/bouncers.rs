@@ -61,12 +61,16 @@ pub const FWCLOUD_BOUNCER_NAME: &str = "fwcloud";
 pub const BOUNCER_CONFIG_DIRECTORY: &str = "/etc/crowdsec/bouncers";
 pub const BOUNCER_CONFIG_OVERRIDE_PATH: &str =
     "/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local";
+pub const BOUNCER_PENDING_BACKEND_PATH: &str =
+    "/etc/crowdsec/bouncers/fwcloud-crowdsec-bouncer-pending";
 pub const IPSET_SETUP_SERVICE: &str = "fwcloud-crowdsec-ipsets.service";
 pub const IPSET_SETUP_SERVICE_PATH: &str = "/etc/systemd/system/fwcloud-crowdsec-ipsets.service";
 pub const BOUNCER_IPSET_DROP_IN_DIRECTORY: &str =
     "/etc/systemd/system/crowdsec-firewall-bouncer.service.d";
 pub const BOUNCER_IPSET_DROP_IN_PATH: &str =
     "/etc/systemd/system/crowdsec-firewall-bouncer.service.d/fwcloud-ipsets.conf";
+pub const BOUNCER_NFTABLES_DROP_IN_PATH: &str =
+    "/etc/systemd/system/crowdsec-firewall-bouncer.service.d/fwcloud-nftables.conf";
 pub const IPSET_V4_BLACKLIST: &str = "crowdsec-blacklists";
 pub const IPSET_V6_BLACKLIST: &str = "crowdsec6-blacklists";
 pub const NFTABLES_V4_TABLE: &str = "filter";
@@ -86,6 +90,7 @@ const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
 const IPSET_SETUP_SERVICE_CONTENT: &str = "[Unit]\nDescription=Create FWCloud CrowdSec blacklist IPSet\nBefore=crowdsec-firewall-bouncer.service\n\n[Service]\nType=oneshot\nExecStart=/usr/sbin/ipset create crowdsec-blacklists hash:ip timeout 0 maxelem 150000 -exist\nExecStart=/usr/sbin/ipset create crowdsec6-blacklists hash:ip family inet6 timeout 0 maxelem 150000 -exist\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n";
 const BOUNCER_IPSET_DROP_IN_CONTENT: &str =
     "[Unit]\nRequires=fwcloud-crowdsec-ipsets.service\nAfter=fwcloud-crowdsec-ipsets.service\n";
+const BOUNCER_NFTABLES_DROP_IN_CONTENT: &str = "[Unit]\nAfter=fwcloud.service\n";
 
 pub const fn firewall_bouncer_package(backend: CrowdSecFirewallBackend) -> &'static str {
     match backend {
@@ -118,6 +123,7 @@ pub const fn non_selected_firewall_backend(
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecBouncerIntegrationState {
     NotConfigured,
+    PendingFirewallPolicy,
     Ready,
     MissingBlacklistSets,
     ManagedConfiguration,
@@ -188,9 +194,66 @@ enum BouncerConfigurationState {
     Managed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NftablesBouncerServiceAction {
+    Enable,
+    Restart,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BouncerReconciliationAction {
+    SkipCrowdSecNotInstalled,
+    PendingFirewallPolicy,
+    Reconcile,
+}
+
 pub async fn active_backend() -> Result<CrowdSecFirewallBackend> {
     let configured_backend = configured_backend().await?;
     Ok(select_active_backend(configured_backend))
+}
+
+pub async fn pending_backend() -> Result<Option<CrowdSecFirewallBackend>> {
+    match fs::read_to_string(BOUNCER_PENDING_BACKEND_PATH).await {
+        Ok(backend) => pending_backend_from_contents(&backend)
+            .map(Some)
+            .ok_or_else(|| {
+                FwcError::crowdsec(
+                    FIREWALL_INTEGRATION_INVALID,
+                    "Invalid pending CrowdSec Firewall Bouncer backend",
+                )
+            }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to read pending CrowdSec Firewall Bouncer backend",
+        )),
+    }
+}
+
+pub fn pending_policy_status(backend: CrowdSecFirewallBackend) -> CrowdSecBouncerIntegrationStatus {
+    CrowdSecBouncerIntegrationStatus {
+        state: CrowdSecBouncerIntegrationState::PendingFirewallPolicy,
+        ipv4_blacklist: CrowdSecIpSetStatus {
+            name: IPSET_V4_BLACKLIST,
+            exists: false,
+        },
+        ipv6_blacklist: CrowdSecIpSetStatus {
+            name: IPSET_V6_BLACKLIST,
+            exists: false,
+        },
+        managed_configuration: false,
+        unmanaged_firewall_rules: false,
+        service_running: false,
+        message: match backend {
+            CrowdSecFirewallBackend::Nftables => {
+                "CrowdSec NFTables Firewall Bouncer waits for a deployed FWCloud policy"
+            }
+            CrowdSecFirewallBackend::Iptables => {
+                "CrowdSec Firewall Bouncer waits for a deployed FWCloud policy"
+            }
+        }
+        .to_string(),
+    }
 }
 
 fn select_active_backend(
@@ -434,9 +497,79 @@ pub async fn install_with_backend_and_progress(
     backend: CrowdSecFirewallBackend,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecBouncerInstallResponse> {
-    match backend {
+    let response = match backend {
         CrowdSecFirewallBackend::Iptables => install_iptables_bouncer(progress).await,
         CrowdSecFirewallBackend::Nftables => install_nftables_bouncer(progress).await,
+    }?;
+    clear_pending_backend().await?;
+
+    Ok(response)
+}
+
+pub async fn reconcile_after_policy_deployment(backend: CrowdSecFirewallBackend) -> Result<bool> {
+    if bouncer_reconciliation_action(
+        packages::package_status().await?.crowdsec_installed,
+        backend,
+        true,
+    ) == BouncerReconciliationAction::SkipCrowdSecNotInstalled
+    {
+        debug!(
+            "CrowdSec is not installed; skipping Firewall Bouncer reconciliation after policy deployment"
+        );
+        return Ok(false);
+    }
+
+    reconcile_for_installed_crowdsec(backend, None).await
+}
+
+pub async fn reconcile_for_installed_crowdsec(
+    backend: CrowdSecFirewallBackend,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<bool> {
+    let nftables_blacklist_sets_ready = if backend == CrowdSecFirewallBackend::Nftables {
+        nftables_blacklist_sets_are_ready().await?
+    } else {
+        true
+    };
+
+    if bouncer_reconciliation_action(true, backend, nftables_blacklist_sets_ready)
+        == BouncerReconciliationAction::PendingFirewallPolicy
+    {
+        debug!(
+            "FWCloud NFTables CrowdSec blacklist sets are unavailable; delaying Firewall Bouncer reconciliation"
+        );
+        emit_warning(
+            progress,
+            "CrowdSec NFTables Firewall Bouncer waits for a deployed FWCloud policy",
+        );
+        write_pending_backend(backend).await?;
+        return Ok(false);
+    }
+
+    reconcile_non_selected_bouncer_backend(backend, progress).await?;
+    emit_progress(
+        progress,
+        "Reconciling CrowdSec Firewall Bouncer for the FWCloud firewall backend",
+    );
+    install_with_backend_and_progress(backend, progress).await?;
+    emit_success(
+        progress,
+        "CrowdSec Firewall Bouncer is reconciled for the FWCloud firewall backend",
+    );
+    Ok(true)
+}
+
+fn bouncer_reconciliation_action(
+    crowdsec_installed: bool,
+    backend: CrowdSecFirewallBackend,
+    nftables_blacklist_sets_ready: bool,
+) -> BouncerReconciliationAction {
+    if !crowdsec_installed {
+        BouncerReconciliationAction::SkipCrowdSecNotInstalled
+    } else if backend == CrowdSecFirewallBackend::Nftables && !nftables_blacklist_sets_ready {
+        BouncerReconciliationAction::PendingFirewallPolicy
+    } else {
+        BouncerReconciliationAction::Reconcile
     }
 }
 
@@ -446,6 +579,7 @@ async fn install_iptables_bouncer(
     log::info!("Installing CrowdSec Firewall Bouncer in FWCloud IPSet-only mode");
 
     reconcile_non_selected_bouncer_backend(CrowdSecFirewallBackend::Iptables, progress).await?;
+    remove_nftables_bouncer_drop_in().await?;
 
     emit_progress(progress, "Preparing FWCloud CrowdSec blacklist IPSet");
     ensure_blacklist_ipsets().await?;
@@ -583,13 +717,27 @@ async fn install_nftables_bouncer(
     );
     emit_progress(
         progress,
-        "Enabling CrowdSec NFTables Firewall Bouncer service",
+        "Configuring CrowdSec NFTables Firewall Bouncer startup order",
     );
-    enable_firewall_bouncer_service().await?;
+    install_nftables_bouncer_drop_in().await?;
     emit_success(
         progress,
-        "CrowdSec NFTables Firewall Bouncer service is enabled and running",
+        "CrowdSec NFTables Firewall Bouncer starts after the FWCloud policy service",
     );
+    let service_action = nftables_bouncer_service_action(
+        systemd_service_is_running(FIREWALL_BOUNCER_SERVICE).await?,
+    );
+    let service_message = match service_action {
+        NftablesBouncerServiceAction::Enable => {
+            "CrowdSec NFTables Firewall Bouncer service is enabled and running"
+        }
+        NftablesBouncerServiceAction::Restart => {
+            "CrowdSec NFTables Firewall Bouncer service is restarted and synchronizing decisions"
+        }
+    };
+    emit_progress(progress, service_message);
+    reconcile_nftables_firewall_bouncer_service(service_action).await?;
+    emit_success(progress, service_message);
 
     log::info!("CrowdSec NFTables Firewall Bouncer installation completed");
     emit_success(
@@ -631,8 +779,7 @@ async fn install_nftables_bouncer(
             CrowdSecStepResult {
                 step: CrowdSecBouncerInstallStep::Service,
                 status: CrowdSecStepStatus::Completed,
-                message: "CrowdSec NFTables Firewall Bouncer service is enabled and running"
-                    .to_string(),
+                message: service_message.to_string(),
             },
         ],
     })
@@ -722,6 +869,24 @@ pub async fn uninstall_with_progress(
         "FWCloud CrowdSec Firewall Bouncer configuration is removed",
         "FWCloud CrowdSec Firewall Bouncer configuration is already absent",
     );
+    emit_progress(
+        progress,
+        "Removing CrowdSec NFTables Firewall Bouncer startup order",
+    );
+    let nftables_startup_order_removed = remove_nftables_bouncer_drop_in().await?;
+    emit_boolean_result(
+        progress,
+        nftables_startup_order_removed,
+        "CrowdSec NFTables Firewall Bouncer startup order is removed",
+        "CrowdSec NFTables Firewall Bouncer startup order is already absent",
+    );
+    let pending_backend_removed = remove_managed_file(BOUNCER_PENDING_BACKEND_PATH).await?;
+    emit_boolean_result(
+        progress,
+        pending_backend_removed,
+        "Pending CrowdSec Firewall Bouncer backend is removed",
+        "Pending CrowdSec Firewall Bouncer backend is already absent",
+    );
     let (ipset_setup_step, blacklist_sets_step) = match backend {
         CrowdSecFirewallBackend::Iptables => {
             emit_progress(progress, "Removing FWCloud CrowdSec IPSet boot service");
@@ -800,6 +965,12 @@ pub async fn uninstall_with_progress(
                 "FWCloud CrowdSec Firewall Bouncer configuration is removed",
                 "FWCloud CrowdSec Firewall Bouncer configuration is already absent",
             ),
+            boolean_step(
+                CrowdSecBouncerUninstallStep::NftablesStartupOrder,
+                nftables_startup_order_removed,
+                "CrowdSec NFTables Firewall Bouncer startup order is removed",
+                "CrowdSec NFTables Firewall Bouncer startup order is already absent",
+            ),
             ipset_setup_step,
             blacklist_sets_step,
         ],
@@ -841,6 +1012,39 @@ async fn write_set_only_configuration(
         ),
     };
     write_bouncer_configuration(&contents)
+}
+
+async fn write_pending_backend(backend: CrowdSecFirewallBackend) -> Result<()> {
+    fs::create_dir_all(BOUNCER_CONFIG_DIRECTORY)
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create CrowdSec Firewall Bouncer configuration directory",
+            )
+        })?;
+    fs::write(
+        BOUNCER_PENDING_BACKEND_PATH,
+        pending_backend_contents(backend),
+    )
+    .await
+    .map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to store pending CrowdSec Firewall Bouncer backend",
+        )
+    })
+}
+
+async fn clear_pending_backend() -> Result<()> {
+    match fs::remove_file(BOUNCER_PENDING_BACKEND_PATH).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to clear pending CrowdSec Firewall Bouncer backend",
+        )),
+    }
 }
 
 async fn configured_backend() -> Result<Option<CrowdSecFirewallBackend>> {
@@ -958,6 +1162,21 @@ fn configuration_backend(configuration: &str) -> Option<CrowdSecFirewallBackend>
             _ => None,
         }
     })
+}
+
+fn pending_backend_contents(backend: CrowdSecFirewallBackend) -> &'static str {
+    match backend {
+        CrowdSecFirewallBackend::Iptables => "iptables\n",
+        CrowdSecFirewallBackend::Nftables => "nftables\n",
+    }
+}
+
+fn pending_backend_from_contents(contents: &str) -> Option<CrowdSecFirewallBackend> {
+    match contents.trim() {
+        "iptables" => Some(CrowdSecFirewallBackend::Iptables),
+        "nftables" => Some(CrowdSecFirewallBackend::Nftables),
+        _ => None,
+    }
 }
 
 fn configuration_is_set_only(configuration: &str, backend: CrowdSecFirewallBackend) -> bool {
@@ -1085,6 +1304,15 @@ pub async fn validate_nftables_blacklist_sets() -> Result<()> {
     Ok(())
 }
 
+async fn nftables_blacklist_sets_are_ready() -> Result<bool> {
+    let ipv4 =
+        blacklist_nftables_status("ip", NFTABLES_V4_TABLE, IPSET_V4_BLACKLIST, "ipv4_addr").await?;
+    let ipv6 = blacklist_nftables_status("ip6", NFTABLES_V6_TABLE, IPSET_V6_BLACKLIST, "ipv6_addr")
+        .await?;
+
+    Ok(ipv4.exists && ipv6.exists)
+}
+
 pub async fn install_ipset_setup_service() -> Result<()> {
     write_if_changed(IPSET_SETUP_SERVICE_PATH, IPSET_SETUP_SERVICE_CONTENT).await?;
     fs::create_dir_all(BOUNCER_IPSET_DROP_IN_DIRECTORY)
@@ -1109,12 +1337,76 @@ pub async fn install_ipset_setup_service() -> Result<()> {
     .await
 }
 
+async fn install_nftables_bouncer_drop_in() -> Result<()> {
+    fs::create_dir_all(BOUNCER_IPSET_DROP_IN_DIRECTORY)
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create CrowdSec Firewall Bouncer systemd drop-in directory",
+            )
+        })?;
+    write_if_changed(
+        BOUNCER_NFTABLES_DROP_IN_PATH,
+        BOUNCER_NFTABLES_DROP_IN_CONTENT,
+    )
+    .await?;
+    run_systemctl(
+        &["daemon-reload"],
+        "Unable to reload CrowdSec NFTables systemd configuration",
+    )
+    .await
+}
+
+async fn remove_nftables_bouncer_drop_in() -> Result<bool> {
+    let removed = remove_managed_file(BOUNCER_NFTABLES_DROP_IN_PATH).await?;
+    if !removed {
+        return Ok(false);
+    }
+
+    run_systemctl(
+        &["daemon-reload"],
+        "Unable to reload CrowdSec NFTables systemd configuration",
+    )
+    .await?;
+    Ok(true)
+}
+
 async fn enable_firewall_bouncer_service() -> Result<()> {
     run_systemctl(
         &["enable", "--now", FIREWALL_BOUNCER_SERVICE],
         "Unable to enable CrowdSec Firewall Bouncer service",
     )
     .await
+}
+
+fn nftables_bouncer_service_action(service_was_running: bool) -> NftablesBouncerServiceAction {
+    if service_was_running {
+        NftablesBouncerServiceAction::Restart
+    } else {
+        NftablesBouncerServiceAction::Enable
+    }
+}
+
+async fn reconcile_nftables_firewall_bouncer_service(
+    action: NftablesBouncerServiceAction,
+) -> Result<()> {
+    match action {
+        NftablesBouncerServiceAction::Enable => {
+            run_systemctl(
+                &["enable", "--now", FIREWALL_BOUNCER_SERVICE],
+                "Unable to enable CrowdSec NFTables Firewall Bouncer service",
+            )
+            .await
+        }
+        NftablesBouncerServiceAction::Restart => {
+            run_systemctl(
+                &["restart", FIREWALL_BOUNCER_SERVICE],
+                "Unable to restart CrowdSec NFTables Firewall Bouncer service",
+            )
+            .await
+        }
+    }
 }
 
 async fn disable_systemd_service(service: &str) -> Result<bool> {
@@ -1618,15 +1910,19 @@ mod tests {
     };
 
     use super::{
-        bouncer_register_response, bouncers_from_json, configuration_backend,
-        configuration_is_set_only, emit_boolean_result, firewall_rules_contain_unmanaged_crowdsec,
-        integration_status, nftables_blacklist_set_is_compatible,
+        bouncer_reconciliation_action, bouncer_register_response, bouncers_from_json,
+        configuration_backend, configuration_is_set_only, emit_boolean_result,
+        firewall_rules_contain_unmanaged_crowdsec, integration_status,
+        nftables_blacklist_set_is_compatible, nftables_bouncer_service_action,
         nftables_set_only_configuration_contents, non_selected_firewall_backend,
+        pending_backend_contents, pending_backend_from_contents, pending_policy_status,
         reject_fwcloud_bouncer, select_active_backend, set_only_configuration_contents,
-        validate_bouncer_name, BouncerConfigurationState, CrowdSecBouncerIntegrationState,
-        CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse, CrowdSecFirewallBackend,
-        CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig, FWCLOUD_BOUNCER_NAME,
-        IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
+        validate_bouncer_name, BouncerConfigurationState, BouncerReconciliationAction,
+        CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse,
+        CrowdSecFirewallBackend, CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig,
+        NftablesBouncerServiceAction, BOUNCER_NFTABLES_DROP_IN_CONTENT,
+        BOUNCER_NFTABLES_DROP_IN_PATH, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST,
+        IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
     };
     use crate::{
         crowdsec::{
@@ -1684,6 +1980,42 @@ mod tests {
     }
 
     #[test]
+    fn orders_the_nftables_bouncer_after_the_fwcloud_policy_service() {
+        assert_eq!(
+            BOUNCER_NFTABLES_DROP_IN_CONTENT,
+            "[Unit]\nAfter=fwcloud.service\n"
+        );
+    }
+
+    #[test]
+    fn chooses_to_skip_pending_or_reconcile_the_bouncer() {
+        assert_eq!(
+            bouncer_reconciliation_action(false, CrowdSecFirewallBackend::Iptables, true),
+            BouncerReconciliationAction::SkipCrowdSecNotInstalled
+        );
+        assert_eq!(
+            bouncer_reconciliation_action(true, CrowdSecFirewallBackend::Nftables, false),
+            BouncerReconciliationAction::PendingFirewallPolicy
+        );
+        assert_eq!(
+            bouncer_reconciliation_action(true, CrowdSecFirewallBackend::Nftables, true),
+            BouncerReconciliationAction::Reconcile
+        );
+        assert_eq!(
+            bouncer_reconciliation_action(true, CrowdSecFirewallBackend::Iptables, false),
+            BouncerReconciliationAction::Reconcile
+        );
+    }
+
+    #[test]
+    fn uses_a_dedicated_nftables_bouncer_drop_in() {
+        assert_eq!(
+            BOUNCER_NFTABLES_DROP_IN_PATH,
+            "/etc/systemd/system/crowdsec-firewall-bouncer.service.d/fwcloud-nftables.conf"
+        );
+    }
+
+    #[test]
     fn selects_the_configured_backend_before_package_detection() {
         assert_eq!(
             select_active_backend(Some(CrowdSecFirewallBackend::Iptables)),
@@ -1700,6 +2032,31 @@ mod tests {
     }
 
     #[test]
+    fn stores_and_reads_a_pending_nftables_backend() {
+        assert_eq!(
+            pending_backend_from_contents(pending_backend_contents(
+                CrowdSecFirewallBackend::Nftables
+            )),
+            Some(CrowdSecFirewallBackend::Nftables)
+        );
+        assert_eq!(pending_backend_from_contents("unknown"), None);
+    }
+
+    #[test]
+    fn reports_a_pending_nftables_policy_without_managing_sets() {
+        let status = pending_policy_status(CrowdSecFirewallBackend::Nftables);
+
+        assert_eq!(
+            status.state,
+            CrowdSecBouncerIntegrationState::PendingFirewallPolicy
+        );
+        assert!(!status.ipv4_blacklist.exists);
+        assert!(!status.ipv6_blacklist.exists);
+        assert!(!status.service_running);
+        assert!(!status.managed_configuration);
+    }
+
+    #[test]
     fn selects_the_opposite_backend_for_reconciliation() {
         assert_eq!(
             non_selected_firewall_backend(CrowdSecFirewallBackend::Iptables),
@@ -1708,6 +2065,18 @@ mod tests {
         assert_eq!(
             non_selected_firewall_backend(CrowdSecFirewallBackend::Nftables),
             CrowdSecFirewallBackend::Iptables
+        );
+    }
+
+    #[test]
+    fn restarts_an_active_nftables_bouncer_after_reconciliation() {
+        assert_eq!(
+            nftables_bouncer_service_action(false),
+            NftablesBouncerServiceAction::Enable
+        );
+        assert_eq!(
+            nftables_bouncer_service_action(true),
+            NftablesBouncerServiceAction::Restart
         );
     }
 

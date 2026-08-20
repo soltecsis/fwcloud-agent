@@ -333,7 +333,8 @@ async fn install_crowdsec(
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let install_result = install::install_with_progress(Some(&progress)).await;
+        let install_result =
+            install::install_with_backend_and_progress(request.backend, Some(&progress)).await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         match install_result {

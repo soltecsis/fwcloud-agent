@@ -27,11 +27,12 @@ use tokio::{process::Command, time::timeout};
 
 use crate::{
     crowdsec::{
+        bouncers,
         command::CrowdSecCommand,
         errors::{COMMAND_FAILED, OPERATION_TIMEOUT},
         models::{
-            CrowdSecDataRetention, CrowdSecInstallResponse, CrowdSecInstallStep,
-            CrowdSecStepResult, CrowdSecStepStatus,
+            CrowdSecDataRetention, CrowdSecFirewallBackend, CrowdSecInstallResponse,
+            CrowdSecInstallStep, CrowdSecStepResult, CrowdSecStepStatus,
         },
         packages,
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
@@ -42,10 +43,17 @@ use crate::{
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub async fn install() -> Result<CrowdSecInstallResponse> {
-    install_with_progress(None).await
+    install_with_backend_and_progress(CrowdSecFirewallBackend::Iptables, None).await
 }
 
 pub async fn install_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecInstallResponse> {
+    install_with_backend_and_progress(CrowdSecFirewallBackend::Iptables, progress).await
+}
+
+pub async fn install_with_backend_and_progress(
+    backend: CrowdSecFirewallBackend,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecInstallResponse> {
     log::info!("Installing CrowdSec packages and default collections");
@@ -84,6 +92,22 @@ pub async fn install_with_progress(
     emit_progress(progress, "Restarting CrowdSec service");
     restart_crowdsec_service().await?;
     emit_success(progress, "CrowdSec service restarted");
+
+    let bouncer_configured = bouncers::reconcile_for_installed_crowdsec(backend, progress).await?;
+    steps.push(CrowdSecStepResult {
+        step: CrowdSecInstallStep::FirewallBouncer,
+        status: if bouncer_configured {
+            CrowdSecStepStatus::Completed
+        } else {
+            CrowdSecStepStatus::Skipped
+        },
+        message: if bouncer_configured {
+            "CrowdSec Firewall Bouncer is configured for the FWCloud firewall backend".to_string()
+        } else {
+            "CrowdSec NFTables Firewall Bouncer waits for a deployed FWCloud policy".to_string()
+        },
+    });
+
     log::info!("CrowdSec installation completed");
     emit_success(progress, "CrowdSec installation completed");
 
