@@ -25,8 +25,8 @@ use actix_web::{post, web, HttpResponse};
 use log::debug;
 use std::sync::Arc;
 
-use crate::config::Config;
 use crate::utils::http_files::HttpFiles;
+use crate::{config::Config, crowdsec::bouncers};
 
 use crate::errors::Result;
 
@@ -41,9 +41,18 @@ async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Resu
         let _mutex_data = mutex.lock().await;
         debug!("Script mutex locked (thread id: {})", thread_id::get());
 
-        res = HttpFiles::new(cfg.tmp_dir, false)
-            .fwcloud_script(payload, &cfg)
-            .await?;
+        let mut files = HttpFiles::new(cfg.tmp_dir, false);
+        res = files.fwcloud_script(payload, &cfg).await?;
+
+        if let Some(backend) = files.crowdsec_backend()? {
+            debug!(
+                "Reconciling CrowdSec Firewall Bouncer after FWCloud policy deployment ({:?})",
+                backend
+            );
+            let crowdsec_mutex = Arc::clone(&cfg.mutex.crowdsec);
+            let _crowdsec_mutex_data = crowdsec_mutex.lock().await;
+            bouncers::reconcile_after_policy_deployment(backend).await?;
+        }
 
         debug!("Releasing script mutex (thread id: {})", thread_id::get());
     } // End of mutex scope.

@@ -31,9 +31,9 @@ use std::{io::Write, os::unix::prelude::PermissionsExt};
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::config::Config;
 use crate::errors::{FwcError, Result};
 use crate::utils::cmd::{run_cmd, run_cmd_ws};
+use crate::{config::Config, crowdsec::models::CrowdSecFirewallBackend};
 
 use super::ws::WsData;
 
@@ -63,6 +63,8 @@ pub struct HttpFiles {
     n_files: u32,
     ws_id: Uuid,
     ws_id_buf: String,
+    allow_crowdsec_backend: bool,
+    crowdsec_backend_buf: String,
 }
 
 impl HttpFiles {
@@ -80,6 +82,8 @@ impl HttpFiles {
             n_files: 0,
             ws_id: Uuid::nil(),
             ws_id_buf: String::from(""),
+            allow_crowdsec_backend: false,
+            crowdsec_backend_buf: String::from(""),
         }
     }
 
@@ -97,6 +101,7 @@ impl HttpFiles {
         cfg: &web::Data<Arc<Config>>,
     ) -> Result<HttpResponse> {
         self.expected_files = 1;
+        self.allow_crowdsec_backend = true;
         self.extract_multipart_data(payload).await?;
         self.check_data()?;
 
@@ -158,6 +163,18 @@ impl HttpFiles {
         }
 
         Ok(res)
+    }
+
+    pub fn crowdsec_backend(&self) -> Result<Option<CrowdSecFirewallBackend>> {
+        match self.crowdsec_backend_buf.as_str() {
+            "" => Ok(None),
+            "iptables" => Ok(Some(CrowdSecFirewallBackend::Iptables)),
+            "nftables" => Ok(Some(CrowdSecFirewallBackend::Nftables)),
+            _ => Err(FwcError::crowdsec(
+                crate::crowdsec::errors::BOUNCER_INVALID,
+                "Invalid CrowdSec Firewall Bouncer backend",
+            )),
+        }
     }
 
     async fn extract_multipart_data(&mut self, mut payload: Multipart) -> Result<()> {
@@ -240,6 +257,8 @@ impl HttpFiles {
             buf = &mut self.perms;
         } else if name == "ws_id" {
             buf = &mut self.ws_id_buf;
+        } else if name == "crowdsec_backend" && self.allow_crowdsec_backend {
+            buf = &mut self.crowdsec_backend_buf;
         } else {
             return Err(FwcError::NotAllowedParameter);
         }

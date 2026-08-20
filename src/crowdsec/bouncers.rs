@@ -188,6 +188,12 @@ enum BouncerConfigurationState {
     Managed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NftablesBouncerServiceAction {
+    Enable,
+    Restart,
+}
+
 pub async fn active_backend() -> Result<CrowdSecFirewallBackend> {
     let configured_backend = configured_backend().await?;
     Ok(select_active_backend(configured_backend))
@@ -440,6 +446,44 @@ pub async fn install_with_backend_and_progress(
     }
 }
 
+pub async fn reconcile_after_policy_deployment(backend: CrowdSecFirewallBackend) -> Result<bool> {
+    if !packages::package_status().await?.crowdsec_installed {
+        debug!(
+            "CrowdSec is not installed; skipping Firewall Bouncer reconciliation after policy deployment"
+        );
+        return Ok(false);
+    }
+
+    reconcile_for_installed_crowdsec(backend, None).await
+}
+
+pub async fn reconcile_for_installed_crowdsec(
+    backend: CrowdSecFirewallBackend,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<bool> {
+    if backend == CrowdSecFirewallBackend::Nftables && !nftables_blacklist_sets_are_ready().await? {
+        debug!(
+            "FWCloud NFTables CrowdSec blacklist sets are unavailable; delaying Firewall Bouncer reconciliation"
+        );
+        emit_warning(
+            progress,
+            "CrowdSec NFTables Firewall Bouncer waits for a deployed FWCloud policy",
+        );
+        return Ok(false);
+    }
+
+    emit_progress(
+        progress,
+        "Reconciling CrowdSec Firewall Bouncer for the FWCloud firewall backend",
+    );
+    install_with_backend_and_progress(backend, progress).await?;
+    emit_success(
+        progress,
+        "CrowdSec Firewall Bouncer is reconciled for the FWCloud firewall backend",
+    );
+    Ok(true)
+}
+
 async fn install_iptables_bouncer(
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecBouncerInstallResponse> {
@@ -581,15 +625,20 @@ async fn install_nftables_bouncer(
         progress,
         "FWCloud NFTables set-only bouncer configuration is written",
     );
-    emit_progress(
-        progress,
-        "Enabling CrowdSec NFTables Firewall Bouncer service",
+    let service_action = nftables_bouncer_service_action(
+        systemd_service_is_running(FIREWALL_BOUNCER_SERVICE).await?,
     );
-    enable_firewall_bouncer_service().await?;
-    emit_success(
-        progress,
-        "CrowdSec NFTables Firewall Bouncer service is enabled and running",
-    );
+    let service_message = match service_action {
+        NftablesBouncerServiceAction::Enable => {
+            "CrowdSec NFTables Firewall Bouncer service is enabled and running"
+        }
+        NftablesBouncerServiceAction::Restart => {
+            "CrowdSec NFTables Firewall Bouncer service is restarted and synchronizing decisions"
+        }
+    };
+    emit_progress(progress, service_message);
+    reconcile_nftables_firewall_bouncer_service(service_action).await?;
+    emit_success(progress, service_message);
 
     log::info!("CrowdSec NFTables Firewall Bouncer installation completed");
     emit_success(
@@ -631,8 +680,7 @@ async fn install_nftables_bouncer(
             CrowdSecStepResult {
                 step: CrowdSecBouncerInstallStep::Service,
                 status: CrowdSecStepStatus::Completed,
-                message: "CrowdSec NFTables Firewall Bouncer service is enabled and running"
-                    .to_string(),
+                message: service_message.to_string(),
             },
         ],
     })
@@ -1085,6 +1133,15 @@ pub async fn validate_nftables_blacklist_sets() -> Result<()> {
     Ok(())
 }
 
+async fn nftables_blacklist_sets_are_ready() -> Result<bool> {
+    let ipv4 =
+        blacklist_nftables_status("ip", NFTABLES_V4_TABLE, IPSET_V4_BLACKLIST, "ipv4_addr").await?;
+    let ipv6 = blacklist_nftables_status("ip6", NFTABLES_V6_TABLE, IPSET_V6_BLACKLIST, "ipv6_addr")
+        .await?;
+
+    Ok(ipv4.exists && ipv6.exists)
+}
+
 pub async fn install_ipset_setup_service() -> Result<()> {
     write_if_changed(IPSET_SETUP_SERVICE_PATH, IPSET_SETUP_SERVICE_CONTENT).await?;
     fs::create_dir_all(BOUNCER_IPSET_DROP_IN_DIRECTORY)
@@ -1115,6 +1172,35 @@ async fn enable_firewall_bouncer_service() -> Result<()> {
         "Unable to enable CrowdSec Firewall Bouncer service",
     )
     .await
+}
+
+fn nftables_bouncer_service_action(service_was_running: bool) -> NftablesBouncerServiceAction {
+    if service_was_running {
+        NftablesBouncerServiceAction::Restart
+    } else {
+        NftablesBouncerServiceAction::Enable
+    }
+}
+
+async fn reconcile_nftables_firewall_bouncer_service(
+    action: NftablesBouncerServiceAction,
+) -> Result<()> {
+    match action {
+        NftablesBouncerServiceAction::Enable => {
+            run_systemctl(
+                &["enable", "--now", FIREWALL_BOUNCER_SERVICE],
+                "Unable to enable CrowdSec NFTables Firewall Bouncer service",
+            )
+            .await
+        }
+        NftablesBouncerServiceAction::Restart => {
+            run_systemctl(
+                &["restart", FIREWALL_BOUNCER_SERVICE],
+                "Unable to restart CrowdSec NFTables Firewall Bouncer service",
+            )
+            .await
+        }
+    }
 }
 
 async fn disable_systemd_service(service: &str) -> Result<bool> {
@@ -1620,13 +1706,14 @@ mod tests {
     use super::{
         bouncer_register_response, bouncers_from_json, configuration_backend,
         configuration_is_set_only, emit_boolean_result, firewall_rules_contain_unmanaged_crowdsec,
-        integration_status, nftables_blacklist_set_is_compatible,
+        integration_status, nftables_blacklist_set_is_compatible, nftables_bouncer_service_action,
         nftables_set_only_configuration_contents, non_selected_firewall_backend,
         reject_fwcloud_bouncer, select_active_backend, set_only_configuration_contents,
         validate_bouncer_name, BouncerConfigurationState, CrowdSecBouncerIntegrationState,
         CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse, CrowdSecFirewallBackend,
-        CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig, FWCLOUD_BOUNCER_NAME,
-        IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
+        CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig, NftablesBouncerServiceAction,
+        FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE,
+        NFTABLES_V6_TABLE,
     };
     use crate::{
         crowdsec::{
@@ -1708,6 +1795,18 @@ mod tests {
         assert_eq!(
             non_selected_firewall_backend(CrowdSecFirewallBackend::Nftables),
             CrowdSecFirewallBackend::Iptables
+        );
+    }
+
+    #[test]
+    fn restarts_an_active_nftables_bouncer_after_reconciliation() {
+        assert_eq!(
+            nftables_bouncer_service_action(false),
+            NftablesBouncerServiceAction::Enable
+        );
+        assert_eq!(
+            nftables_bouncer_service_action(true),
+            NftablesBouncerServiceAction::Restart
         );
     }
 
