@@ -69,6 +69,8 @@ pub const BOUNCER_IPSET_DROP_IN_DIRECTORY: &str =
     "/etc/systemd/system/crowdsec-firewall-bouncer.service.d";
 pub const BOUNCER_IPSET_DROP_IN_PATH: &str =
     "/etc/systemd/system/crowdsec-firewall-bouncer.service.d/fwcloud-ipsets.conf";
+pub const BOUNCER_NFTABLES_DROP_IN_PATH: &str =
+    "/etc/systemd/system/crowdsec-firewall-bouncer.service.d/fwcloud-nftables.conf";
 pub const IPSET_V4_BLACKLIST: &str = "crowdsec-blacklists";
 pub const IPSET_V6_BLACKLIST: &str = "crowdsec6-blacklists";
 pub const NFTABLES_V4_TABLE: &str = "filter";
@@ -88,6 +90,7 @@ const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
 const IPSET_SETUP_SERVICE_CONTENT: &str = "[Unit]\nDescription=Create FWCloud CrowdSec blacklist IPSet\nBefore=crowdsec-firewall-bouncer.service\n\n[Service]\nType=oneshot\nExecStart=/usr/sbin/ipset create crowdsec-blacklists hash:ip timeout 0 maxelem 150000 -exist\nExecStart=/usr/sbin/ipset create crowdsec6-blacklists hash:ip family inet6 timeout 0 maxelem 150000 -exist\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n";
 const BOUNCER_IPSET_DROP_IN_CONTENT: &str =
     "[Unit]\nRequires=fwcloud-crowdsec-ipsets.service\nAfter=fwcloud-crowdsec-ipsets.service\n";
+const BOUNCER_NFTABLES_DROP_IN_CONTENT: &str = "[Unit]\nAfter=fwcloud.service\n";
 
 pub const fn firewall_bouncer_package(backend: CrowdSecFirewallBackend) -> &'static str {
     match backend {
@@ -676,6 +679,15 @@ async fn install_nftables_bouncer(
     emit_success(
         progress,
         "FWCloud NFTables set-only bouncer configuration is written",
+    );
+    emit_progress(
+        progress,
+        "Configuring CrowdSec NFTables Firewall Bouncer startup order",
+    );
+    install_nftables_bouncer_drop_in().await?;
+    emit_success(
+        progress,
+        "CrowdSec NFTables Firewall Bouncer starts after the FWCloud policy service",
     );
     let service_action = nftables_bouncer_service_action(
         systemd_service_is_running(FIREWALL_BOUNCER_SERVICE).await?,
@@ -1266,6 +1278,27 @@ pub async fn install_ipset_setup_service() -> Result<()> {
     .await
 }
 
+async fn install_nftables_bouncer_drop_in() -> Result<()> {
+    fs::create_dir_all(BOUNCER_IPSET_DROP_IN_DIRECTORY)
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create CrowdSec Firewall Bouncer systemd drop-in directory",
+            )
+        })?;
+    write_if_changed(
+        BOUNCER_NFTABLES_DROP_IN_PATH,
+        BOUNCER_NFTABLES_DROP_IN_CONTENT,
+    )
+    .await?;
+    run_systemctl(
+        &["daemon-reload"],
+        "Unable to reload CrowdSec NFTables systemd configuration",
+    )
+    .await
+}
+
 async fn enable_firewall_bouncer_service() -> Result<()> {
     run_systemctl(
         &["enable", "--now", FIREWALL_BOUNCER_SERVICE],
@@ -1813,8 +1846,8 @@ mod tests {
         validate_bouncer_name, BouncerConfigurationState, CrowdSecBouncerIntegrationState,
         CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse, CrowdSecFirewallBackend,
         CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig, NftablesBouncerServiceAction,
-        FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE,
-        NFTABLES_V6_TABLE,
+        BOUNCER_NFTABLES_DROP_IN_CONTENT, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST,
+        IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
     };
     use crate::{
         crowdsec::{
@@ -1869,6 +1902,14 @@ mod tests {
             &configuration.replace("  ipv6:\n", ""),
             CrowdSecFirewallBackend::Nftables,
         ));
+    }
+
+    #[test]
+    fn orders_the_nftables_bouncer_after_the_fwcloud_policy_service() {
+        assert_eq!(
+            BOUNCER_NFTABLES_DROP_IN_CONTENT,
+            "[Unit]\nAfter=fwcloud.service\n"
+        );
     }
 
     #[test]
