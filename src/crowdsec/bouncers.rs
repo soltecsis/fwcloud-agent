@@ -200,6 +200,13 @@ enum NftablesBouncerServiceAction {
     Restart,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BouncerReconciliationAction {
+    SkipCrowdSecNotInstalled,
+    PendingFirewallPolicy,
+    Reconcile,
+}
+
 pub async fn active_backend() -> Result<CrowdSecFirewallBackend> {
     let configured_backend = configured_backend().await?;
     Ok(select_active_backend(configured_backend))
@@ -500,7 +507,12 @@ pub async fn install_with_backend_and_progress(
 }
 
 pub async fn reconcile_after_policy_deployment(backend: CrowdSecFirewallBackend) -> Result<bool> {
-    if !packages::package_status().await?.crowdsec_installed {
+    if bouncer_reconciliation_action(
+        packages::package_status().await?.crowdsec_installed,
+        backend,
+        true,
+    ) == BouncerReconciliationAction::SkipCrowdSecNotInstalled
+    {
         debug!(
             "CrowdSec is not installed; skipping Firewall Bouncer reconciliation after policy deployment"
         );
@@ -514,7 +526,15 @@ pub async fn reconcile_for_installed_crowdsec(
     backend: CrowdSecFirewallBackend,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<bool> {
-    if backend == CrowdSecFirewallBackend::Nftables && !nftables_blacklist_sets_are_ready().await? {
+    let nftables_blacklist_sets_ready = if backend == CrowdSecFirewallBackend::Nftables {
+        nftables_blacklist_sets_are_ready().await?
+    } else {
+        true
+    };
+
+    if bouncer_reconciliation_action(true, backend, nftables_blacklist_sets_ready)
+        == BouncerReconciliationAction::PendingFirewallPolicy
+    {
         debug!(
             "FWCloud NFTables CrowdSec blacklist sets are unavailable; delaying Firewall Bouncer reconciliation"
         );
@@ -537,6 +557,20 @@ pub async fn reconcile_for_installed_crowdsec(
         "CrowdSec Firewall Bouncer is reconciled for the FWCloud firewall backend",
     );
     Ok(true)
+}
+
+fn bouncer_reconciliation_action(
+    crowdsec_installed: bool,
+    backend: CrowdSecFirewallBackend,
+    nftables_blacklist_sets_ready: bool,
+) -> BouncerReconciliationAction {
+    if !crowdsec_installed {
+        BouncerReconciliationAction::SkipCrowdSecNotInstalled
+    } else if backend == CrowdSecFirewallBackend::Nftables && !nftables_blacklist_sets_ready {
+        BouncerReconciliationAction::PendingFirewallPolicy
+    } else {
+        BouncerReconciliationAction::Reconcile
+    }
 }
 
 async fn install_iptables_bouncer(
@@ -1876,17 +1910,19 @@ mod tests {
     };
 
     use super::{
-        bouncer_register_response, bouncers_from_json, configuration_backend,
-        configuration_is_set_only, emit_boolean_result, firewall_rules_contain_unmanaged_crowdsec,
-        integration_status, nftables_blacklist_set_is_compatible, nftables_bouncer_service_action,
+        bouncer_reconciliation_action, bouncer_register_response, bouncers_from_json,
+        configuration_backend, configuration_is_set_only, emit_boolean_result,
+        firewall_rules_contain_unmanaged_crowdsec, integration_status,
+        nftables_blacklist_set_is_compatible, nftables_bouncer_service_action,
         nftables_set_only_configuration_contents, non_selected_firewall_backend,
         pending_backend_contents, pending_backend_from_contents, pending_policy_status,
         reject_fwcloud_bouncer, select_active_backend, set_only_configuration_contents,
-        validate_bouncer_name, BouncerConfigurationState, CrowdSecBouncerIntegrationState,
-        CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse, CrowdSecFirewallBackend,
-        CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig, NftablesBouncerServiceAction,
-        BOUNCER_NFTABLES_DROP_IN_CONTENT, BOUNCER_NFTABLES_DROP_IN_PATH, FWCLOUD_BOUNCER_NAME,
-        IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
+        validate_bouncer_name, BouncerConfigurationState, BouncerReconciliationAction,
+        CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse,
+        CrowdSecFirewallBackend, CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig,
+        NftablesBouncerServiceAction, BOUNCER_NFTABLES_DROP_IN_CONTENT,
+        BOUNCER_NFTABLES_DROP_IN_PATH, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST,
+        IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
     };
     use crate::{
         crowdsec::{
@@ -1948,6 +1984,26 @@ mod tests {
         assert_eq!(
             BOUNCER_NFTABLES_DROP_IN_CONTENT,
             "[Unit]\nAfter=fwcloud.service\n"
+        );
+    }
+
+    #[test]
+    fn chooses_to_skip_pending_or_reconcile_the_bouncer() {
+        assert_eq!(
+            bouncer_reconciliation_action(false, CrowdSecFirewallBackend::Iptables, true),
+            BouncerReconciliationAction::SkipCrowdSecNotInstalled
+        );
+        assert_eq!(
+            bouncer_reconciliation_action(true, CrowdSecFirewallBackend::Nftables, false),
+            BouncerReconciliationAction::PendingFirewallPolicy
+        );
+        assert_eq!(
+            bouncer_reconciliation_action(true, CrowdSecFirewallBackend::Nftables, true),
+            BouncerReconciliationAction::Reconcile
+        );
+        assert_eq!(
+            bouncer_reconciliation_action(true, CrowdSecFirewallBackend::Iptables, false),
+            BouncerReconciliationAction::Reconcile
         );
     }
 

@@ -470,10 +470,11 @@ impl CrowdSecCapabilitiesResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep, CrowdSecCapabilitiesResponse,
-        CrowdSecDataRetention, CrowdSecFirewallBackend, CrowdSecInstallRequest,
-        CrowdSecOperationRequest, CrowdSecPackageStatus, CrowdSecStepResult, CrowdSecStepStatus,
-        CrowdSecUninstallResponse, CrowdSecUninstallStep,
+        CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep, CrowdSecBouncerUninstallStep,
+        CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecFirewallBackend,
+        CrowdSecInstallRequest, CrowdSecInstallStep, CrowdSecOperationRequest,
+        CrowdSecPackageStatus, CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse,
+        CrowdSecUninstallStep,
     };
 
     #[test]
@@ -565,6 +566,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(CrowdSecInstallStep::FirewallBouncer).unwrap(),
             "firewall_bouncer"
+        );
+        assert_eq!(
+            serde_json::to_value(CrowdSecBouncerUninstallStep::NftablesStartupOrder).unwrap(),
+            "nftables_startup_order"
         );
     }
 }
