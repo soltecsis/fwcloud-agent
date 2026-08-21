@@ -59,8 +59,10 @@ pub const NFTABLES_RUNTIME_PACKAGE: &str = "nftables";
 pub const FIREWALL_BOUNCER_SERVICE: &str = "crowdsec-firewall-bouncer.service";
 pub const FWCLOUD_BOUNCER_NAME: &str = "fwcloud";
 pub const BOUNCER_CONFIG_DIRECTORY: &str = "/etc/crowdsec/bouncers";
-pub const BOUNCER_CONFIG_OVERRIDE_PATH: &str =
+pub const BOUNCER_CONFIG_PATH: &str = "/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml";
+const LEGACY_BOUNCER_CONFIG_OVERRIDE_PATH: &str =
     "/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local";
+const FWCLOUD_BOUNCER_CONFIGURATION_MARKER: &str = "# Managed by FWCloud";
 pub const BOUNCER_PENDING_BACKEND_PATH: &str =
     "/etc/crowdsec/bouncers/fwcloud-crowdsec-bouncer-pending";
 pub const IPSET_SETUP_SERVICE: &str = "fwcloud-crowdsec-ipsets.service";
@@ -81,11 +83,17 @@ pub const NFTABLES_V6_CHAIN: &str = "INPUT";
 const IPSET_COMMAND: &str = "/usr/sbin/ipset";
 const NFT_COMMAND: &str = "/usr/sbin/nft";
 const CSCLI_COMMAND: &str = "/usr/bin/cscli";
+const IPTABLES_COMMAND: &str = "/usr/sbin/iptables";
+const IP6TABLES_COMMAND: &str = "/usr/sbin/ip6tables";
 const IPTABLES_SAVE_COMMAND: &str = "/usr/sbin/iptables-save";
 const IP6TABLES_SAVE_COMMAND: &str = "/usr/sbin/ip6tables-save";
 const IPSET_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const IPSET_MAX_ELEMENTS: &str = "150000";
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
+const LEGACY_BOUNCER_CHAIN: &str = "CROWDSEC_CHAIN";
+const LEGACY_BOUNCER_IPSET_V4_PREFIX: &str = "crowdsec-blacklists-";
+const LEGACY_BOUNCER_IPSET_V6_PREFIX: &str = "crowdsec6-blacklists-";
+const LEGACY_BOUNCER_BASE_CHAINS: [&str; 2] = ["INPUT", "FORWARD"];
 
 const IPSET_SETUP_SERVICE_CONTENT: &str = "[Unit]\nDescription=Create FWCloud CrowdSec blacklist IPSet\nBefore=crowdsec-firewall-bouncer.service\n\n[Service]\nType=oneshot\nExecStart=/usr/sbin/ipset create crowdsec-blacklists hash:ip timeout 0 maxelem 150000 -exist\nExecStart=/usr/sbin/ipset create crowdsec6-blacklists hash:ip family inet6 timeout 0 maxelem 150000 -exist\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n";
 const BOUNCER_IPSET_DROP_IN_CONTENT: &str =
@@ -613,12 +621,15 @@ async fn install_iptables_bouncer(
         progress,
         "FWCloud IPSet-only bouncer configuration is written",
     );
+    let legacy_resources_removed = reconcile_legacy_bouncer_resources(progress).await?;
     emit_progress(progress, "Enabling CrowdSec Firewall Bouncer service");
     enable_firewall_bouncer_service().await?;
     emit_success(
         progress,
         "CrowdSec Firewall Bouncer service is enabled and running",
     );
+    let integration =
+        validate_bouncer_integration(CrowdSecFirewallBackend::Iptables, progress).await?;
 
     log::info!("CrowdSec Firewall Bouncer installation completed");
     emit_success(progress, "CrowdSec Firewall Bouncer installation completed");
@@ -641,6 +652,12 @@ async fn install_iptables_bouncer(
                 message: "CrowdSec Firewall Bouncer is configured for FWCloud IPSet only"
                     .to_string(),
             },
+            boolean_step(
+                CrowdSecBouncerInstallStep::LegacyResources,
+                legacy_resources_removed,
+                "Legacy CrowdSec Firewall Bouncer resources are removed",
+                "No legacy CrowdSec Firewall Bouncer resources were found",
+            ),
             CrowdSecStepResult {
                 step: CrowdSecBouncerInstallStep::Package,
                 status: CrowdSecStepStatus::Completed,
@@ -656,6 +673,7 @@ async fn install_iptables_bouncer(
                 message: "CrowdSec Firewall Bouncer service is enabled and running".to_string(),
             },
         ],
+        integration,
     })
 }
 
@@ -715,6 +733,7 @@ async fn install_nftables_bouncer(
         progress,
         "FWCloud NFTables set-only bouncer configuration is written",
     );
+    let legacy_resources_removed = reconcile_legacy_bouncer_resources(progress).await?;
     emit_progress(
         progress,
         "Configuring CrowdSec NFTables Firewall Bouncer startup order",
@@ -738,6 +757,8 @@ async fn install_nftables_bouncer(
     emit_progress(progress, service_message);
     reconcile_nftables_firewall_bouncer_service(service_action).await?;
     emit_success(progress, service_message);
+    let integration =
+        validate_bouncer_integration(CrowdSecFirewallBackend::Nftables, progress).await?;
 
     log::info!("CrowdSec NFTables Firewall Bouncer installation completed");
     emit_success(
@@ -776,12 +797,19 @@ async fn install_nftables_bouncer(
                 message: "CrowdSec Firewall Bouncer is configured for FWCloud NFTables set-only"
                     .to_string(),
             },
+            boolean_step(
+                CrowdSecBouncerInstallStep::LegacyResources,
+                legacy_resources_removed,
+                "Legacy CrowdSec Firewall Bouncer resources are removed",
+                "No legacy CrowdSec Firewall Bouncer resources were found",
+            ),
             CrowdSecStepResult {
                 step: CrowdSecBouncerInstallStep::Service,
                 status: CrowdSecStepStatus::Completed,
                 message: service_message.to_string(),
             },
         ],
+        integration,
     })
 }
 
@@ -862,7 +890,7 @@ pub async fn uninstall_with_progress(
         progress,
         "Removing FWCloud CrowdSec Firewall Bouncer configuration",
     );
-    let configuration_removed = remove_managed_file(BOUNCER_CONFIG_OVERRIDE_PATH).await?;
+    let configuration_removed = remove_bouncer_configuration().await?;
     emit_boolean_result(
         progress,
         configuration_removed,
@@ -1048,7 +1076,7 @@ async fn clear_pending_backend() -> Result<()> {
 }
 
 async fn configured_backend() -> Result<Option<CrowdSecFirewallBackend>> {
-    match fs::read_to_string(BOUNCER_CONFIG_OVERRIDE_PATH).await {
+    match fs::read_to_string(BOUNCER_CONFIG_PATH).await {
         Ok(configuration) => Ok(configuration_backend(&configuration)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(_) => Err(FwcError::crowdsec(
@@ -1061,7 +1089,7 @@ async fn configured_backend() -> Result<Option<CrowdSecFirewallBackend>> {
 async fn bouncer_configuration_state(
     backend: CrowdSecFirewallBackend,
 ) -> Result<BouncerConfigurationState> {
-    match fs::read_to_string(BOUNCER_CONFIG_OVERRIDE_PATH).await {
+    match fs::read_to_string(BOUNCER_CONFIG_PATH).await {
         Ok(configuration) if configuration_is_set_only(&configuration, backend) => {
             Ok(BouncerConfigurationState::SetOnly)
         }
@@ -1179,6 +1207,12 @@ fn pending_backend_from_contents(contents: &str) -> Option<CrowdSecFirewallBacke
     }
 }
 
+fn configuration_is_fwcloud_managed(configuration: &str) -> bool {
+    configuration
+        .lines()
+        .any(|line| line.trim() == FWCLOUD_BOUNCER_CONFIGURATION_MARKER)
+}
+
 fn configuration_is_set_only(configuration: &str, backend: CrowdSecFirewallBackend) -> bool {
     let expected = match backend {
         CrowdSecFirewallBackend::Iptables => vec![
@@ -1204,8 +1238,24 @@ fn configuration_is_set_only(configuration: &str, backend: CrowdSecFirewallBacke
     });
 
     expected_are_present
+        && !configuration_contains_bouncer_rule_settings(configuration, backend)
         && (backend != CrowdSecFirewallBackend::Nftables
             || (configuration.contains("  ipv4:\n") && configuration.contains("  ipv6:\n")))
+}
+
+fn configuration_contains_bouncer_rule_settings(
+    configuration: &str,
+    backend: CrowdSecFirewallBackend,
+) -> bool {
+    match backend {
+        CrowdSecFirewallBackend::Iptables => configuration
+            .lines()
+            .any(|line| line.trim_start().starts_with("iptables_chains:")),
+        CrowdSecFirewallBackend::Nftables => configuration.lines().any(|line| {
+            let trimmed_line = line.trim();
+            trimmed_line.starts_with("nftables_hooks:") || trimmed_line == "set-only: false"
+        }),
+    }
 }
 
 fn boolean_step<T>(
@@ -1720,6 +1770,215 @@ fn is_fwcloud_blacklist_rule(rule: &str) -> bool {
             || rule.contains("--match-set crowdsec6-blacklists "))
 }
 
+async fn reconcile_legacy_bouncer_resources(progress: Option<&CrowdSecProgress>) -> Result<bool> {
+    if systemd_service_is_running(FIREWALL_BOUNCER_SERVICE).await? {
+        emit_progress(
+            progress,
+            "Stopping CrowdSec Firewall Bouncer before legacy resource cleanup",
+        );
+        run_systemctl(
+            &["stop", FIREWALL_BOUNCER_SERVICE],
+            "Unable to stop CrowdSec Firewall Bouncer before legacy resource cleanup",
+        )
+        .await?;
+        emit_success(
+            progress,
+            "CrowdSec Firewall Bouncer is stopped for legacy resource cleanup",
+        );
+    }
+
+    emit_progress(
+        progress,
+        "Removing legacy CrowdSec Firewall Bouncer resources",
+    );
+    let resources_removed = cleanup_legacy_bouncer_resources().await?;
+    emit_boolean_result(
+        progress,
+        resources_removed,
+        "Legacy CrowdSec Firewall Bouncer resources are removed",
+        "No legacy CrowdSec Firewall Bouncer resources were found",
+    );
+
+    Ok(resources_removed)
+}
+
+async fn validate_bouncer_integration(
+    backend: CrowdSecFirewallBackend,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecBouncerIntegrationStatus> {
+    emit_progress(
+        progress,
+        "Validating FWCloud CrowdSec Firewall Bouncer integration",
+    );
+    let integration = status(backend).await?;
+
+    match integration.state {
+        CrowdSecBouncerIntegrationState::Ready => emit_success(progress, &integration.message),
+        _ => emit_warning(progress, &integration.message),
+    }
+
+    Ok(integration)
+}
+
+pub async fn cleanup_legacy_bouncer_resources() -> Result<bool> {
+    let mut resources_removed = false;
+
+    for (command, save_command) in [
+        (IPTABLES_COMMAND, IPTABLES_SAVE_COMMAND),
+        (IP6TABLES_COMMAND, IP6TABLES_SAVE_COMMAND),
+    ] {
+        if !Path::new(command).is_file() || !Path::new(save_command).is_file() {
+            continue;
+        }
+
+        let output = run_iptables_save(save_command).await?;
+        let rules = String::from_utf8_lossy(&output.stdout);
+        let Some(jump_chains) = legacy_bouncer_jump_chains(&rules) else {
+            continue;
+        };
+
+        for chain in jump_chains {
+            run_iptables(command, &["-D", chain, "-j", LEGACY_BOUNCER_CHAIN]).await?;
+        }
+        run_iptables(command, &["-F", LEGACY_BOUNCER_CHAIN]).await?;
+        run_iptables(command, &["-X", LEGACY_BOUNCER_CHAIN]).await?;
+        resources_removed = true;
+    }
+
+    if Path::new(IPSET_COMMAND).is_file() {
+        let output = run_ipset(&["list", "-name"]).await?;
+        if output.status.success() {
+            for name in legacy_bouncer_ipset_names(&String::from_utf8_lossy(&output.stdout)) {
+                let output = run_ipset(&["destroy", name]).await?;
+                if !output.status.success() {
+                    return Err(FwcError::crowdsec(
+                        FIREWALL_INTEGRATION_INVALID,
+                        "Unable to remove legacy CrowdSec Firewall Bouncer IPSet",
+                    ));
+                }
+                resources_removed = true;
+            }
+        }
+    }
+
+    Ok(resources_removed)
+}
+
+fn legacy_bouncer_jump_chains(rules: &str) -> Option<Vec<&'static str>> {
+    if !rules
+        .lines()
+        .any(|line| line.starts_with(&format!(":{LEGACY_BOUNCER_CHAIN} ")))
+    {
+        return None;
+    }
+
+    let chain_rules = rules
+        .lines()
+        .filter(|line| line.starts_with(&format!("-A {LEGACY_BOUNCER_CHAIN} ")))
+        .collect::<Vec<_>>();
+    if chain_rules.is_empty()
+        || !chain_rules
+            .iter()
+            .all(|line| line.contains("--comment \"CrowdSec:"))
+    {
+        return None;
+    }
+
+    let jump_chains = LEGACY_BOUNCER_BASE_CHAINS
+        .iter()
+        .flat_map(|chain| {
+            rules
+                .lines()
+                .filter(move |line| *line == format!("-A {chain} -j {LEGACY_BOUNCER_CHAIN}"))
+                .map(move |_| *chain)
+        })
+        .collect::<Vec<_>>();
+
+    (!jump_chains.is_empty()).then_some(jump_chains)
+}
+
+fn legacy_bouncer_ipset_names(output: &str) -> Vec<&str> {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|name| {
+            [
+                LEGACY_BOUNCER_IPSET_V4_PREFIX,
+                LEGACY_BOUNCER_IPSET_V6_PREFIX,
+            ]
+            .iter()
+            .any(|prefix| {
+                name.strip_prefix(prefix).is_some_and(|suffix| {
+                    !suffix.is_empty() && suffix.chars().all(|value| value.is_ascii_digit())
+                })
+            })
+        })
+        .collect()
+}
+
+async fn run_iptables_save(command: &str) -> Result<std::process::Output> {
+    debug!(
+        "Inspecting legacy CrowdSec Firewall Bouncer rules: {}",
+        command
+    );
+    let output = timeout(IPSET_COMMAND_TIMEOUT, Command::new(command).output())
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                OPERATION_TIMEOUT,
+                "CrowdSec firewall inspection command timed out",
+            )
+        })?
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to inspect firewall rules for CrowdSec integration",
+            )
+        })?;
+
+    if output.status.success() {
+        Ok(output)
+    } else {
+        Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to inspect firewall rules for CrowdSec integration",
+        ))
+    }
+}
+
+async fn run_iptables(command: &str, arguments: &[&str]) -> Result<()> {
+    debug!(
+        "Running legacy CrowdSec Firewall Bouncer cleanup command: {} {:?}",
+        command, arguments
+    );
+    let output = timeout(
+        IPSET_COMMAND_TIMEOUT,
+        Command::new(command).args(arguments).output(),
+    )
+    .await
+    .map_err(|_| {
+        FwcError::crowdsec(
+            OPERATION_TIMEOUT,
+            "CrowdSec Firewall Bouncer cleanup command timed out",
+        )
+    })?
+    .map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to run CrowdSec Firewall Bouncer cleanup command",
+        )
+    })?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to remove legacy CrowdSec Firewall Bouncer firewall resources",
+        ))
+    }
+}
+
 async fn remove_managed_file(path: &str) -> Result<bool> {
     match fs::remove_file(path).await {
         Ok(()) => Ok(true),
@@ -1727,6 +1986,28 @@ async fn remove_managed_file(path: &str) -> Result<bool> {
         Err(_) => Err(FwcError::crowdsec(
             FIREWALL_INTEGRATION_INVALID,
             "Unable to remove FWCloud CrowdSec configuration",
+        )),
+    }
+}
+
+async fn remove_bouncer_configuration() -> Result<bool> {
+    let configuration_removed = remove_fwcloud_bouncer_configuration().await?;
+    let legacy_configuration_removed =
+        remove_managed_file(LEGACY_BOUNCER_CONFIG_OVERRIDE_PATH).await?;
+
+    Ok(configuration_removed || legacy_configuration_removed)
+}
+
+async fn remove_fwcloud_bouncer_configuration() -> Result<bool> {
+    match fs::read_to_string(BOUNCER_CONFIG_PATH).await {
+        Ok(configuration) if configuration_is_fwcloud_managed(&configuration) => {
+            remove_managed_file(BOUNCER_CONFIG_PATH).await
+        }
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to read CrowdSec Firewall Bouncer configuration",
         )),
     }
 }
@@ -1744,34 +2025,57 @@ async fn write_if_changed(path: &str, contents: &str) -> Result<()> {
 }
 
 async fn existing_bouncer_api_key() -> Result<Option<String>> {
-    match fs::read_to_string(BOUNCER_CONFIG_OVERRIDE_PATH).await {
-        Ok(configuration) => configuration
-            .lines()
-            .find_map(|line| {
-                line.split_once(':').and_then(|(key, value)| {
-                    (key.trim() == "api_key").then(|| {
-                        value
-                            .trim()
-                            .trim_matches('"')
-                            .trim_matches('\'')
-                            .to_string()
-                    })
-                })
-            })
-            .filter(|api_key| valid_api_key(api_key))
-            .map(Some)
-            .ok_or_else(|| {
-                FwcError::crowdsec(
-                    FIREWALL_INTEGRATION_INVALID,
-                    "Existing CrowdSec Firewall Bouncer configuration has no valid API key",
-                )
-            }),
+    let legacy_key = bouncer_api_key_from_path(LEGACY_BOUNCER_CONFIG_OVERRIDE_PATH).await?;
+    if legacy_key.is_some() {
+        return Ok(legacy_key);
+    }
+
+    match fs::read_to_string(BOUNCER_CONFIG_PATH).await {
+        Ok(configuration) if configuration_is_fwcloud_managed(&configuration) => {
+            bouncer_api_key_from_contents(&configuration)
+        }
+        Ok(_) => Ok(None),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(_) => Err(FwcError::crowdsec(
             FIREWALL_INTEGRATION_INVALID,
             "Unable to read CrowdSec Firewall Bouncer configuration",
         )),
     }
+}
+
+async fn bouncer_api_key_from_path(path: &str) -> Result<Option<String>> {
+    match fs::read_to_string(path).await {
+        Ok(configuration) => bouncer_api_key_from_contents(&configuration),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to read CrowdSec Firewall Bouncer configuration",
+        )),
+    }
+}
+
+fn bouncer_api_key_from_contents(configuration: &str) -> Result<Option<String>> {
+    configuration
+        .lines()
+        .find_map(|line| {
+            line.split_once(':').and_then(|(key, value)| {
+                (key.trim() == "api_key").then(|| {
+                    value
+                        .trim()
+                        .trim_matches('"')
+                        .trim_matches('\'')
+                        .to_string()
+                })
+            })
+        })
+        .filter(|api_key| valid_api_key(api_key))
+        .map(Some)
+        .ok_or_else(|| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Existing CrowdSec Firewall Bouncer configuration has no valid API key",
+            )
+        })
 }
 
 async fn generate_bouncer_api_key() -> Result<String> {
@@ -1834,7 +2138,7 @@ fn valid_api_key(api_key: &str) -> bool {
 }
 
 fn write_bouncer_configuration(contents: &str) -> Result<()> {
-    let temporary_path = format!("{}.tmp", BOUNCER_CONFIG_OVERRIDE_PATH);
+    let temporary_path = format!("{}.tmp", BOUNCER_CONFIG_PATH);
     let _ = std_fs::remove_file(&temporary_path);
     let mut configuration_file = OpenOptions::new()
         .create(true)
@@ -1865,12 +2169,21 @@ fn write_bouncer_configuration(contents: &str) -> Result<()> {
                 "Unable to write CrowdSec Firewall Bouncer configuration",
             )
         })?;
-    std_fs::rename(&temporary_path, BOUNCER_CONFIG_OVERRIDE_PATH).map_err(|_| {
+    std_fs::rename(&temporary_path, BOUNCER_CONFIG_PATH).map_err(|_| {
         FwcError::crowdsec(
             FIREWALL_INTEGRATION_INVALID,
             "Unable to install CrowdSec Firewall Bouncer configuration",
         )
-    })
+    })?;
+
+    match std_fs::remove_file(LEGACY_BOUNCER_CONFIG_OVERRIDE_PATH) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to remove legacy CrowdSec Firewall Bouncer configuration",
+        )),
+    }
 }
 
 fn set_only_configuration_contents(
@@ -1878,7 +2191,7 @@ fn set_only_configuration_contents(
     api_key: &str,
 ) -> String {
     format!(
-        "mode: {}\napi_url: http://127.0.0.1:8080/\napi_key: {}\ndisable_ipv6: false\nblacklists_ipv4: {}\nblacklists_ipv6: {}\nipset_type: hash:ip\n",
+        "{FWCLOUD_BOUNCER_CONFIGURATION_MARKER}\nmode: {}\napi_url: http://127.0.0.1:8080/\napi_key: {}\ndisable_ipv6: false\nblacklists_ipv4: {}\nblacklists_ipv6: {}\nipset_type: hash:ip\n",
         configuration.mode,
         api_key,
         configuration.blacklists_ipv4,
@@ -1891,7 +2204,7 @@ fn nftables_set_only_configuration_contents(
     api_key: &str,
 ) -> String {
     format!(
-        "mode: {}\napi_url: http://127.0.0.1:8080/\napi_key: {}\ndisable_ipv6: false\nnftables:\n  ipv4:\n    enabled: true\n    set-only: true\n    table: {}\n    chain: {}\n  ipv6:\n    enabled: true\n    set-only: true\n    table: {}\n    chain: {}\n",
+        "{FWCLOUD_BOUNCER_CONFIGURATION_MARKER}\nmode: {}\napi_url: http://127.0.0.1:8080/\napi_key: {}\ndisable_ipv6: false\nnftables:\n  ipv4:\n    enabled: true\n    set-only: true\n    table: {}\n    chain: {}\n  ipv6:\n    enabled: true\n    set-only: true\n    table: {}\n    chain: {}\n",
         configuration.mode,
         api_key,
         configuration.ipv4_table,
@@ -1911,8 +2224,9 @@ mod tests {
 
     use super::{
         bouncer_reconciliation_action, bouncer_register_response, bouncers_from_json,
-        configuration_backend, configuration_is_set_only, emit_boolean_result,
-        firewall_rules_contain_unmanaged_crowdsec, integration_status,
+        configuration_backend, configuration_is_fwcloud_managed, configuration_is_set_only,
+        emit_boolean_result, firewall_rules_contain_unmanaged_crowdsec, integration_status,
+        legacy_bouncer_ipset_names, legacy_bouncer_jump_chains,
         nftables_blacklist_set_is_compatible, nftables_bouncer_service_action,
         nftables_set_only_configuration_contents, non_selected_firewall_backend,
         pending_backend_contents, pending_backend_from_contents, pending_policy_status,
@@ -1920,7 +2234,7 @@ mod tests {
         validate_bouncer_name, BouncerConfigurationState, BouncerReconciliationAction,
         CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse,
         CrowdSecFirewallBackend, CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig,
-        NftablesBouncerServiceAction, BOUNCER_NFTABLES_DROP_IN_CONTENT,
+        NftablesBouncerServiceAction, BOUNCER_CONFIG_PATH, BOUNCER_NFTABLES_DROP_IN_CONTENT,
         BOUNCER_NFTABLES_DROP_IN_PATH, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST,
         IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
     };
@@ -1951,6 +2265,18 @@ mod tests {
             &configuration.replace("mode: ipset", "mode: iptables"),
             CrowdSecFirewallBackend::Iptables,
         ));
+        assert!(!configuration_is_set_only(
+            &format!("{configuration}iptables_chains:\n  - INPUT\n"),
+            CrowdSecFirewallBackend::Iptables,
+        ));
+        assert!(configuration_is_fwcloud_managed(&configuration));
+        assert!(!configuration_is_fwcloud_managed(
+            "mode: iptables\napi_key: package-generated-key\n"
+        ));
+        assert_eq!(
+            BOUNCER_CONFIG_PATH,
+            "/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml"
+        );
     }
 
     #[test]
@@ -1975,6 +2301,14 @@ mod tests {
         );
         assert!(!configuration_is_set_only(
             &configuration.replace("  ipv6:\n", ""),
+            CrowdSecFirewallBackend::Nftables,
+        ));
+        assert!(!configuration_is_set_only(
+            &configuration.replace("set-only: true", "set-only: false"),
+            CrowdSecFirewallBackend::Nftables,
+        ));
+        assert!(!configuration_is_set_only(
+            &format!("{configuration}nftables_hooks:\n  - input\n"),
             CrowdSecFirewallBackend::Nftables,
         ));
     }
@@ -2133,6 +2467,33 @@ mod tests {
 
         assert!(!firewall_rules_contain_unmanaged_crowdsec(fwcloud_rules));
         assert!(firewall_rules_contain_unmanaged_crowdsec(unmanaged_rules));
+    }
+
+    #[test]
+    fn selects_only_legacy_bouncer_chains_and_ipsets_for_cleanup() {
+        let legacy_rules = ":CROWDSEC_CHAIN - [0:0]\n-A INPUT -j CROWDSEC_CHAIN\n-A CROWDSEC_CHAIN -m set --match-set crowdsec-blacklists-0 src -m comment --comment \"CrowdSec: CAPI\" -j DROP\n-A FORWARD -m set --match-set crowdsec-blacklists src -j DROP\n";
+        let ipsets = "crowdsec-blacklists\ncrowdsec-blacklists-0\ncrowdsec-blacklists-23\ncrowdsec6-blacklists\ncrowdsec6-blacklists-1\nuser-crowdsec-blacklists-0\n";
+
+        assert_eq!(
+            legacy_bouncer_jump_chains(legacy_rules),
+            Some(vec!["INPUT"])
+        );
+        assert_eq!(
+            legacy_bouncer_ipset_names(ipsets),
+            vec![
+                "crowdsec-blacklists-0",
+                "crowdsec-blacklists-23",
+                "crowdsec6-blacklists-1",
+            ]
+        );
+    }
+
+    #[test]
+    fn preserves_non_legacy_crowdsec_chains() {
+        let rules =
+            ":CROWDSEC_CHAIN - [0:0]\n-A INPUT -j CROWDSEC_CHAIN\n-A CROWDSEC_CHAIN -j DROP\n";
+
+        assert_eq!(legacy_bouncer_jump_chains(rules), None);
     }
 
     #[test]
