@@ -22,9 +22,13 @@
 
 use crate::{
     crowdsec::{
+        capi,
         command::CrowdSecCommand,
         errors::CONSOLE_INVALID_ENROLLMENT,
-        models::{CrowdSecConsoleState, CrowdSecConsoleStatusResponse},
+        models::{
+            CrowdSecCapiState, CrowdSecCapiStatus, CrowdSecConsoleState,
+            CrowdSecConsoleStatusResponse,
+        },
     },
     errors::{FwcError, Result},
 };
@@ -35,27 +39,7 @@ const MAX_TAG_LENGTH: usize = 64;
 const MAX_TAGS: usize = 16;
 
 pub async fn status() -> Result<CrowdSecConsoleStatusResponse> {
-    let output = CrowdSecCommand::cscli(&["capi", "status", "-o", "json"])?
-        .execute_allow_failure()
-        .await?;
-
-    let diagnostics = format!("{}\n{}", output.stdout(), output.stderr());
-    if output_uses_unsupported_json_option(&diagnostics) {
-        let output = CrowdSecCommand::cscli(&["capi", "status"])?
-            .execute_allow_failure()
-            .await?;
-        return Ok(capi_status(
-            output.succeeded(),
-            output.stdout(),
-            output.stderr(),
-        ));
-    }
-
-    Ok(capi_status(
-        output.succeeded(),
-        output.stdout(),
-        output.stderr(),
-    ))
+    Ok(capi_status(capi::status().await?))
 }
 
 pub async fn enroll(
@@ -143,18 +127,15 @@ fn enrollment_arguments<'a>(
     arguments
 }
 
-fn capi_status(succeeded: bool, stdout: &str, stderr: &str) -> CrowdSecConsoleStatusResponse {
-    let diagnostics = format!("{}\n{}", stdout, stderr).to_ascii_lowercase();
-    let state = if succeeded {
-        CrowdSecConsoleState::Connected
-    } else if is_not_configured(&diagnostics) {
-        CrowdSecConsoleState::NotConfigured
-    } else {
-        CrowdSecConsoleState::Error
+fn capi_status(status: CrowdSecCapiStatus) -> CrowdSecConsoleStatusResponse {
+    let state = match &status.state {
+        CrowdSecCapiState::Connected => CrowdSecConsoleState::Connected,
+        CrowdSecCapiState::NotConfigured => CrowdSecConsoleState::NotConfigured,
+        CrowdSecCapiState::TemporarilyBlocked => CrowdSecConsoleState::RateLimited,
+        CrowdSecCapiState::Error => CrowdSecConsoleState::Error,
     };
-
     CrowdSecConsoleStatusResponse {
-        message: capi_status_message(&state).to_string(),
+        message: capi_status_message(&state, status.retry_after_minutes).to_string(),
         state,
     }
 }
@@ -166,31 +147,27 @@ fn pending_approval_status() -> CrowdSecConsoleStatusResponse {
     }
 }
 
-fn is_not_configured(diagnostics: &str) -> bool {
-    diagnostics.contains("not enrolled")
-        || diagnostics.contains("not registered")
-        || diagnostics.contains("no credentials")
-        || diagnostics.contains("online_api_credentials")
-        || diagnostics.contains("credentials file")
-}
-
-fn output_uses_unsupported_json_option(diagnostics: &str) -> bool {
-    let diagnostics = diagnostics.to_ascii_lowercase();
-    diagnostics.contains("unknown flag") && diagnostics.contains("output")
-}
-
-fn capi_status_message(state: &CrowdSecConsoleState) -> &'static str {
+fn capi_status_message(state: &CrowdSecConsoleState, retry_after_minutes: Option<u64>) -> String {
     match state {
         CrowdSecConsoleState::NotConfigured => {
-            "CrowdSec Central API credentials are not configured"
+            "CrowdSec Central API credentials are not configured".to_string()
         }
         CrowdSecConsoleState::PendingApproval => {
             unreachable!("CAPI status cannot determine enrollment approval")
         }
         CrowdSecConsoleState::Connected => {
             "CrowdSec Central API is reachable; CrowdSec Console approval cannot be checked locally"
+                .to_string()
         }
-        CrowdSecConsoleState::Error => "Unable to determine CrowdSec Central API connectivity",
+        CrowdSecConsoleState::RateLimited => match retry_after_minutes {
+            Some(minutes) => format!(
+                "CrowdSec Central API requests are temporarily blocked. Retry in {minutes} minutes."
+            ),
+            None => "CrowdSec Central API requests are temporarily blocked.".to_string(),
+        },
+        CrowdSecConsoleState::Error => {
+            "Unable to determine CrowdSec Central API connectivity".to_string()
+        }
     }
 }
 
@@ -204,7 +181,8 @@ mod tests {
         crowdsec::{
             errors::CONSOLE_INVALID_ENROLLMENT,
             models::{
-                CrowdSecConsoleEnrollResponse, CrowdSecConsoleState, CrowdSecConsoleStatusResponse,
+                CrowdSecCapiState, CrowdSecCapiStatus, CrowdSecConsoleEnrollResponse,
+                CrowdSecConsoleState, CrowdSecConsoleStatusResponse,
             },
         },
         errors::FwcError,
@@ -267,17 +245,40 @@ mod tests {
     #[test]
     fn normalizes_capi_connection_states() {
         assert_eq!(
-            capi_status(false, "", "no credentials found").state,
+            capi_status(CrowdSecCapiStatus {
+                state: CrowdSecCapiState::NotConfigured,
+                retry_after_minutes: None,
+            })
+            .state,
             CrowdSecConsoleState::NotConfigured
         );
         assert_eq!(
-            capi_status(true, "CAPI connection succeeded", "").state,
+            capi_status(CrowdSecCapiStatus {
+                state: CrowdSecCapiState::Connected,
+                retry_after_minutes: None,
+            })
+            .state,
             CrowdSecConsoleState::Connected
         );
         assert_eq!(
-            capi_status(false, "", "network timeout").state,
+            capi_status(CrowdSecCapiStatus {
+                state: CrowdSecCapiState::Error,
+                retry_after_minutes: None,
+            })
+            .state,
             CrowdSecConsoleState::Error
         );
+    }
+
+    #[test]
+    fn reports_the_remaining_minutes_for_a_temporary_capi_block() {
+        let status = capi_status(CrowdSecCapiStatus {
+            state: CrowdSecCapiState::TemporarilyBlocked,
+            retry_after_minutes: Some(61),
+        });
+
+        assert_eq!(status.state, CrowdSecConsoleState::RateLimited);
+        assert!(status.message.contains("Retry in 61 minutes"));
     }
 
     #[test]

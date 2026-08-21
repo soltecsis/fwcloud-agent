@@ -22,6 +22,7 @@
 
 pub mod alerts;
 pub mod bouncers;
+pub mod capi;
 pub mod collections;
 pub mod command;
 pub mod console;

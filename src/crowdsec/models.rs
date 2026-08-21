@@ -221,7 +221,22 @@ pub enum CrowdSecHealthState {
     Ready,
     NotConfigured,
     Unavailable,
+    RateLimited,
     Error,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum CrowdSecCapiState {
+    Connected,
+    NotConfigured,
+    TemporarilyBlocked,
+    Error,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct CrowdSecCapiStatus {
+    pub state: CrowdSecCapiState,
+    pub retry_after_minutes: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -342,6 +357,7 @@ pub enum CrowdSecConsoleState {
     NotConfigured,
     PendingApproval,
     Connected,
+    RateLimited,
     Error,
 }
 
