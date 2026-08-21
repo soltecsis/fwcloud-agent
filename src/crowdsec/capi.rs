@@ -31,6 +31,7 @@ use tokio::fs;
 
 use crate::{
     crowdsec::{
+        command::CrowdSecCommand,
         errors::COMMAND_FAILED,
         models::{CrowdSecCapiState, CrowdSecCapiStatus},
     },
@@ -43,6 +44,34 @@ const CAPI_COOLDOWN_STATE_PATH: &str = "./data/crowdsec/capi-cooldown.json";
 #[derive(Deserialize, Serialize)]
 struct CapiCooldownState {
     retry_at_unix_seconds: u64,
+}
+
+pub async fn status() -> Result<CrowdSecCapiStatus> {
+    if let Some(status) = active_cooldown().await? {
+        return Ok(status);
+    }
+
+    let output = CrowdSecCommand::cscli(&["capi", "status", "-o", "json"])?
+        .execute_allow_failure()
+        .await?;
+    let diagnostics = format!("{}\n{}", output.stdout(), output.stderr());
+    let status = if output_uses_unsupported_json_option(&diagnostics) {
+        let output = CrowdSecCommand::cscli(&["capi", "status"])?
+            .execute_allow_failure()
+            .await?;
+        status_from_command_output(output.succeeded(), output.stdout(), output.stderr())
+    } else {
+        status_from_command_output(output.succeeded(), output.stdout(), output.stderr())
+    };
+
+    match &status.state {
+        CrowdSecCapiState::Connected => {
+            clear_cooldown().await?;
+            Ok(status)
+        }
+        CrowdSecCapiState::TemporarilyBlocked => start_cooldown().await,
+        CrowdSecCapiState::NotConfigured | CrowdSecCapiState::Error => Ok(status),
+    }
 }
 
 pub fn status_from_command_output(
@@ -169,6 +198,11 @@ fn is_temporarily_blocked(diagnostics: &str) -> bool {
         || diagnostics.contains("http status 403")
         || diagnostics.contains("status code: 403")
         || diagnostics.contains("http 403")
+}
+
+fn output_uses_unsupported_json_option(diagnostics: &str) -> bool {
+    let diagnostics = diagnostics.to_ascii_lowercase();
+    diagnostics.contains("unknown flag") && diagnostics.contains("output")
 }
 
 #[cfg(test)]
