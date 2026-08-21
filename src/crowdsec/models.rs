@@ -224,6 +224,20 @@ pub enum CrowdSecHealthState {
     Error,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum CrowdSecCapiState {
+    Connected,
+    NotConfigured,
+    TemporarilyBlocked,
+    Error,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct CrowdSecCapiStatus {
+    pub state: CrowdSecCapiState,
+    pub retry_after_minutes: Option<u64>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CrowdSecHealthStatus {
     pub state: CrowdSecHealthState,
