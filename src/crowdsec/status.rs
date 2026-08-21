@@ -308,6 +308,7 @@ fn health_status_from_console(status: CrowdSecConsoleStatusResponse) -> CrowdSec
         CrowdSecConsoleState::NotConfigured => CrowdSecHealthState::NotConfigured,
         CrowdSecConsoleState::PendingApproval => CrowdSecHealthState::Unknown,
         CrowdSecConsoleState::Connected => CrowdSecHealthState::Ready,
+        CrowdSecConsoleState::RateLimited => CrowdSecHealthState::RateLimited,
         CrowdSecConsoleState::Error => CrowdSecHealthState::Error,
     };
 
@@ -432,8 +433,8 @@ async fn service_is_running(service: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::{
-        crowdsec_version_from_output, status_warnings, unavailable_bouncer_status,
-        unavailable_package_status,
+        crowdsec_version_from_output, health_status_from_console, status_warnings,
+        unavailable_bouncer_status, unavailable_package_status,
     };
     use crate::crowdsec::{
         bouncers,
@@ -442,9 +443,10 @@ mod tests {
             IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
         },
         models::{
-            CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus, CrowdSecHealthState,
-            CrowdSecHealthStatus, CrowdSecPackageStatus, CrowdSecServiceStatus,
-            CrowdSecStatusCount, CrowdSecStatusResponse,
+            CrowdSecConsoleState, CrowdSecConsoleStatusResponse, CrowdSecFirewallBackend,
+            CrowdSecFirewallBouncerStatus, CrowdSecHealthState, CrowdSecHealthStatus,
+            CrowdSecPackageStatus, CrowdSecServiceStatus, CrowdSecStatusCount,
+            CrowdSecStatusResponse,
         },
     };
 
@@ -491,6 +493,18 @@ mod tests {
             crowdsec_version_from_output(output).as_deref(),
             Some("v1.7.0")
         );
+    }
+
+    #[test]
+    fn exposes_a_temporary_capi_block_as_a_health_warning() {
+        let health = health_status_from_console(CrowdSecConsoleStatusResponse {
+            state: CrowdSecConsoleState::RateLimited,
+            message: "CrowdSec Central API requests are temporarily blocked. Retry in 61 minutes."
+                .to_string(),
+        });
+
+        assert_eq!(health.state, CrowdSecHealthState::RateLimited);
+        assert!(health.message.contains("Retry in 61 minutes"));
     }
 
     #[test]

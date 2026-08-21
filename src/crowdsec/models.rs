@@ -221,6 +221,7 @@ pub enum CrowdSecHealthState {
     Ready,
     NotConfigured,
     Unavailable,
+    RateLimited,
     Error,
 }
 
@@ -356,6 +357,7 @@ pub enum CrowdSecConsoleState {
     NotConfigured,
     PendingApproval,
     Connected,
+    RateLimited,
     Error,
 }
 

@@ -131,9 +131,8 @@ fn capi_status(status: CrowdSecCapiStatus) -> CrowdSecConsoleStatusResponse {
     let state = match &status.state {
         CrowdSecCapiState::Connected => CrowdSecConsoleState::Connected,
         CrowdSecCapiState::NotConfigured => CrowdSecConsoleState::NotConfigured,
-        CrowdSecCapiState::TemporarilyBlocked | CrowdSecCapiState::Error => {
-            CrowdSecConsoleState::Error
-        }
+        CrowdSecCapiState::TemporarilyBlocked => CrowdSecConsoleState::RateLimited,
+        CrowdSecCapiState::Error => CrowdSecConsoleState::Error,
     };
     CrowdSecConsoleStatusResponse {
         message: capi_status_message(&state, status.retry_after_minutes).to_string(),
@@ -160,12 +159,15 @@ fn capi_status_message(state: &CrowdSecConsoleState, retry_after_minutes: Option
             "CrowdSec Central API is reachable; CrowdSec Console approval cannot be checked locally"
                 .to_string()
         }
-        CrowdSecConsoleState::Error => match retry_after_minutes {
+        CrowdSecConsoleState::RateLimited => match retry_after_minutes {
             Some(minutes) => format!(
                 "CrowdSec Central API requests are temporarily blocked. Retry in {minutes} minutes."
             ),
-            None => "Unable to determine CrowdSec Central API connectivity".to_string(),
+            None => "CrowdSec Central API requests are temporarily blocked.".to_string(),
         },
+        CrowdSecConsoleState::Error => {
+            "Unable to determine CrowdSec Central API connectivity".to_string()
+        }
     }
 }
 
@@ -275,7 +277,7 @@ mod tests {
             retry_after_minutes: Some(61),
         });
 
-        assert_eq!(status.state, CrowdSecConsoleState::Error);
+        assert_eq!(status.state, CrowdSecConsoleState::RateLimited);
         assert!(status.message.contains("Retry in 61 minutes"));
     }
 
