@@ -99,8 +99,10 @@ pub enum CrowdSecBouncerInstallStep {
     NftablesBlacklistSets,
     IpSetSetupService,
     Configuration,
+    LegacyResources,
     Package,
     Service,
+    Integration,
 }
 
 #[derive(Debug, Serialize)]
@@ -151,6 +153,7 @@ pub struct CrowdSecUninstallResponse {
 #[derive(Debug, Serialize)]
 pub struct CrowdSecBouncerInstallResponse {
     pub steps: Vec<CrowdSecStepResult<CrowdSecBouncerInstallStep>>,
+    pub integration: crate::crowdsec::bouncers::CrowdSecBouncerIntegrationStatus,
 }
 
 #[derive(Debug, Serialize)]
@@ -578,6 +581,14 @@ mod tests {
         assert_eq!(
             serde_json::to_value(CrowdSecBouncerInstallStep::NftablesBlacklistSets).unwrap(),
             "nftables_blacklist_sets"
+        );
+        assert_eq!(
+            serde_json::to_value(CrowdSecBouncerInstallStep::LegacyResources).unwrap(),
+            "legacy_resources"
+        );
+        assert_eq!(
+            serde_json::to_value(CrowdSecBouncerInstallStep::Integration).unwrap(),
+            "integration"
         );
         assert_eq!(
             serde_json::to_value(CrowdSecInstallStep::FirewallBouncer).unwrap(),
