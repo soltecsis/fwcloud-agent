@@ -21,6 +21,7 @@
 */
 
 use std::{
+    future::Future,
     io::ErrorKind,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -46,11 +47,29 @@ struct CapiCooldownState {
     retry_at_unix_seconds: u64,
 }
 
+struct CapiStatusCheck {
+    from_cooldown: bool,
+    status: CrowdSecCapiStatus,
+}
+
 pub async fn status() -> Result<CrowdSecCapiStatus> {
-    if let Some(status) = active_cooldown().await? {
-        return Ok(status);
+    let check = status_with_active_cooldown(active_cooldown().await?, execute_status_check).await?;
+    if check.from_cooldown {
+        return Ok(check.status);
     }
 
+    let status = check.status;
+    match &status.state {
+        CrowdSecCapiState::Connected => {
+            clear_cooldown().await?;
+            Ok(status)
+        }
+        CrowdSecCapiState::TemporarilyBlocked => start_cooldown().await,
+        CrowdSecCapiState::NotConfigured | CrowdSecCapiState::Error => Ok(status),
+    }
+}
+
+async fn execute_status_check() -> Result<CrowdSecCapiStatus> {
     let output = CrowdSecCommand::cscli(&["capi", "status", "-o", "json"])?
         .execute_allow_failure()
         .await?;
@@ -64,13 +83,26 @@ pub async fn status() -> Result<CrowdSecCapiStatus> {
         status_from_command_output(output.succeeded(), output.stdout(), output.stderr())
     };
 
-    match &status.state {
-        CrowdSecCapiState::Connected => {
-            clear_cooldown().await?;
-            Ok(status)
-        }
-        CrowdSecCapiState::TemporarilyBlocked => start_cooldown().await,
-        CrowdSecCapiState::NotConfigured | CrowdSecCapiState::Error => Ok(status),
+    Ok(status)
+}
+
+async fn status_with_active_cooldown<F, Fut>(
+    active_cooldown: Option<CrowdSecCapiStatus>,
+    status_check: F,
+) -> Result<CapiStatusCheck>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<CrowdSecCapiStatus>>,
+{
+    match active_cooldown {
+        Some(status) => Ok(CapiStatusCheck {
+            from_cooldown: true,
+            status,
+        }),
+        None => Ok(CapiStatusCheck {
+            from_cooldown: false,
+            status: status_check().await?,
+        }),
     }
 }
 
@@ -209,9 +241,13 @@ fn output_uses_unsupported_json_option(diagnostics: &str) -> bool {
 mod tests {
     use super::{
         active_cooldown_at, cooldown_status, remove_cooldown, status_from_command_output,
-        write_cooldown,
+        status_with_active_cooldown, write_cooldown,
     };
-    use crate::crowdsec::models::CrowdSecCapiState;
+    use crate::crowdsec::models::{CrowdSecCapiState, CrowdSecCapiStatus};
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
     use uuid::Uuid;
 
     #[test]
@@ -272,5 +308,41 @@ mod tests {
         assert_eq!(status.state, CrowdSecCapiState::TemporarilyBlocked);
         assert_eq!(status.retry_after_minutes, Some(2));
         remove_cooldown(&path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn suppresses_the_capi_command_while_a_cooldown_is_active() {
+        let command_called = Arc::new(AtomicBool::new(false));
+        let command_called_by_check = Arc::clone(&command_called);
+        let active_status = cooldown_status(61);
+
+        let result = status_with_active_cooldown(Some(active_status), move || {
+            command_called_by_check.store(true, Ordering::SeqCst);
+            async {
+                Ok(CrowdSecCapiStatus {
+                    state: CrowdSecCapiState::Connected,
+                    retry_after_minutes: None,
+                })
+            }
+        })
+        .await
+        .unwrap();
+
+        assert!(result.from_cooldown);
+        assert!(!command_called.load(Ordering::SeqCst));
+        assert_eq!(result.status.state, CrowdSecCapiState::TemporarilyBlocked);
+    }
+
+    #[tokio::test]
+    async fn successful_recovery_removes_the_cooldown_file() {
+        let path =
+            std::env::temp_dir().join(format!("fwcloud-crowdsec-capi-{}.json", Uuid::new_v4()));
+        let path = path.to_string_lossy().to_string();
+
+        write_cooldown(&path, 161).await.unwrap();
+        remove_cooldown(&path).await.unwrap();
+
+        assert!(active_cooldown_at(&path, 100).await.unwrap().is_none());
+        assert!(!std::path::Path::new(&path).exists());
     }
 }
