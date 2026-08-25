@@ -51,7 +51,7 @@ enable() {
   apt-get update  
 
   echo
-  pkgInstall "suricata"
+  DEBIAN_FRONTEND=noninteractive pkgInstall "suricata" -o Dpkg::Options::="--force-confold"
 
   echo
   pkgInstall "jq"
