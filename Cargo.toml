@@ -107,9 +107,9 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 [dependencies]
 actix = "0.13.5"
 actix-web-actors = "4.3.1"
-actix-web = { version = "4.14.1", features = ["openssl"] }
+actix-web = { version = "4.15.0", features = ["openssl"] }
 actix-service = "2.0.3"
-actix-multipart = "0.8.0"
+actix-multipart = "0.8.1"
 tokio = { version = "1.53.1", features = ["full"] }
 futures = "0.3.34"
 openssl = { version = "0.10.81", features = ["vendored"] }
@@ -122,10 +122,10 @@ lazy_static = "1.5.0"
 rand = "0.10.2"
 rand_distr = "0.6.0" 
 regex = "1.13.1"
-log = "0.4.33"
+log = "0.4.34"
 env_logger = "0.11.11"
 sanitize-filename = "0.6.0"
-uuid = { version = "1.24.1", features = ["serde", "v4"] }
+uuid = { version = "1.25.0", features = ["serde", "v4"] }
 thread-id = "5.1.0"
 subprocess = "1.2.1"
 sha2 = "0.11.0"
