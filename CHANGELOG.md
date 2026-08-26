@@ -5,7 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [Unreleased]
+## [2.2.3] - 2026-08-26
 ## Fixed
 - Install Suricata without interactive configuration prompts, preserving the existing configuration when it is already present.
 - Disable selected Suricata EVE logs for TLS, DNS, HTTP, SMTP, POP3, and flows. Extended HTTP and TLS log fields are also disabled.
