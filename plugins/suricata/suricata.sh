@@ -63,6 +63,9 @@ enable() {
   echo "(*) Setting up Suricata service."
   CFG_FILE="/etc/suricata/suricata.yaml"
   sed -i 's/community-id: false$/community-id: true/g' "$CFG_FILE"
+  sed -i -E '/^[[:space:]]*types:/,/^[[:space:]]*# bi-directional flows/ s/^([[:space:]]*)-[[:space:]]+(tls|dns|http|smtp|pop3)(:?[[:space:]]*)$/\1#- \2\3/' "$CFG_FILE"
+  sed -i -E '/^[[:space:]]*#?-[[:space:]]+(http|tls):[[:space:]]*$/ { n; s/^([[:space:]]*)extended: yes([[:space:]]*#.*)?$/\1#extended: yes\2/; }' "$CFG_FILE"
+  sed -i -E '/^[[:space:]]*# bi-directional flows/,/^[[:space:]]*# uni-directional flows/ s/^([[:space:]]*)-[[:space:]]+flow([[:space:]]*)$/\1#- flow\2/' "$CFG_FILE"
   if [ -z "$NETIF" ]; then
     NETIF=`ip -p -j route show default | grep '"dev":' | awk -F'"' '{print $4}'`
   fi
