@@ -505,10 +505,30 @@ pub async fn install_with_backend_and_progress(
     backend: CrowdSecFirewallBackend,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecBouncerInstallResponse> {
+    emit_progress(
+        progress,
+        "Temporarily blocking CrowdSec Firewall Bouncer service during package transition",
+    );
+    mask_firewall_bouncer_service().await?;
+
     let response = match backend {
         CrowdSecFirewallBackend::Iptables => install_iptables_bouncer(progress).await,
         CrowdSecFirewallBackend::Nftables => install_nftables_bouncer(progress).await,
-    }?;
+    };
+
+    let response = match response {
+        Ok(response) => response,
+        Err(error) => {
+            if let Err(unmask_error) = unmask_firewall_bouncer_service().await {
+                debug!(
+                    "Unable to restore CrowdSec Firewall Bouncer service after package transition failure: {}",
+                    unmask_error
+                );
+            }
+            return Err(error);
+        }
+    };
+
     clear_pending_backend().await?;
 
     Ok(response)
@@ -623,6 +643,7 @@ async fn install_iptables_bouncer(
     );
     let legacy_resources_removed = reconcile_legacy_bouncer_resources(progress).await?;
     emit_progress(progress, "Enabling CrowdSec Firewall Bouncer service");
+    unmask_firewall_bouncer_service().await?;
     enable_firewall_bouncer_service().await?;
     emit_success(
         progress,
@@ -755,6 +776,7 @@ async fn install_nftables_bouncer(
         }
     };
     emit_progress(progress, service_message);
+    unmask_firewall_bouncer_service().await?;
     reconcile_nftables_firewall_bouncer_service(service_action).await?;
     emit_success(progress, service_message);
     let integration =
@@ -826,7 +848,6 @@ async fn reconcile_non_selected_bouncer_backend(
         progress,
         "Removing the non-selected CrowdSec Firewall Bouncer backend",
     );
-    disable_systemd_service(FIREWALL_BOUNCER_SERVICE).await?;
     packages::uninstall_firewall_bouncer_package(non_selected_backend, progress).await?;
     emit_success(
         progress,
@@ -1426,6 +1447,30 @@ async fn enable_firewall_bouncer_service() -> Result<()> {
     run_systemctl(
         &["enable", "--now", FIREWALL_BOUNCER_SERVICE],
         "Unable to enable CrowdSec Firewall Bouncer service",
+    )
+    .await
+}
+
+async fn mask_firewall_bouncer_service() -> Result<()> {
+    if systemd_unit_exists(FIREWALL_BOUNCER_SERVICE).await? {
+        run_systemctl(
+            &["stop", FIREWALL_BOUNCER_SERVICE],
+            "Unable to stop CrowdSec Firewall Bouncer service",
+        )
+        .await?;
+    }
+
+    run_systemctl(
+        &["mask", "--runtime", FIREWALL_BOUNCER_SERVICE],
+        "Unable to temporarily block CrowdSec Firewall Bouncer service",
+    )
+    .await
+}
+
+async fn unmask_firewall_bouncer_service() -> Result<()> {
+    run_systemctl(
+        &["unmask", "--runtime", FIREWALL_BOUNCER_SERVICE],
+        "Unable to restore CrowdSec Firewall Bouncer service",
     )
     .await
 }
