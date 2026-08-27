@@ -139,7 +139,7 @@ pkgInstall() {
       exit 1
     fi
   else
-    echo "Package '$1' already installed."
+    echo "Package '$PKG_NAME' already installed."
   fi
   echo
 }
