@@ -44,10 +44,10 @@ use crate::{
 };
 
 const CROWDSEC_PACKAGES: &[&str] = &["crowdsec", "ipset"];
-const CROWDSEC_REMOVABLE_PACKAGES: &[&str] = &[
+const CROWDSEC_REMOVABLE_PACKAGES: &[&str] = &["crowdsec"];
+const FIREWALL_BOUNCER_REMOVABLE_PACKAGES: &[&str] = &[
     "crowdsec-firewall-bouncer-iptables",
     "crowdsec-firewall-bouncer-nftables",
-    "crowdsec",
 ];
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 const OS_RELEASE_PATH: &str = "/etc/os-release";
@@ -226,6 +226,22 @@ pub async fn uninstall_firewall_bouncer_package(
     Ok(true)
 }
 
+pub async fn uninstall_firewall_bouncer_packages_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<bool> {
+    let package_manager = detect_package_manager().await?;
+    let mut removed = false;
+
+    for package in FIREWALL_BOUNCER_REMOVABLE_PACKAGES {
+        if package_is_present(package_manager, package).await? {
+            remove_bouncer_package(package_manager, package, progress).await?;
+            removed = true;
+        }
+    }
+
+    Ok(removed)
+}
+
 pub async fn package_status() -> Result<CrowdSecPackageStatus> {
     let package_manager = detect_package_manager().await?;
 
@@ -258,11 +274,7 @@ pub async fn uninstall_packages_with_progress(
 
     for package in CROWDSEC_REMOVABLE_PACKAGES {
         if package_is_present(package_manager, package).await? {
-            if is_firewall_bouncer_package(package) {
-                remove_bouncer_package(package_manager, package, progress).await?;
-            } else {
-                remove_package(package_manager, package, progress).await?;
-            }
+            remove_package(package_manager, package, progress).await?;
             removed_packages.push(*package);
         } else {
             absent_packages.push(*package);
@@ -506,14 +518,6 @@ fn apt_bouncer_package_arguments<'a>(operation: &'a str, package: &'a str) -> Ve
     ]
 }
 
-fn is_firewall_bouncer_package(package: &str) -> bool {
-    matches!(
-        package,
-        super::bouncers::IPTABLES_FIREWALL_BOUNCER_PACKAGE
-            | super::bouncers::NFTABLES_FIREWALL_BOUNCER_PACKAGE
-    )
-}
-
 async fn run_command(
     program: &str,
     arguments: &[&str],
@@ -698,7 +702,8 @@ mod tests {
     use super::{
         apt_bouncer_package_arguments, apt_package_state, is_package_manager_command,
         package_manager_for_os_release, package_removal_message, stream_command_output,
-        PackageManager, PackageState,
+        PackageManager, PackageState, CROWDSEC_REMOVABLE_PACKAGES,
+        FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
     };
     use crate::{
         crowdsec::{
@@ -787,6 +792,18 @@ mod tests {
                 "crowdsec-firewall-bouncer-nftables",
             ]
         );
+    }
+
+    #[test]
+    fn removes_bouncer_packages_before_the_crowdsec_engine() {
+        assert_eq!(
+            FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
+            &[
+                "crowdsec-firewall-bouncer-iptables",
+                "crowdsec-firewall-bouncer-nftables",
+            ]
+        );
+        assert_eq!(CROWDSEC_REMOVABLE_PACKAGES, &["crowdsec"]);
     }
 
     #[tokio::test]

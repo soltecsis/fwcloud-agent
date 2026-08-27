@@ -882,6 +882,19 @@ pub async fn uninstall() -> Result<CrowdSecBouncerUninstallResponse> {
 pub async fn uninstall_with_progress(
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecBouncerUninstallResponse> {
+    uninstall_with_options(progress, false).await
+}
+
+pub async fn uninstall_for_crowdsec_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecBouncerUninstallResponse> {
+    uninstall_with_options(progress, true).await
+}
+
+async fn uninstall_with_options(
+    progress: Option<&CrowdSecProgress>,
+    remove_packages: bool,
+) -> Result<CrowdSecBouncerUninstallResponse> {
     let backend = configured_backend()
         .await?
         .unwrap_or(CrowdSecFirewallBackend::Iptables);
@@ -908,6 +921,20 @@ pub async fn uninstall_with_progress(
         "FWCloud CrowdSec Firewall Bouncer registration is removed",
         "FWCloud CrowdSec Firewall Bouncer registration is already absent",
     );
+    if remove_packages {
+        emit_progress(
+            progress,
+            "Removing CrowdSec Firewall Bouncer packages before configuration cleanup",
+        );
+        let packages_removed =
+            packages::uninstall_firewall_bouncer_packages_with_progress(progress).await?;
+        emit_boolean_result(
+            progress,
+            packages_removed,
+            "CrowdSec Firewall Bouncer packages are removed",
+            "CrowdSec Firewall Bouncer packages are already absent",
+        );
+    }
     emit_progress(
         progress,
         "Removing FWCloud CrowdSec Firewall Bouncer configuration",

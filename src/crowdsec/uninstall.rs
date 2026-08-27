@@ -63,7 +63,7 @@ pub async fn uninstall_with_progress(
 
     let mut steps = Vec::new();
     emit_progress(progress, "Disabling FWCloud CrowdSec Firewall Bouncer");
-    let bouncer_uninstall = bouncers::uninstall_with_progress(progress).await?;
+    let bouncer_uninstall = bouncers::uninstall_for_crowdsec_with_progress(progress).await?;
     let bouncer_step = bouncer_uninstall_step(&bouncer_uninstall);
     emit_step_result(progress, &bouncer_step);
     steps.push(bouncer_step);
