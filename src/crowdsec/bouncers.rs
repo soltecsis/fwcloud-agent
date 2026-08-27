@@ -818,7 +818,7 @@ async fn reconcile_non_selected_bouncer_backend(
     progress: Option<&CrowdSecProgress>,
 ) -> Result<()> {
     let non_selected_backend = non_selected_firewall_backend(backend);
-    if !packages::firewall_bouncer_package_is_installed(non_selected_backend).await? {
+    if !packages::firewall_bouncer_package_is_present(non_selected_backend).await? {
         return Ok(());
     }
 

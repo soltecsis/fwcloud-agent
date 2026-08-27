@@ -67,6 +67,23 @@ enum PackageManager {
     Yum,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PackageState {
+    Installed,
+    Pending,
+    Absent,
+}
+
+impl PackageState {
+    fn is_installed(self) -> bool {
+        self == Self::Installed
+    }
+
+    fn is_present(self) -> bool {
+        self != Self::Absent
+    }
+}
+
 pub async fn install_packages() -> Result<Vec<CrowdSecStepResult<CrowdSecInstallStep>>> {
     install_packages_with_progress(None).await
 }
@@ -184,13 +201,24 @@ pub async fn firewall_bouncer_package_is_installed(
     .await
 }
 
+pub async fn firewall_bouncer_package_is_present(
+    backend: CrowdSecFirewallBackend,
+) -> Result<bool> {
+    let package_manager = detect_package_manager().await?;
+    package_is_present(
+        package_manager,
+        super::bouncers::firewall_bouncer_package(backend),
+    )
+    .await
+}
+
 pub async fn uninstall_firewall_bouncer_package(
     backend: CrowdSecFirewallBackend,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<bool> {
     let package_manager = detect_package_manager().await?;
     let package = super::bouncers::firewall_bouncer_package(backend);
-    if !package_is_installed(package_manager, package).await? {
+    if !package_is_present(package_manager, package).await? {
         return Ok(false);
     }
 
@@ -229,7 +257,7 @@ pub async fn uninstall_packages_with_progress(
     let mut absent_packages = Vec::new();
 
     for package in CROWDSEC_REMOVABLE_PACKAGES {
-        if package_is_installed(package_manager, package).await? {
+        if package_is_present(package_manager, package).await? {
             remove_package(package_manager, package, progress).await?;
             removed_packages.push(*package);
         } else {
@@ -347,6 +375,14 @@ async fn configure_apt_repository(progress: Option<&CrowdSecProgress>) -> Result
 }
 
 async fn package_is_installed(package_manager: PackageManager, package: &str) -> Result<bool> {
+    Ok(package_state(package_manager, package).await?.is_installed())
+}
+
+async fn package_is_present(package_manager: PackageManager, package: &str) -> Result<bool> {
+    Ok(package_state(package_manager, package).await?.is_present())
+}
+
+async fn package_state(package_manager: PackageManager, package: &str) -> Result<PackageState> {
     let (program, arguments): (&str, Vec<&str>) = match package_manager {
         PackageManager::Apt => (
             "/usr/bin/dpkg-query",
@@ -358,9 +394,27 @@ async fn package_is_installed(package_manager: PackageManager, package: &str) ->
     let output = run_command_allow_failure(program, &arguments, None).await?;
 
     match package_manager {
-        PackageManager::Apt => Ok(output.status.success()
-            && String::from_utf8_lossy(&output.stdout).trim() == "installed"),
-        PackageManager::Dnf | PackageManager::Yum => Ok(output.status.success()),
+        PackageManager::Apt => Ok(apt_package_state(
+            output.status.success(),
+            String::from_utf8_lossy(&output.stdout).trim(),
+        )),
+        PackageManager::Dnf | PackageManager::Yum => Ok(if output.status.success() {
+            PackageState::Installed
+        } else {
+            PackageState::Absent
+        }),
+    }
+}
+
+fn apt_package_state(query_succeeded: bool, status: &str) -> PackageState {
+    if !query_succeeded {
+        return PackageState::Absent;
+    }
+
+    match status {
+        "installed" => PackageState::Installed,
+        "not-installed" | "config-files" | "" => PackageState::Absent,
+        _ => PackageState::Pending,
     }
 }
 
@@ -553,8 +607,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        is_package_manager_command, package_manager_for_os_release, package_removal_message,
-        stream_command_output, PackageManager,
+        apt_package_state, is_package_manager_command, package_manager_for_os_release,
+        package_removal_message, stream_command_output, PackageManager, PackageState,
     };
     use crate::{
         crowdsec::{
@@ -611,6 +665,21 @@ mod tests {
             firewall_bouncer_packages(CrowdSecFirewallBackend::Nftables),
             &["nftables", "crowdsec-firewall-bouncer-nftables"]
         );
+    }
+
+    #[test]
+    fn identifies_apt_package_states() {
+        assert_eq!(
+            apt_package_state(true, "installed"),
+            PackageState::Installed
+        );
+        assert_eq!(
+            apt_package_state(true, "half-configured"),
+            PackageState::Pending
+        );
+        assert_eq!(apt_package_state(true, "unpacked"), PackageState::Pending);
+        assert_eq!(apt_package_state(true, "config-files"), PackageState::Absent);
+        assert_eq!(apt_package_state(false, ""), PackageState::Absent);
     }
 
     #[tokio::test]
