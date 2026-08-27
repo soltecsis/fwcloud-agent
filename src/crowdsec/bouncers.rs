@@ -624,6 +624,12 @@ async fn install_iptables_bouncer(
         progress,
         "CrowdSec Firewall Bouncer is configured for FWCloud IPSet only",
     );
+    emit_progress(progress, "Writing FWCloud IPSet-only bouncer configuration");
+    write_set_only_configuration(CrowdSecFirewallBackend::Iptables, &api_key).await?;
+    emit_success(
+        progress,
+        "FWCloud IPSet-only bouncer configuration is written",
+    );
     emit_progress(progress, "Installing CrowdSec Firewall Bouncer package");
     let package_installed =
         packages::install_firewall_bouncer_package_with_progress(progress).await?;
@@ -635,12 +641,6 @@ async fn install_iptables_bouncer(
             "CrowdSec Firewall Bouncer package is already installed",
         );
     }
-    emit_progress(progress, "Writing FWCloud IPSet-only bouncer configuration");
-    write_set_only_configuration(CrowdSecFirewallBackend::Iptables, &api_key).await?;
-    emit_success(
-        progress,
-        "FWCloud IPSet-only bouncer configuration is written",
-    );
     let legacy_resources_removed = reconcile_legacy_bouncer_resources(progress).await?;
     emit_progress(progress, "Enabling CrowdSec Firewall Bouncer service");
     unmask_firewall_bouncer_service().await?;
@@ -725,6 +725,17 @@ async fn install_nftables_bouncer(
 
     emit_progress(
         progress,
+        "Preparing CrowdSec NFTables Firewall Bouncer configuration",
+    );
+    let api_key = prepare_set_only_configuration().await?;
+    write_set_only_configuration(CrowdSecFirewallBackend::Nftables, &api_key).await?;
+    emit_success(
+        progress,
+        "FWCloud NFTables set-only bouncer configuration is written",
+    );
+
+    emit_progress(
+        progress,
         "Installing CrowdSec NFTables Firewall Bouncer package",
     );
     let package_installed = packages::install_firewall_bouncer_package_for_backend_with_progress(
@@ -744,16 +755,6 @@ async fn install_nftables_bouncer(
         );
     }
 
-    emit_progress(
-        progress,
-        "Preparing CrowdSec NFTables Firewall Bouncer configuration",
-    );
-    let api_key = prepare_set_only_configuration().await?;
-    write_set_only_configuration(CrowdSecFirewallBackend::Nftables, &api_key).await?;
-    emit_success(
-        progress,
-        "FWCloud NFTables set-only bouncer configuration is written",
-    );
     let legacy_resources_removed = reconcile_legacy_bouncer_resources(progress).await?;
     emit_progress(
         progress,
