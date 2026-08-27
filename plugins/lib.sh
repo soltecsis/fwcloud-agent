@@ -127,16 +127,19 @@ pkgInstalled() {
 pkgInstall() {
   # $1=Package name.
 
-  echo "(*) Installing '$1' package."
-  pkgInstalled "$1"
+  PKG_NAME="$1"
+  shift
+
+  echo "(*) Installing '$PKG_NAME' package."
+  pkgInstalled "$PKG_NAME"
   if [ "$?" = "0" ]; then
-    $PKGM_CMD install -y $1
+    $PKGM_CMD install -y "$@" "$PKG_NAME"
     if [ "$?" != "0" ]; then
       echo "Error: Installing package."
       exit 1
     fi
   else
-    echo "Package '$1' already installed."
+    echo "Package '$PKG_NAME' already installed."
   fi
   echo
 }

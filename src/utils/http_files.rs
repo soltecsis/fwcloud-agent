@@ -249,19 +249,18 @@ impl HttpFiles {
 
     async fn extract_field_data(&mut self, mut field: Field, name: String) -> Result<()> {
         // We only accept these NO file parameter in the multipart stream and it must be the destination directory.
-        let buf: &mut String;
-        if name == "dst_dir" {
-            buf = &mut self.dst_dir;
+        let buf: &mut String = if name == "dst_dir" {
+            &mut self.dst_dir
         } else if name == "perms" {
             self.perms.clear();
-            buf = &mut self.perms;
+            &mut self.perms
         } else if name == "ws_id" {
-            buf = &mut self.ws_id_buf;
+            &mut self.ws_id_buf
         } else if name == "crowdsec_backend" && self.allow_crowdsec_backend {
-            buf = &mut self.crowdsec_backend_buf;
+            &mut self.crowdsec_backend_buf
         } else {
             return Err(FwcError::NotAllowedParameter);
-        }
+        };
 
         // Field in turn is stream of *Bytes* object
         while let Some(chunk) = field.next().await {
