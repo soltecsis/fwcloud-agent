@@ -148,13 +148,7 @@ impl HttpFiles {
                             .clone();
                         debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
                     }
-                    res = run_cmd_ws("sh", &[&file[..], "start"], &ws_data, true)?;
-                    {
-                        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
-                        let mut ws_map = cfg.ws_map.lock().unwrap();
-                        ws_map.remove(&self.ws_id);
-                        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
-                    }
+                    res = run_cmd_ws("sh", &[&file[..], "start"], &ws_data, false)?;
                 } else {
                     res = run_cmd("sh", &[&file[..], "start"])?;
                 }
@@ -175,6 +169,10 @@ impl HttpFiles {
                 "Invalid CrowdSec Firewall Bouncer backend",
             )),
         }
+    }
+
+    pub fn websocket_id(&self) -> Option<Uuid> {
+        (self.ws_id != Uuid::nil()).then_some(self.ws_id)
     }
 
     async fn extract_multipart_data(&mut self, mut payload: Multipart) -> Result<()> {
@@ -372,5 +370,16 @@ mod tests {
         item.perms = String::from("650");
         item.perms_to_u32();
         assert_eq!(item.perms_u32, 424);
+    }
+
+    #[test]
+    fn returns_the_optional_websocket_identifier() {
+        let mut item = HttpFiles::new("", false);
+
+        assert_eq!(item.websocket_id(), None);
+
+        let ws_id = Uuid::new_v4();
+        item.ws_id = ws_id;
+        assert_eq!(item.websocket_id(), Some(ws_id));
     }
 }
