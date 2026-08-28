@@ -26,7 +26,13 @@ use log::debug;
 use std::sync::Arc;
 
 use crate::utils::http_files::HttpFiles;
-use crate::{config::Config, crowdsec::bouncers};
+use crate::{
+    config::Config,
+    crowdsec::{
+        bouncers,
+        progress::{CrowdSecProgress, CrowdSecProgressMessageType},
+    },
+};
 
 use crate::errors::Result;
 
@@ -43,6 +49,7 @@ async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Resu
 
         let mut files = HttpFiles::new(cfg.tmp_dir, false);
         res = files.fwcloud_script(payload, &cfg).await?;
+        let _crowdsec_progress = CrowdSecProgress::from_request(&cfg, files.websocket_id())?;
 
         if let Some(backend) = files.crowdsec_backend()? {
             debug!(
@@ -51,7 +58,16 @@ async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Resu
             );
             let crowdsec_mutex = Arc::clone(&cfg.mutex.crowdsec);
             let _crowdsec_mutex_data = crowdsec_mutex.lock().await;
-            bouncers::reconcile_after_policy_deployment(backend).await?;
+            if let Err(error) =
+                bouncers::reconcile_after_policy_deployment(backend, Some(&_crowdsec_progress))
+                    .await
+            {
+                _crowdsec_progress.typed_message(
+                    CrowdSecProgressMessageType::Error,
+                    "CrowdSec Firewall Bouncer reconciliation failed",
+                );
+                return Err(error);
+            }
         }
 
         debug!("Releasing script mutex (thread id: {})", thread_id::get());

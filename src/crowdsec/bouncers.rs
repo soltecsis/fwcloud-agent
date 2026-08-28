@@ -104,6 +104,14 @@ const BOUNCER_IPSET_DROP_IN_CONTENT: &str =
     "[Unit]\nRequires=fwcloud-crowdsec-ipsets.service\nAfter=fwcloud-crowdsec-ipsets.service\n";
 const BOUNCER_NFTABLES_DROP_IN_CONTENT: &str = "[Unit]\nAfter=fwcloud.service\n";
 const BOUNCER_PACKAGE_TRANSITION_DROP_IN_CONTENT: &str = "[Service]\nType=oneshot\nExecStartPre=\nExecStart=\nExecStart=/usr/bin/true\nExecStartPost=\nRestart=no\n";
+const BOUNCER_RECONCILIATION_SKIPPED_MESSAGE: &str =
+    "CrowdSec is not installed; skipping Firewall Bouncer reconciliation";
+const BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVAL_MESSAGE: &str =
+    "Removing CrowdSec Firewall Bouncer backend startup configuration";
+const BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVED_MESSAGE: &str =
+    "CrowdSec Firewall Bouncer backend startup configuration is removed";
+const BOUNCER_BACKEND_STARTUP_CONFIGURATION_ABSENT_MESSAGE: &str =
+    "CrowdSec Firewall Bouncer backend startup configuration is already absent";
 
 pub const fn firewall_bouncer_package(backend: CrowdSecFirewallBackend) -> &'static str {
     match backend {
@@ -553,20 +561,24 @@ pub async fn install_with_backend_and_progress(
     Ok(response)
 }
 
-pub async fn reconcile_after_policy_deployment(backend: CrowdSecFirewallBackend) -> Result<bool> {
+pub async fn reconcile_after_policy_deployment(
+    backend: CrowdSecFirewallBackend,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<bool> {
     if bouncer_reconciliation_action(
         packages::package_status().await?.crowdsec_installed,
         backend,
         true,
     ) == BouncerReconciliationAction::SkipCrowdSecNotInstalled
     {
+        emit_reconciliation_skipped(progress);
         debug!(
             "CrowdSec is not installed; skipping Firewall Bouncer reconciliation after policy deployment"
         );
         return Ok(false);
     }
 
-    reconcile_for_installed_crowdsec(backend, None).await
+    reconcile_for_installed_crowdsec(backend, progress).await
 }
 
 pub async fn reconcile_for_installed_crowdsec(
@@ -893,6 +905,23 @@ fn emit_warning(progress: Option<&CrowdSecProgress>, message: &str) {
     }
 }
 
+fn emit_reconciliation_skipped(progress: Option<&CrowdSecProgress>) {
+    emit_progress(progress, BOUNCER_RECONCILIATION_SKIPPED_MESSAGE);
+}
+
+fn emit_backend_startup_configuration_cleanup(progress: Option<&CrowdSecProgress>, removed: bool) {
+    emit_progress(
+        progress,
+        BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVAL_MESSAGE,
+    );
+    emit_boolean_result(
+        progress,
+        removed,
+        BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVED_MESSAGE,
+        BOUNCER_BACKEND_STARTUP_CONFIGURATION_ABSENT_MESSAGE,
+    );
+}
+
 pub async fn uninstall() -> Result<CrowdSecBouncerUninstallResponse> {
     uninstall_with_progress(None).await
 }
@@ -965,17 +994,8 @@ async fn uninstall_with_options(
         "FWCloud CrowdSec Firewall Bouncer configuration is removed",
         "FWCloud CrowdSec Firewall Bouncer configuration is already absent",
     );
-    emit_progress(
-        progress,
-        "Removing CrowdSec NFTables Firewall Bouncer startup order",
-    );
-    let nftables_startup_order_removed = remove_nftables_bouncer_drop_in().await?;
-    emit_boolean_result(
-        progress,
-        nftables_startup_order_removed,
-        "CrowdSec NFTables Firewall Bouncer startup order is removed",
-        "CrowdSec NFTables Firewall Bouncer startup order is already absent",
-    );
+    let backend_startup_configuration_removed = remove_nftables_bouncer_drop_in().await?;
+    emit_backend_startup_configuration_cleanup(progress, backend_startup_configuration_removed);
     let pending_backend_removed = remove_managed_file(BOUNCER_PENDING_BACKEND_PATH).await?;
     emit_boolean_result(
         progress,
@@ -1063,9 +1083,9 @@ async fn uninstall_with_options(
             ),
             boolean_step(
                 CrowdSecBouncerUninstallStep::NftablesStartupOrder,
-                nftables_startup_order_removed,
-                "CrowdSec NFTables Firewall Bouncer startup order is removed",
-                "CrowdSec NFTables Firewall Bouncer startup order is already absent",
+                backend_startup_configuration_removed,
+                BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVED_MESSAGE,
+                BOUNCER_BACKEND_STARTUP_CONFIGURATION_ABSENT_MESSAGE,
             ),
             ipset_setup_step,
             blacklist_sets_step,
@@ -2360,7 +2380,8 @@ mod tests {
     use super::{
         bouncer_reconciliation_action, bouncer_register_response, bouncers_from_json,
         configuration_backend, configuration_is_fwcloud_managed, configuration_is_set_only,
-        emit_boolean_result, firewall_rules_contain_unmanaged_crowdsec, integration_status,
+        emit_backend_startup_configuration_cleanup, emit_boolean_result,
+        emit_reconciliation_skipped, firewall_rules_contain_unmanaged_crowdsec, integration_status,
         legacy_bouncer_ipset_names, legacy_bouncer_jump_chains,
         nftables_blacklist_set_is_compatible, nftables_bouncer_service_action,
         nftables_set_only_configuration_contents, non_selected_firewall_backend,
@@ -2369,9 +2390,11 @@ mod tests {
         validate_bouncer_name, BouncerConfigurationState, BouncerReconciliationAction,
         CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse,
         CrowdSecFirewallBackend, CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig,
-        NftablesBouncerServiceAction, BOUNCER_CONFIG_PATH, BOUNCER_NFTABLES_DROP_IN_CONTENT,
-        BOUNCER_NFTABLES_DROP_IN_PATH, BOUNCER_PACKAGE_TRANSITION_DROP_IN_CONTENT,
-        BOUNCER_PACKAGE_TRANSITION_DROP_IN_PATH, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST,
+        NftablesBouncerServiceAction, BOUNCER_BACKEND_STARTUP_CONFIGURATION_ABSENT_MESSAGE,
+        BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVAL_MESSAGE, BOUNCER_CONFIG_PATH,
+        BOUNCER_NFTABLES_DROP_IN_CONTENT, BOUNCER_NFTABLES_DROP_IN_PATH,
+        BOUNCER_PACKAGE_TRANSITION_DROP_IN_CONTENT, BOUNCER_PACKAGE_TRANSITION_DROP_IN_PATH,
+        BOUNCER_RECONCILIATION_SKIPPED_MESSAGE, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST,
         IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
     };
     use crate::{
@@ -2772,5 +2795,55 @@ mod tests {
         let absent = serde_json::from_str::<CrowdSecProgressMessage>(&data.lines[1]).unwrap();
         assert_eq!(completed.message_type, CrowdSecProgressMessageType::Success);
         assert_eq!(absent.message_type, CrowdSecProgressMessageType::Warning);
+    }
+
+    #[test]
+    fn reconciliation_skip_is_reported_as_information() {
+        let map = Arc::new(Mutex::new(HashMap::new()));
+        let id = Uuid::new_v4();
+        let data = Arc::new(Mutex::new(WsData {
+            created_at: SystemTime::now(),
+            lines: Vec::new(),
+            finished: false,
+        }));
+        map.lock().unwrap().insert(id, Arc::clone(&data));
+        let progress = CrowdSecProgress::from_ws_map(map, Some(id)).unwrap();
+
+        emit_reconciliation_skipped(Some(&progress));
+
+        let message =
+            serde_json::from_str::<CrowdSecProgressMessage>(&data.lock().unwrap().lines[0])
+                .unwrap();
+        assert_eq!(message.message_type, CrowdSecProgressMessageType::Info);
+        assert_eq!(message.message, BOUNCER_RECONCILIATION_SKIPPED_MESSAGE);
+    }
+
+    #[test]
+    fn backend_startup_configuration_cleanup_uses_neutral_messages() {
+        let map = Arc::new(Mutex::new(HashMap::new()));
+        let id = Uuid::new_v4();
+        let data = Arc::new(Mutex::new(WsData {
+            created_at: SystemTime::now(),
+            lines: Vec::new(),
+            finished: false,
+        }));
+        map.lock().unwrap().insert(id, Arc::clone(&data));
+        let progress = CrowdSecProgress::from_ws_map(map, Some(id)).unwrap();
+
+        emit_backend_startup_configuration_cleanup(Some(&progress), false);
+
+        let data = data.lock().unwrap();
+        let start = serde_json::from_str::<CrowdSecProgressMessage>(&data.lines[0]).unwrap();
+        let result = serde_json::from_str::<CrowdSecProgressMessage>(&data.lines[1]).unwrap();
+        assert_eq!(start.message_type, CrowdSecProgressMessageType::Info);
+        assert_eq!(
+            start.message,
+            BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVAL_MESSAGE
+        );
+        assert_eq!(result.message_type, CrowdSecProgressMessageType::Warning);
+        assert_eq!(
+            result.message,
+            BOUNCER_BACKEND_STARTUP_CONFIGURATION_ABSENT_MESSAGE
+        );
     }
 }
