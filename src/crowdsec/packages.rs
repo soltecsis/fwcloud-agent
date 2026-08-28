@@ -44,10 +44,10 @@ use crate::{
 };
 
 const CROWDSEC_PACKAGES: &[&str] = &["crowdsec", "ipset"];
-const CROWDSEC_REMOVABLE_PACKAGES: &[&str] = &[
+const CROWDSEC_REMOVABLE_PACKAGES: &[&str] = &["crowdsec"];
+const FIREWALL_BOUNCER_REMOVABLE_PACKAGES: &[&str] = &[
     "crowdsec-firewall-bouncer-iptables",
     "crowdsec-firewall-bouncer-nftables",
-    "crowdsec",
 ];
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 const OS_RELEASE_PATH: &str = "/etc/os-release";
@@ -57,6 +57,8 @@ const APT_KEYRING_TEMP_PATH: &str = "/etc/apt/keyrings/crowdsec_crowdsec-archive
 const APT_REPOSITORY_PATH: &str = "/etc/apt/sources.list.d/crowdsec_crowdsec.list";
 const RPM_REPOSITORY_PATH: &str = "/etc/yum.repos.d/crowdsec_crowdsec.repo";
 const CROWDSEC_GPG_KEY_URL: &str = "https://packagecloud.io/crowdsec/crowdsec/gpgkey";
+const APT_DPKG_FORCE_CONFOLD_OPTION: &str = "Dpkg::Options::=--force-confold";
+const APT_NONINTERACTIVE_ENVIRONMENT: (&str, &str) = ("DEBIAN_FRONTEND", "noninteractive");
 const CROWDSEC_APT_REPOSITORY: &str = "deb [signed-by=/etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg] https://packagecloud.io/crowdsec/crowdsec/any any main\ndeb-src [signed-by=/etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg] https://packagecloud.io/crowdsec/crowdsec/any any main\n";
 const CROWDSEC_RPM_REPOSITORY: &str = "[crowdsec_crowdsec]\nname=crowdsec_crowdsec\nbaseurl=https://packagecloud.io/crowdsec/crowdsec/rpm_any/rpm_any/$basearch\nrepo_gpgcheck=1\ngpgcheck=1\nenabled=1\ngpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey\n       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-EDE2C695EC9A5A5C.pub.gpg\n";
 
@@ -65,6 +67,23 @@ enum PackageManager {
     Apt,
     Dnf,
     Yum,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PackageState {
+    Installed,
+    Pending,
+    Absent,
+}
+
+impl PackageState {
+    fn is_installed(self) -> bool {
+        self == Self::Installed
+    }
+
+    fn is_present(self) -> bool {
+        self != Self::Absent
+    }
 }
 
 pub async fn install_packages() -> Result<Vec<CrowdSecStepResult<CrowdSecInstallStep>>> {
@@ -147,7 +166,7 @@ pub async fn install_firewall_bouncer_package_for_backend_with_progress(
             continue;
         }
 
-        install_package(package_manager, package, progress).await?;
+        install_bouncer_package(package_manager, package, progress).await?;
         installed = true;
     }
 
@@ -184,18 +203,43 @@ pub async fn firewall_bouncer_package_is_installed(
     .await
 }
 
+pub async fn firewall_bouncer_package_is_present(backend: CrowdSecFirewallBackend) -> Result<bool> {
+    let package_manager = detect_package_manager().await?;
+    package_is_present(
+        package_manager,
+        super::bouncers::firewall_bouncer_package(backend),
+    )
+    .await
+}
+
 pub async fn uninstall_firewall_bouncer_package(
     backend: CrowdSecFirewallBackend,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<bool> {
     let package_manager = detect_package_manager().await?;
     let package = super::bouncers::firewall_bouncer_package(backend);
-    if !package_is_installed(package_manager, package).await? {
+    if !package_is_present(package_manager, package).await? {
         return Ok(false);
     }
 
-    remove_package(package_manager, package, progress).await?;
+    remove_bouncer_package(package_manager, package, progress).await?;
     Ok(true)
+}
+
+pub async fn uninstall_firewall_bouncer_packages_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<bool> {
+    let package_manager = detect_package_manager().await?;
+    let mut removed = false;
+
+    for package in FIREWALL_BOUNCER_REMOVABLE_PACKAGES {
+        if package_is_present(package_manager, package).await? {
+            remove_bouncer_package(package_manager, package, progress).await?;
+            removed = true;
+        }
+    }
+
+    Ok(removed)
 }
 
 pub async fn package_status() -> Result<CrowdSecPackageStatus> {
@@ -229,7 +273,7 @@ pub async fn uninstall_packages_with_progress(
     let mut absent_packages = Vec::new();
 
     for package in CROWDSEC_REMOVABLE_PACKAGES {
-        if package_is_installed(package_manager, package).await? {
+        if package_is_present(package_manager, package).await? {
             remove_package(package_manager, package, progress).await?;
             removed_packages.push(*package);
         } else {
@@ -347,6 +391,16 @@ async fn configure_apt_repository(progress: Option<&CrowdSecProgress>) -> Result
 }
 
 async fn package_is_installed(package_manager: PackageManager, package: &str) -> Result<bool> {
+    Ok(package_state(package_manager, package)
+        .await?
+        .is_installed())
+}
+
+async fn package_is_present(package_manager: PackageManager, package: &str) -> Result<bool> {
+    Ok(package_state(package_manager, package).await?.is_present())
+}
+
+async fn package_state(package_manager: PackageManager, package: &str) -> Result<PackageState> {
     let (program, arguments): (&str, Vec<&str>) = match package_manager {
         PackageManager::Apt => (
             "/usr/bin/dpkg-query",
@@ -358,9 +412,27 @@ async fn package_is_installed(package_manager: PackageManager, package: &str) ->
     let output = run_command_allow_failure(program, &arguments, None).await?;
 
     match package_manager {
-        PackageManager::Apt => Ok(output.status.success()
-            && String::from_utf8_lossy(&output.stdout).trim() == "installed"),
-        PackageManager::Dnf | PackageManager::Yum => Ok(output.status.success()),
+        PackageManager::Apt => Ok(apt_package_state(
+            output.status.success(),
+            String::from_utf8_lossy(&output.stdout).trim(),
+        )),
+        PackageManager::Dnf | PackageManager::Yum => Ok(if output.status.success() {
+            PackageState::Installed
+        } else {
+            PackageState::Absent
+        }),
+    }
+}
+
+fn apt_package_state(query_succeeded: bool, status: &str) -> PackageState {
+    if !query_succeeded {
+        return PackageState::Absent;
+    }
+
+    match status {
+        "installed" => PackageState::Installed,
+        "not-installed" | "config-files" | "" => PackageState::Absent,
+        _ => PackageState::Pending,
     }
 }
 
@@ -378,6 +450,28 @@ async fn install_package(
     run_command(program, &arguments, progress).await
 }
 
+async fn install_bouncer_package(
+    package_manager: PackageManager,
+    package: &str,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<()> {
+    match package_manager {
+        PackageManager::Apt => {
+            let arguments = apt_bouncer_package_arguments("install", package);
+            run_command_with_environment(
+                "/usr/bin/apt-get",
+                &arguments,
+                progress,
+                &[APT_NONINTERACTIVE_ENVIRONMENT],
+            )
+            .await
+        }
+        PackageManager::Dnf | PackageManager::Yum => {
+            install_package(package_manager, package, progress).await
+        }
+    }
+}
+
 async fn remove_package(
     package_manager: PackageManager,
     package: &str,
@@ -392,12 +486,55 @@ async fn remove_package(
     run_command(program, &arguments, progress).await
 }
 
+async fn remove_bouncer_package(
+    package_manager: PackageManager,
+    package: &str,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<()> {
+    match package_manager {
+        PackageManager::Apt => {
+            let arguments = apt_bouncer_package_arguments("remove", package);
+            run_command_with_environment(
+                "/usr/bin/apt-get",
+                &arguments,
+                progress,
+                &[APT_NONINTERACTIVE_ENVIRONMENT],
+            )
+            .await
+        }
+        PackageManager::Dnf | PackageManager::Yum => {
+            remove_package(package_manager, package, progress).await
+        }
+    }
+}
+
+fn apt_bouncer_package_arguments<'a>(operation: &'a str, package: &'a str) -> Vec<&'a str> {
+    vec![
+        "--option",
+        APT_DPKG_FORCE_CONFOLD_OPTION,
+        operation,
+        "--yes",
+        package,
+    ]
+}
+
 async fn run_command(
     program: &str,
     arguments: &[&str],
     progress: Option<&CrowdSecProgress>,
 ) -> Result<()> {
-    let output = run_command_allow_failure(program, arguments, progress).await?;
+    run_command_with_environment(program, arguments, progress, &[]).await
+}
+
+async fn run_command_with_environment(
+    program: &str,
+    arguments: &[&str],
+    progress: Option<&CrowdSecProgress>,
+    environment: &[(&str, &str)],
+) -> Result<()> {
+    let output =
+        run_command_allow_failure_with_environment(program, arguments, progress, environment)
+            .await?;
 
     if output.status.success() {
         debug!(
@@ -426,6 +563,15 @@ async fn run_command_allow_failure(
     arguments: &[&str],
     progress: Option<&CrowdSecProgress>,
 ) -> Result<std::process::Output> {
+    run_command_allow_failure_with_environment(program, arguments, progress, &[]).await
+}
+
+async fn run_command_allow_failure_with_environment(
+    program: &str,
+    arguments: &[&str],
+    progress: Option<&CrowdSecProgress>,
+    environment: &[(&str, &str)],
+) -> Result<std::process::Output> {
     debug!(
         "Running CrowdSec package command: {} {:?}",
         program, arguments
@@ -434,6 +580,7 @@ async fn run_command_allow_failure(
     let mut command = Command::new(program);
     command
         .args(arguments)
+        .envs(environment.iter().copied())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -553,8 +700,10 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        is_package_manager_command, package_manager_for_os_release, package_removal_message,
-        stream_command_output, PackageManager,
+        apt_bouncer_package_arguments, apt_package_state, is_package_manager_command,
+        package_manager_for_os_release, package_removal_message, stream_command_output,
+        PackageManager, PackageState, CROWDSEC_REMOVABLE_PACKAGES,
+        FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
     };
     use crate::{
         crowdsec::{
@@ -611,6 +760,50 @@ mod tests {
             firewall_bouncer_packages(CrowdSecFirewallBackend::Nftables),
             &["nftables", "crowdsec-firewall-bouncer-nftables"]
         );
+    }
+
+    #[test]
+    fn identifies_apt_package_states() {
+        assert_eq!(
+            apt_package_state(true, "installed"),
+            PackageState::Installed
+        );
+        assert_eq!(
+            apt_package_state(true, "half-configured"),
+            PackageState::Pending
+        );
+        assert_eq!(apt_package_state(true, "unpacked"), PackageState::Pending);
+        assert_eq!(
+            apt_package_state(true, "config-files"),
+            PackageState::Absent
+        );
+        assert_eq!(apt_package_state(false, ""), PackageState::Absent);
+    }
+
+    #[test]
+    fn uses_non_interactive_apt_arguments_for_bouncer_packages() {
+        assert_eq!(
+            apt_bouncer_package_arguments("install", "crowdsec-firewall-bouncer-nftables"),
+            vec![
+                "--option",
+                "Dpkg::Options::=--force-confold",
+                "install",
+                "--yes",
+                "crowdsec-firewall-bouncer-nftables",
+            ]
+        );
+    }
+
+    #[test]
+    fn removes_bouncer_packages_before_the_crowdsec_engine() {
+        assert_eq!(
+            FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
+            &[
+                "crowdsec-firewall-bouncer-iptables",
+                "crowdsec-firewall-bouncer-nftables",
+            ]
+        );
+        assert_eq!(CROWDSEC_REMOVABLE_PACKAGES, &["crowdsec"]);
     }
 
     #[tokio::test]
