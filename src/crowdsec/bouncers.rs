@@ -73,6 +73,10 @@ pub const BOUNCER_IPSET_DROP_IN_PATH: &str =
     "/etc/systemd/system/crowdsec-firewall-bouncer.service.d/fwcloud-ipsets.conf";
 pub const BOUNCER_NFTABLES_DROP_IN_PATH: &str =
     "/etc/systemd/system/crowdsec-firewall-bouncer.service.d/fwcloud-nftables.conf";
+const BOUNCER_PACKAGE_TRANSITION_DROP_IN_DIRECTORY: &str =
+    "/run/systemd/system/crowdsec-firewall-bouncer.service.d";
+const BOUNCER_PACKAGE_TRANSITION_DROP_IN_PATH: &str =
+    "/run/systemd/system/crowdsec-firewall-bouncer.service.d/99-fwcloud-package-transition.conf";
 pub const IPSET_V4_BLACKLIST: &str = "crowdsec-blacklists";
 pub const IPSET_V6_BLACKLIST: &str = "crowdsec6-blacklists";
 pub const NFTABLES_V4_TABLE: &str = "filter";
@@ -99,6 +103,7 @@ const IPSET_SETUP_SERVICE_CONTENT: &str = "[Unit]\nDescription=Create FWCloud Cr
 const BOUNCER_IPSET_DROP_IN_CONTENT: &str =
     "[Unit]\nRequires=fwcloud-crowdsec-ipsets.service\nAfter=fwcloud-crowdsec-ipsets.service\n";
 const BOUNCER_NFTABLES_DROP_IN_CONTENT: &str = "[Unit]\nAfter=fwcloud.service\n";
+const BOUNCER_PACKAGE_TRANSITION_DROP_IN_CONTENT: &str = "[Service]\nType=oneshot\nExecStartPre=\nExecStart=\nExecStart=/usr/bin/true\nExecStartPost=\nRestart=no\n";
 
 pub const fn firewall_bouncer_package(backend: CrowdSecFirewallBackend) -> &'static str {
     match backend {
@@ -507,22 +512,36 @@ pub async fn install_with_backend_and_progress(
 ) -> Result<CrowdSecBouncerInstallResponse> {
     emit_progress(
         progress,
+        "Preserving FWCloud CrowdSec Firewall Bouncer credentials during backend transition",
+    );
+    let api_key = prepare_set_only_configuration().await?;
+    emit_progress(
+        progress,
         "Temporarily blocking CrowdSec Firewall Bouncer service during package transition",
     );
     mask_firewall_bouncer_service().await?;
+    if let Err(error) = install_bouncer_package_transition_drop_in().await {
+        if let Err(restore_error) = restore_firewall_bouncer_service().await {
+            debug!(
+                "Unable to restore CrowdSec Firewall Bouncer service after package transition setup failure: {}",
+                restore_error
+            );
+        }
+        return Err(error);
+    }
 
     let response = match backend {
-        CrowdSecFirewallBackend::Iptables => install_iptables_bouncer(progress).await,
-        CrowdSecFirewallBackend::Nftables => install_nftables_bouncer(progress).await,
+        CrowdSecFirewallBackend::Iptables => install_iptables_bouncer(progress, &api_key).await,
+        CrowdSecFirewallBackend::Nftables => install_nftables_bouncer(progress, &api_key).await,
     };
 
     let response = match response {
         Ok(response) => response,
         Err(error) => {
-            if let Err(unmask_error) = unmask_firewall_bouncer_service().await {
+            if let Err(restore_error) = restore_firewall_bouncer_service().await {
                 debug!(
                     "Unable to restore CrowdSec Firewall Bouncer service after package transition failure: {}",
-                    unmask_error
+                    restore_error
                 );
             }
             return Err(error);
@@ -574,7 +593,6 @@ pub async fn reconcile_for_installed_crowdsec(
         return Ok(false);
     }
 
-    reconcile_non_selected_bouncer_backend(backend, progress).await?;
     emit_progress(
         progress,
         "Reconciling CrowdSec Firewall Bouncer for the FWCloud firewall backend",
@@ -603,6 +621,7 @@ fn bouncer_reconciliation_action(
 
 async fn install_iptables_bouncer(
     progress: Option<&CrowdSecProgress>,
+    api_key: &str,
 ) -> Result<CrowdSecBouncerInstallResponse> {
     log::info!("Installing CrowdSec Firewall Bouncer in FWCloud IPSet-only mode");
 
@@ -619,13 +638,12 @@ async fn install_iptables_bouncer(
         progress,
         "Preparing CrowdSec Firewall Bouncer configuration",
     );
-    let api_key = prepare_set_only_configuration().await?;
     emit_success(
         progress,
         "CrowdSec Firewall Bouncer is configured for FWCloud IPSet only",
     );
     emit_progress(progress, "Writing FWCloud IPSet-only bouncer configuration");
-    write_set_only_configuration(CrowdSecFirewallBackend::Iptables, &api_key).await?;
+    write_set_only_configuration(CrowdSecFirewallBackend::Iptables, api_key).await?;
     emit_success(
         progress,
         "FWCloud IPSet-only bouncer configuration is written",
@@ -643,7 +661,7 @@ async fn install_iptables_bouncer(
     }
     let legacy_resources_removed = reconcile_legacy_bouncer_resources(progress).await?;
     emit_progress(progress, "Enabling CrowdSec Firewall Bouncer service");
-    unmask_firewall_bouncer_service().await?;
+    restore_firewall_bouncer_service().await?;
     enable_firewall_bouncer_service().await?;
     emit_success(
         progress,
@@ -700,6 +718,7 @@ async fn install_iptables_bouncer(
 
 async fn install_nftables_bouncer(
     progress: Option<&CrowdSecProgress>,
+    api_key: &str,
 ) -> Result<CrowdSecBouncerInstallResponse> {
     log::info!("Installing CrowdSec Firewall Bouncer in FWCloud NFTables set-only mode");
 
@@ -727,8 +746,7 @@ async fn install_nftables_bouncer(
         progress,
         "Preparing CrowdSec NFTables Firewall Bouncer configuration",
     );
-    let api_key = prepare_set_only_configuration().await?;
-    write_set_only_configuration(CrowdSecFirewallBackend::Nftables, &api_key).await?;
+    write_set_only_configuration(CrowdSecFirewallBackend::Nftables, api_key).await?;
     emit_success(
         progress,
         "FWCloud NFTables set-only bouncer configuration is written",
@@ -777,7 +795,7 @@ async fn install_nftables_bouncer(
         }
     };
     emit_progress(progress, service_message);
-    unmask_firewall_bouncer_service().await?;
+    restore_firewall_bouncer_service().await?;
     reconcile_nftables_firewall_bouncer_service(service_action).await?;
     emit_success(progress, service_message);
     let integration =
@@ -910,6 +928,7 @@ async fn uninstall_with_options(
         "CrowdSec Firewall Bouncer service is disabled and stopped",
         "CrowdSec Firewall Bouncer service is already absent",
     );
+    remove_bouncer_package_transition_drop_in().await?;
     emit_progress(
         progress,
         "Removing FWCloud CrowdSec Firewall Bouncer registration",
@@ -1493,6 +1512,49 @@ async fn mask_firewall_bouncer_service() -> Result<()> {
         "Unable to temporarily block CrowdSec Firewall Bouncer service",
     )
     .await
+}
+
+async fn install_bouncer_package_transition_drop_in() -> Result<()> {
+    debug!(
+        "Installing temporary CrowdSec Firewall Bouncer systemd override for package transition"
+    );
+    fs::create_dir_all(BOUNCER_PACKAGE_TRANSITION_DROP_IN_DIRECTORY)
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create temporary CrowdSec Firewall Bouncer package transition configuration",
+            )
+        })?;
+    write_if_changed(
+        BOUNCER_PACKAGE_TRANSITION_DROP_IN_PATH,
+        BOUNCER_PACKAGE_TRANSITION_DROP_IN_CONTENT,
+    )
+    .await?;
+    run_systemctl(
+        &["daemon-reload"],
+        "Unable to apply temporary CrowdSec Firewall Bouncer package transition configuration",
+    )
+    .await
+}
+
+async fn remove_bouncer_package_transition_drop_in() -> Result<()> {
+    if !remove_managed_file(BOUNCER_PACKAGE_TRANSITION_DROP_IN_PATH).await? {
+        return Ok(());
+    }
+
+    debug!("Removing temporary CrowdSec Firewall Bouncer systemd override for package transition");
+
+    run_systemctl(
+        &["daemon-reload"],
+        "Unable to remove temporary CrowdSec Firewall Bouncer package transition configuration",
+    )
+    .await
+}
+
+async fn restore_firewall_bouncer_service() -> Result<()> {
+    remove_bouncer_package_transition_drop_in().await?;
+    unmask_firewall_bouncer_service().await
 }
 
 async fn unmask_firewall_bouncer_service() -> Result<()> {
@@ -2308,7 +2370,8 @@ mod tests {
         CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig, CrowdSecBouncersResponse,
         CrowdSecFirewallBackend, CrowdSecIpSetStatus, CrowdSecNftablesSetOnlyConfig,
         NftablesBouncerServiceAction, BOUNCER_CONFIG_PATH, BOUNCER_NFTABLES_DROP_IN_CONTENT,
-        BOUNCER_NFTABLES_DROP_IN_PATH, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST,
+        BOUNCER_NFTABLES_DROP_IN_PATH, BOUNCER_PACKAGE_TRANSITION_DROP_IN_CONTENT,
+        BOUNCER_PACKAGE_TRANSITION_DROP_IN_PATH, FWCLOUD_BOUNCER_NAME, IPSET_V4_BLACKLIST,
         IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
     };
     use crate::{
@@ -2419,6 +2482,18 @@ mod tests {
         assert_eq!(
             BOUNCER_NFTABLES_DROP_IN_PATH,
             "/etc/systemd/system/crowdsec-firewall-bouncer.service.d/fwcloud-nftables.conf"
+        );
+    }
+
+    #[test]
+    fn temporarily_prevents_package_scripts_from_starting_the_bouncer() {
+        assert_eq!(
+            BOUNCER_PACKAGE_TRANSITION_DROP_IN_PATH,
+            "/run/systemd/system/crowdsec-firewall-bouncer.service.d/99-fwcloud-package-transition.conf"
+        );
+        assert_eq!(
+            BOUNCER_PACKAGE_TRANSITION_DROP_IN_CONTENT,
+            "[Service]\nType=oneshot\nExecStartPre=\nExecStart=\nExecStart=/usr/bin/true\nExecStartPost=\nRestart=no\n"
         );
     }
 
