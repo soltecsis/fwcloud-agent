@@ -29,6 +29,7 @@ pub mod console;
 pub mod decisions;
 pub mod errors;
 pub mod install;
+pub mod lapi;
 pub mod models;
 pub mod packages;
 pub mod progress;

@@ -193,6 +193,51 @@ pub struct CrowdSecBouncerRemoveResponse {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecCentralLapiConfigureRequest {
+    pub listen_uri: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecCentralLapiConfigureResponse {
+    pub listen_uri: String,
+    pub message: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecMachineState {
+    Pending,
+    Validated,
+    Unknown,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecMachine {
+    pub name: String,
+    pub state: CrowdSecMachineState,
+    pub last_heartbeat: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecMachinesResponse {
+    pub machines: Vec<CrowdSecMachine>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecMachineValidationResponse {
+    pub name: String,
+    pub state: CrowdSecMachineState,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecMachineRemoveResponse {
+    pub name: String,
+    pub message: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CrowdSecPackageStatus {
     pub crowdsec_installed: bool,

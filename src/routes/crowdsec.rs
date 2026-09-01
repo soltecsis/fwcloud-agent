@@ -28,13 +28,14 @@ use log::debug;
 use crate::{
     config::Config,
     crowdsec::{
-        alerts, bouncers, collections, console, decisions, install,
+        alerts, bouncers, collections, console, decisions, install, lapi,
         models::{
             CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerRegisterRequest,
-            CrowdSecBouncerUninstallRequest, CrowdSecCollectionInstallRequest,
-            CrowdSecCollectionRemoveRequest, CrowdSecCollectionUpdateRequest,
-            CrowdSecCollectionsQuery, CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest,
-            CrowdSecDecisionsQuery, CrowdSecInstallRequest, CrowdSecUninstallRequest,
+            CrowdSecBouncerUninstallRequest, CrowdSecCentralLapiConfigureRequest,
+            CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
+            CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
+            CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
+            CrowdSecInstallRequest, CrowdSecUninstallRequest,
         },
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
         status, uninstall,
@@ -276,6 +277,103 @@ async fn crowdsec_bouncers(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> 
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         bouncers_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/lapi/central/configure")]
+async fn configure_crowdsec_central_lapi(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecCentralLapiConfigureRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let configure_result = lapi::configure_central(&request.listen_uri).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        configure_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[get("/crowdsec/lapi/machines")]
+async fn crowdsec_lapi_machines(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let machines_result = lapi::machines().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        machines_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/lapi/machines/{name}/validate")]
+async fn validate_crowdsec_lapi_machine(
+    cfg: web::Data<Arc<Config>>,
+    name: web::Path<String>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let validate_result = lapi::validate_machine(&name).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        validate_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[delete("/crowdsec/lapi/machines/{name}")]
+async fn remove_crowdsec_lapi_machine(
+    cfg: web::Data<Arc<Config>>,
+    name: web::Path<String>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let remove_result = lapi::remove_machine(&name).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        remove_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/lapi/bouncers/register")]
+async fn register_crowdsec_lapi_bouncer(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecBouncerRegisterRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let register_result = lapi::register_bouncer(&request.name).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        register_result?
     };
 
     Ok(HttpResponse::Ok().json(response))
