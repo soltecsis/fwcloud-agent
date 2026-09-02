@@ -918,10 +918,12 @@ fn machines_from_json(value: &Value) -> Vec<CrowdSecMachine> {
         return Vec::new();
     };
 
-    machines
+    let mut normalized_machines = machines
         .iter()
         .filter_map(machine_from_json)
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>();
+    normalized_machines.sort_by(|left, right| left.name.cmp(&right.name));
+    normalized_machines
 }
 
 fn machine_from_json(value: &Value) -> Option<CrowdSecMachine> {
@@ -931,6 +933,9 @@ fn machine_from_json(value: &Value) -> Option<CrowdSecMachine> {
         .or_else(|| values.get("machine_id"))
         .or_else(|| values.get("name"))
         .and_then(Value::as_str)?;
+    if validate_machine_name(name).is_err() {
+        return None;
+    }
 
     let validated = values
         .get("isValidated")
@@ -1126,8 +1131,8 @@ mod tests {
 
     use super::{
         central_lapi_configuration, consume_preflight_token, issue_preflight_token,
-        machine_from_json, machine_reauthentication_required_message, remote_lapi_url,
-        remote_machine_configuration, validate_listen_uri,
+        machine_from_json, machine_reauthentication_required_message, machines_from_json,
+        remote_lapi_url, remote_machine_configuration, validate_listen_uri, validate_machine_name,
     };
     use crate::crowdsec::models::CrowdSecMachineState;
     use serde_json::json;
@@ -1177,6 +1182,14 @@ mod tests {
     }
 
     #[test]
+    fn validates_machine_names_for_registration_and_removal() {
+        assert!(validate_machine_name("fwcloud-machine-01").is_ok());
+        assert!(validate_machine_name("fwcloud.machine_01").is_ok());
+        assert!(validate_machine_name("invalid machine name").is_err());
+        assert!(validate_machine_name("../../machine").is_err());
+    }
+
+    #[test]
     fn recognizes_a_removed_machine_in_lapi_diagnostics() {
         assert!(machine_reauthentication_required_message(
             "API error: ent: machine not found"
@@ -1201,6 +1214,31 @@ mod tests {
             machine.last_heartbeat.as_deref(),
             Some("2026-09-01T10:00:00Z")
         );
+    }
+
+    #[test]
+    fn omits_invalid_machine_entries_and_credentials_from_inventory() {
+        let machines = machines_from_json(&json!([
+            {
+                "machineId": "fwcloud-machine-2",
+                "isValidated": true,
+                "api_key": "must-not-be-exposed"
+            },
+            {
+                "machineId": "invalid machine name",
+                "isValidated": false
+            },
+            {
+                "machineId": "fwcloud-machine-1",
+                "isValidated": false
+            }
+        ]));
+
+        let serialized = serde_json::to_value(&machines).unwrap();
+        assert_eq!(machines.len(), 2);
+        assert_eq!(machines[0].name, "fwcloud-machine-1");
+        assert_eq!(machines[1].name, "fwcloud-machine-2");
+        assert!(serialized[1].get("api_key").is_none());
     }
 
     #[test]
