@@ -127,6 +127,8 @@ impl ResponseError for FwcError {
                     crate::crowdsec::errors::INVALID_COMMAND
                         | crate::crowdsec::errors::COLLECTION_INVALID
                         | crate::crowdsec::errors::CONSOLE_INVALID_ENROLLMENT
+                        | crate::crowdsec::errors::LAPI_INVALID
+                        | crate::crowdsec::errors::MACHINE_INVALID
                 ) =>
             {
                 StatusCode::BAD_REQUEST
@@ -136,6 +138,8 @@ impl ResponseError for FwcError {
                     *code,
                     crate::crowdsec::errors::COLLECTION_TAINTED
                         | crate::crowdsec::errors::COLLECTION_CONFLICT
+                        | crate::crowdsec::errors::MACHINE_CONFLICT
+                        | crate::crowdsec::errors::MACHINE_REAUTHENTICATION_REQUIRED
                 ) =>
             {
                 StatusCode::CONFLICT
@@ -151,6 +155,11 @@ impl ResponseError for FwcError {
             | FwcError::NotExpectedFileName
             | FwcError::DstDirFirst => StatusCode::BAD_REQUEST,
             FwcError::ApiKeyNotValid | FwcError::ApiKeyNotFound | &FwcError::NotAllowedIP => {
+                StatusCode::FORBIDDEN
+            }
+            FwcError::CrowdSec { code, .. }
+                if *code == crate::crowdsec::errors::LAPI_PREFLIGHT_TOKEN_INVALID =>
+            {
                 StatusCode::FORBIDDEN
             }
             _ => StatusCode::INTERNAL_SERVER_ERROR,

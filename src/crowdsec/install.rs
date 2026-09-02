@@ -125,7 +125,7 @@ async fn restart_crowdsec_service() -> Result<()> {
     run_systemctl(&["restart", "crowdsec.service"]).await
 }
 
-async fn update_hub() -> Result<()> {
+pub(crate) async fn update_hub() -> Result<()> {
     debug!("Updating CrowdSec Hub index");
     CrowdSecCommand::cscli(&["hub", "update"])?
         .execute()
@@ -134,7 +134,7 @@ async fn update_hub() -> Result<()> {
     Ok(())
 }
 
-async fn install_default_collections(progress: Option<&CrowdSecProgress>) -> Result<()> {
+pub(crate) async fn install_default_collections(progress: Option<&CrowdSecProgress>) -> Result<()> {
     for collection in ["crowdsecurity/linux", "crowdsecurity/sshd"] {
         if collection_is_installed(collection).await? {
             debug!(

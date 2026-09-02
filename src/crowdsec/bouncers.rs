@@ -523,6 +523,40 @@ pub async fn install_with_backend_and_progress(
         "Preserving FWCloud CrowdSec Firewall Bouncer credentials during backend transition",
     );
     let api_key = prepare_set_only_configuration().await?;
+    install_with_lapi_configuration(backend, "http://127.0.0.1:8080/", &api_key, progress).await
+}
+
+pub async fn install_with_remote_lapi_and_progress(
+    backend: CrowdSecFirewallBackend,
+    lapi_url: &str,
+    api_key: &str,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecBouncerInstallResponse> {
+    if !valid_api_key(api_key) {
+        return Err(FwcError::crowdsec(
+            BOUNCER_INVALID,
+            "Invalid CrowdSec Firewall Bouncer API key",
+        ));
+    }
+
+    fs::create_dir_all(BOUNCER_CONFIG_DIRECTORY)
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create CrowdSec Firewall Bouncer configuration directory",
+            )
+        })?;
+
+    install_with_lapi_configuration(backend, lapi_url, api_key, progress).await
+}
+
+async fn install_with_lapi_configuration(
+    backend: CrowdSecFirewallBackend,
+    lapi_url: &str,
+    api_key: &str,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecBouncerInstallResponse> {
     emit_progress(
         progress,
         "Temporarily blocking CrowdSec Firewall Bouncer service during package transition",
@@ -539,8 +573,12 @@ pub async fn install_with_backend_and_progress(
     }
 
     let response = match backend {
-        CrowdSecFirewallBackend::Iptables => install_iptables_bouncer(progress, &api_key).await,
-        CrowdSecFirewallBackend::Nftables => install_nftables_bouncer(progress, &api_key).await,
+        CrowdSecFirewallBackend::Iptables => {
+            install_iptables_bouncer(progress, lapi_url, api_key).await
+        }
+        CrowdSecFirewallBackend::Nftables => {
+            install_nftables_bouncer(progress, lapi_url, api_key).await
+        }
     };
 
     let response = match response {
@@ -633,6 +671,7 @@ fn bouncer_reconciliation_action(
 
 async fn install_iptables_bouncer(
     progress: Option<&CrowdSecProgress>,
+    lapi_url: &str,
     api_key: &str,
 ) -> Result<CrowdSecBouncerInstallResponse> {
     log::info!("Installing CrowdSec Firewall Bouncer in FWCloud IPSet-only mode");
@@ -655,7 +694,7 @@ async fn install_iptables_bouncer(
         "CrowdSec Firewall Bouncer is configured for FWCloud IPSet only",
     );
     emit_progress(progress, "Writing FWCloud IPSet-only bouncer configuration");
-    write_set_only_configuration(CrowdSecFirewallBackend::Iptables, api_key).await?;
+    write_set_only_configuration(CrowdSecFirewallBackend::Iptables, lapi_url, api_key).await?;
     emit_success(
         progress,
         "FWCloud IPSet-only bouncer configuration is written",
@@ -730,6 +769,7 @@ async fn install_iptables_bouncer(
 
 async fn install_nftables_bouncer(
     progress: Option<&CrowdSecProgress>,
+    lapi_url: &str,
     api_key: &str,
 ) -> Result<CrowdSecBouncerInstallResponse> {
     log::info!("Installing CrowdSec Firewall Bouncer in FWCloud NFTables set-only mode");
@@ -758,7 +798,7 @@ async fn install_nftables_bouncer(
         progress,
         "Preparing CrowdSec NFTables Firewall Bouncer configuration",
     );
-    write_set_only_configuration(CrowdSecFirewallBackend::Nftables, api_key).await?;
+    write_set_only_configuration(CrowdSecFirewallBackend::Nftables, lapi_url, api_key).await?;
     emit_success(
         progress,
         "FWCloud NFTables set-only bouncer configuration is written",
@@ -1108,6 +1148,7 @@ fn emit_boolean_result(
 
 async fn write_set_only_configuration(
     backend: CrowdSecFirewallBackend,
+    lapi_url: &str,
     api_key: &str,
 ) -> Result<()> {
     fs::create_dir_all(BOUNCER_CONFIG_DIRECTORY)
@@ -1119,11 +1160,14 @@ async fn write_set_only_configuration(
             )
         })?;
     let contents = match backend {
-        CrowdSecFirewallBackend::Iptables => {
-            set_only_configuration_contents(&CrowdSecBouncerSetOnlyConfig::default(), api_key)
-        }
+        CrowdSecFirewallBackend::Iptables => set_only_configuration_contents(
+            &CrowdSecBouncerSetOnlyConfig::default(),
+            lapi_url,
+            api_key,
+        ),
         CrowdSecFirewallBackend::Nftables => nftables_set_only_configuration_contents(
             &CrowdSecNftablesSetOnlyConfig::default(),
+            lapi_url,
             api_key,
         ),
     };
@@ -2343,11 +2387,13 @@ fn write_bouncer_configuration(contents: &str) -> Result<()> {
 
 fn set_only_configuration_contents(
     configuration: &CrowdSecBouncerSetOnlyConfig,
+    lapi_url: &str,
     api_key: &str,
 ) -> String {
     format!(
-        "{FWCLOUD_BOUNCER_CONFIGURATION_MARKER}\nmode: {}\napi_url: http://127.0.0.1:8080/\napi_key: {}\ndisable_ipv6: false\nblacklists_ipv4: {}\nblacklists_ipv6: {}\nipset_type: hash:ip\n",
+        "{FWCLOUD_BOUNCER_CONFIGURATION_MARKER}\nmode: {}\napi_url: {}\napi_key: {}\ndisable_ipv6: false\nblacklists_ipv4: {}\nblacklists_ipv6: {}\nipset_type: hash:ip\n",
         configuration.mode,
+        lapi_url,
         api_key,
         configuration.blacklists_ipv4,
         configuration.blacklists_ipv6,
@@ -2356,11 +2402,13 @@ fn set_only_configuration_contents(
 
 fn nftables_set_only_configuration_contents(
     configuration: &CrowdSecNftablesSetOnlyConfig,
+    lapi_url: &str,
     api_key: &str,
 ) -> String {
     format!(
-        "{FWCLOUD_BOUNCER_CONFIGURATION_MARKER}\nmode: {}\napi_url: http://127.0.0.1:8080/\napi_key: {}\ndisable_ipv6: false\nnftables:\n  ipv4:\n    enabled: true\n    set-only: true\n    table: {}\n    chain: {}\n  ipv6:\n    enabled: true\n    set-only: true\n    table: {}\n    chain: {}\n",
+        "{FWCLOUD_BOUNCER_CONFIGURATION_MARKER}\nmode: {}\napi_url: {}\napi_key: {}\ndisable_ipv6: false\nnftables:\n  ipv4:\n    enabled: true\n    set-only: true\n    table: {}\n    chain: {}\n  ipv6:\n    enabled: true\n    set-only: true\n    table: {}\n    chain: {}\n",
         configuration.mode,
+        lapi_url,
         api_key,
         configuration.ipv4_table,
         configuration.ipv4_chain,
@@ -2413,8 +2461,11 @@ mod tests {
 
     #[test]
     fn recognizes_set_only_configuration() {
-        let configuration =
-            set_only_configuration_contents(&CrowdSecBouncerSetOnlyConfig::default(), "secret");
+        let configuration = set_only_configuration_contents(
+            &CrowdSecBouncerSetOnlyConfig::default(),
+            "http://127.0.0.1:8080/",
+            "secret",
+        );
 
         assert!(configuration_is_set_only(
             &configuration,
@@ -2429,6 +2480,7 @@ mod tests {
             CrowdSecFirewallBackend::Iptables,
         ));
         assert!(configuration_is_fwcloud_managed(&configuration));
+        assert!(configuration.contains("api_url: http://127.0.0.1:8080/\n"));
         assert!(!configuration_is_fwcloud_managed(
             "mode: iptables\napi_key: package-generated-key\n"
         ));
@@ -2442,11 +2494,13 @@ mod tests {
     fn generates_nftables_set_only_configuration() {
         let configuration = nftables_set_only_configuration_contents(
             &CrowdSecNftablesSetOnlyConfig::default(),
+            "http://127.0.0.1:8080/",
             "secret",
         );
 
         assert!(configuration.contains("mode: nftables\n"));
         assert!(configuration.contains("api_key: secret\n"));
+        assert!(configuration.contains("api_url: http://127.0.0.1:8080/\n"));
         assert!(configuration.contains("  ipv4:\n    enabled: true\n    set-only: true\n"));
         assert!(configuration.contains("    table: filter\n    chain: INPUT\n"));
         assert!(configuration.contains("  ipv6:\n    enabled: true\n    set-only: true\n"));
