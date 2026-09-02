@@ -313,6 +313,16 @@ pub async fn install_remote_machine(
     ensure_remote_lapi_reachable(&lapi_url).await?;
     emit_success(progress, "Central CrowdSec Local API is reachable");
 
+    emit_progress(
+        progress,
+        "Stopping existing CrowdSec service before machine configuration",
+    );
+    disable_crowdsec_service_if_present().await?;
+    emit_success(
+        progress,
+        "CrowdSec service is stopped before machine configuration",
+    );
+
     emit_progress(progress, "Installing CrowdSec packages and dependencies");
     packages::install_packages_with_progress(progress).await?;
     emit_success(progress, "CrowdSec packages and dependencies are ready");
@@ -543,6 +553,23 @@ async fn disable_crowdsec_service() -> Result<()> {
             "Unable to stop CrowdSec service pending central validation",
         ))
     }
+}
+
+async fn disable_crowdsec_service_if_present() -> Result<()> {
+    let output = timeout(
+        SERVICE_COMMAND_TIMEOUT,
+        Command::new(SYSTEMCTL_COMMAND)
+            .args(["show", "--property=LoadState", "--value", CROWDSEC_SERVICE])
+            .output(),
+    )
+    .await
+    .map_err(|_| FwcError::crowdsec(COMMAND_FAILED, "CrowdSec service command timed out"))??;
+
+    if !output.status.success() || String::from_utf8_lossy(&output.stdout).trim() == "not-found" {
+        return Ok(());
+    }
+
+    disable_crowdsec_service().await
 }
 
 async fn restrict_machine_credentials_permissions() -> Result<()> {
