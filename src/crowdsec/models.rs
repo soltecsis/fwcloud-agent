@@ -238,6 +238,26 @@ pub struct CrowdSecMachineRemoveResponse {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecLapiPreflightTokenRequest {
+    pub machine_name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecLapiPreflightTokenResponse {
+    pub token: String,
+    pub expires_in_seconds: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecLapiPreflightRequest {
+    pub central_agent_url: String,
+    pub central_agent_tls_fingerprint: String,
+    pub token: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CrowdSecPackageStatus {
     pub crowdsec_installed: bool,

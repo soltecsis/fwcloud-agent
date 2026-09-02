@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use actix_service::{Service, Transform};
-use actix_web::{dev::ServiceRequest, dev::ServiceResponse, web, Error};
+use actix_web::{dev::ServiceRequest, dev::ServiceResponse, http::Method, web, Error};
 use futures::future::{ok, Ready};
 use futures::Future;
 
@@ -85,8 +85,6 @@ where
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        let api_key: String;
-
         let cfg: &web::Data<Arc<Config>> = match req.app_data() {
             Some(val) => val,
             None => {
@@ -96,44 +94,39 @@ where
             }
         };
 
+        let is_lapi_preflight_ping =
+            req.path() == "/api/v1/crowdsec/lapi/ping" && req.method() == Method::POST;
+
         // If the use of API Key is enabled.
         if cfg.enable_api_key {
-            // (1) Verify that the supplied API key is correct.
-            match req.headers().get("X-API-Key") {
-                Some(value) => api_key = String::from(value.to_str().unwrap()),
-                None => return err!(FwcError::ApiKeyNotFound),
-            }
+            let api_key = req
+                .headers()
+                .get("X-API-Key")
+                .and_then(|value| value.to_str().ok());
+            let global_api_key_is_valid = api_key.is_some_and(|api_key| cfg.api_key == api_key);
 
-            if cfg.api_key != api_key {
-                return err!(FwcError::ApiKeyNotValid);
-            }
-
-            // (2) Now check that the peer IP is allowed.
-            // If allowed_ips vector is empty we are allowing connections form any IP.
-            if !cfg.allowed_ips.is_empty() {
-                let mut found = false;
-
-                let remote_ip = match req.connection_info().peer_addr() {
-                    Some(data) => {
-                        let ip_and_port: Vec<&str> = data.split(':').collect();
-                        String::from(ip_and_port[0])
-                    }
-                    None => {
-                        return err!(FwcError::Internal(
-                            "Allowed IPs list not empty and was not possible to get the remote IP"
-                        ))
-                    }
+            if global_api_key_is_valid {
+                if let Err(error) = check_allowed_ip(&req, cfg) {
+                    return err!(error);
+                }
+            } else if is_lapi_preflight_ping {
+                let token = req
+                    .headers()
+                    .get(crate::crowdsec::lapi::PREFLIGHT_TOKEN_HEADER)
+                    .and_then(|value| value.to_str().ok());
+                let Some(token) = token else {
+                    return err!(FwcError::ApiKeyNotFound);
                 };
 
-                for ip in cfg.allowed_ips.iter() {
-                    if *ip == remote_ip {
-                        found = true;
-                        break;
-                    }
+                if let Err(error) =
+                    crate::crowdsec::lapi::consume_preflight_token(cfg.data_dir, token)
+                {
+                    return err!(error);
                 }
-                if !found {
-                    return err!(FwcError::NotAllowedIP);
-                }
+            } else if api_key.is_some() {
+                return err!(FwcError::ApiKeyNotValid);
+            } else {
+                return err!(FwcError::ApiKeyNotFound);
             }
         }
 
@@ -143,5 +136,30 @@ where
             let res = fut.await?;
             Ok(res)
         })
+    }
+}
+
+fn check_allowed_ip(req: &ServiceRequest, cfg: &Config) -> Result<(), FwcError> {
+    // If allowed_ips vector is empty we are allowing connections form any IP.
+    if cfg.allowed_ips.is_empty() {
+        return Ok(());
+    }
+
+    let remote_ip = match req.connection_info().peer_addr() {
+        Some(data) => {
+            let ip_and_port: Vec<&str> = data.split(':').collect();
+            String::from(ip_and_port[0])
+        }
+        None => {
+            return Err(FwcError::Internal(
+                "Allowed IPs list not empty and was not possible to get the remote IP",
+            ))
+        }
+    };
+
+    if cfg.allowed_ips.iter().any(|ip| *ip == remote_ip) {
+        Ok(())
+    } else {
+        Err(FwcError::NotAllowedIP)
     }
 }

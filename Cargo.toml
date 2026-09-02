@@ -132,6 +132,7 @@ sha2 = "0.11.0"
 hex = "0.4.3"
 chrono = { version = "0.4.45", default-features = false }
 sysinfo = "0.39.6"
+url = "2.5.8"
 
 [dev-dependencies]
 serial_test = "4.0.1"

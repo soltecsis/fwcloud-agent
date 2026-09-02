@@ -35,7 +35,8 @@ use crate::{
             CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
             CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
             CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
-            CrowdSecInstallRequest, CrowdSecUninstallRequest,
+            CrowdSecInstallRequest, CrowdSecLapiPreflightRequest,
+            CrowdSecLapiPreflightTokenRequest, CrowdSecUninstallRequest,
         },
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
         status, uninstall,
@@ -300,6 +301,57 @@ async fn configure_crowdsec_central_lapi(
     };
 
     Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/lapi/preflight-tokens")]
+async fn issue_crowdsec_lapi_preflight_token(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecLapiPreflightTokenRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        lapi::ensure_central_ready().await?;
+        let token_result = lapi::issue_preflight_token(cfg.data_dir, &request.machine_name);
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        token_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/lapi/ping")]
+async fn crowdsec_lapi_ping() -> HttpResponse {
+    HttpResponse::NoContent().finish()
+}
+
+#[post("/crowdsec/lapi/preflight")]
+async fn preflight_crowdsec_lapi(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecLapiPreflightRequest>,
+) -> Result<HttpResponse> {
+    {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let preflight_result = lapi::preflight_remote_machine(
+            &request.central_agent_url,
+            &request.central_agent_tls_fingerprint,
+            &request.token,
+        )
+        .await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        preflight_result?;
+    }
+
+    Ok(HttpResponse::NoContent().finish())
 }
 
 #[get("/crowdsec/lapi/machines")]
