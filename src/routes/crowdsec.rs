@@ -446,26 +446,6 @@ async fn remove_crowdsec_lapi_machine(
     Ok(HttpResponse::Ok().json(response))
 }
 
-#[post("/crowdsec/lapi/bouncers/register")]
-async fn register_crowdsec_lapi_bouncer(
-    cfg: web::Data<Arc<Config>>,
-    request: web::Json<CrowdSecBouncerRegisterRequest>,
-) -> Result<HttpResponse> {
-    let response = {
-        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
-        let mutex = Arc::clone(&cfg.mutex.crowdsec);
-        let _mutex_data = mutex.lock().await;
-        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
-
-        let register_result = lapi::register_bouncer(&request.name).await;
-
-        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
-        register_result?
-    };
-
-    Ok(HttpResponse::Ok().json(response))
-}
-
 #[post("/crowdsec/bouncers/register")]
 async fn register_crowdsec_bouncer(
     cfg: web::Data<Arc<Config>>,

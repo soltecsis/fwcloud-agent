@@ -171,14 +171,6 @@ pub async fn remove_machine(name: &str) -> Result<CrowdSecMachineRemoveResponse>
     })
 }
 
-pub async fn register_bouncer(
-    name: &str,
-) -> Result<crate::crowdsec::models::CrowdSecBouncerRegisterResponse> {
-    require_crowdsec_installed().await?;
-    ensure_local_api_reachable().await?;
-    crate::crowdsec::bouncers::register(name).await
-}
-
 pub fn issue_preflight_token(
     data_directory: &str,
     machine_name: &str,
