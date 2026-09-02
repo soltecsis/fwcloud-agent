@@ -42,6 +42,7 @@ use uuid::Uuid;
 
 use crate::{
     crowdsec::{
+        bouncers,
         command::{CrowdSecCommand, CrowdSecCommandOutput},
         errors::{
             COMMAND_FAILED, LAPI_INVALID, LAPI_PREFLIGHT_FAILED, LAPI_PREFLIGHT_TOKEN_INVALID,
@@ -50,9 +51,9 @@ use crate::{
         },
         install,
         models::{
-            CrowdSecCentralLapiConfigureResponse, CrowdSecLapiPreflightTokenResponse,
-            CrowdSecMachine, CrowdSecMachineRemoveResponse, CrowdSecMachineState,
-            CrowdSecMachineValidationResponse, CrowdSecMachinesResponse,
+            CrowdSecCentralLapiConfigureResponse, CrowdSecFirewallBackend,
+            CrowdSecLapiPreflightTokenResponse, CrowdSecMachine, CrowdSecMachineRemoveResponse,
+            CrowdSecMachineState, CrowdSecMachineValidationResponse, CrowdSecMachinesResponse,
             CrowdSecRemoteMachineActivationResponse, CrowdSecRemoteMachineInstallResponse,
         },
         packages,
@@ -363,6 +364,9 @@ pub async fn install_remote_machine(
 
 pub async fn activate_remote_machine(
     machine_name: &str,
+    local_remediation: bool,
+    backend: CrowdSecFirewallBackend,
+    bouncer_api_key: Option<&str>,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecRemoteMachineActivationResponse> {
     validate_machine_name(machine_name)?;
@@ -378,6 +382,28 @@ pub async fn activate_remote_machine(
         "CrowdSec machine is validated by the central Local API",
     );
 
+    if local_remediation {
+        let bouncer_api_key = bouncer_api_key
+            .filter(|api_key| !api_key.is_empty())
+            .ok_or_else(|| {
+                FwcError::crowdsec(
+                    crate::crowdsec::errors::BOUNCER_INVALID,
+                    "CrowdSec Firewall Bouncer API key is required for local remediation",
+                )
+            })?;
+        let lapi_url = configured_remote_lapi_url().await?;
+
+        emit_progress(progress, "Configuring local CrowdSec Firewall Bouncer");
+        bouncers::install_with_remote_lapi_and_progress(
+            backend,
+            &lapi_url,
+            bouncer_api_key,
+            progress,
+        )
+        .await?;
+        emit_success(progress, "Local CrowdSec Firewall Bouncer is configured");
+    }
+
     emit_progress(progress, "Starting CrowdSec machine service");
     enable_crowdsec_service().await?;
     emit_success(progress, "CrowdSec machine service is enabled and running");
@@ -385,7 +411,13 @@ pub async fn activate_remote_machine(
     Ok(CrowdSecRemoteMachineActivationResponse {
         machine_name: machine_name.to_string(),
         state: CrowdSecMachineState::Validated,
-        message: "CrowdSec machine is validated and running".to_string(),
+        local_remediation,
+        message: if local_remediation {
+            "CrowdSec machine is validated, running and configured for local remediation"
+                .to_string()
+        } else {
+            "CrowdSec machine is validated and running".to_string()
+        },
     })
 }
 
@@ -558,6 +590,28 @@ async fn configure_remote_machine() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn configured_remote_lapi_url() -> Result<String> {
+    let credentials = fs::read_to_string("/etc/crowdsec/local_api_credentials.yaml")
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                LAPI_UNREACHABLE,
+                "Unable to read CrowdSec machine credentials",
+            )
+        })?;
+    let lapi_url = credentials
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("url:").map(str::trim))
+        .ok_or_else(|| {
+            FwcError::crowdsec(
+                LAPI_UNREACHABLE,
+                "CrowdSec machine credentials do not define a Local API URL",
+            )
+        })?;
+
+    Ok(remote_lapi_url(lapi_url)?.to_string())
 }
 
 fn validate_listen_uri(listen_uri: &str) -> Result<()> {

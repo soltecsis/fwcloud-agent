@@ -404,8 +404,14 @@ async fn activate_crowdsec_remote_machine(
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let activation_result =
-            lapi::activate_remote_machine(&request.machine_name, Some(&progress)).await;
+        let activation_result = lapi::activate_remote_machine(
+            &request.machine_name,
+            request.local_remediation,
+            request.backend,
+            request.bouncer_api_key.as_deref(),
+            Some(&progress),
+        )
+        .await;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         match activation_result {

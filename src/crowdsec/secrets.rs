@@ -45,7 +45,10 @@ fn redact_sensitive_line(line: &str) -> String {
         .trim_matches('\'')
         .to_ascii_lowercase()
         .replace(['_', '-'], "");
-    if normalized_key != "apikey" && normalized_key != "enrollmentkey" {
+    if !matches!(
+        normalized_key.as_str(),
+        "apikey" | "bouncerapikey" | "enrollmentkey"
+    ) {
         return line.to_string();
     }
 
@@ -59,4 +62,17 @@ fn redact_sensitive_line(line: &str) -> String {
         .collect::<String>();
 
     format!("{key}{separator} {REDACTED_VALUE}{trailing_whitespace}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_sensitive_text;
+
+    #[test]
+    fn redacts_remote_machine_bouncer_api_keys() {
+        assert_eq!(
+            redact_sensitive_text("bouncer_api_key: remote-secret"),
+            "bouncer_api_key: [REDACTED]"
+        );
+    }
 }

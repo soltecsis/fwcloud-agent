@@ -285,6 +285,11 @@ pub struct CrowdSecRemoteMachineInstallResponse {
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecRemoteMachineActivationRequest {
     pub machine_name: String,
+    #[serde(default)]
+    pub local_remediation: bool,
+    #[serde(default)]
+    pub backend: CrowdSecFirewallBackend,
+    pub bouncer_api_key: Option<String>,
     pub ws_id: Option<Uuid>,
 }
 
@@ -292,6 +297,7 @@ pub struct CrowdSecRemoteMachineActivationRequest {
 pub struct CrowdSecRemoteMachineActivationResponse {
     pub machine_name: String,
     pub state: CrowdSecMachineState,
+    pub local_remediation: bool,
     pub message: String,
 }
 
@@ -682,6 +688,21 @@ mod tests {
                 r#"{"machine_name":"fwcloud-web-01"}"#,
             )
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn remote_machine_activation_request_accepts_local_remediation() {
+        let request = serde_json::from_str::<CrowdSecRemoteMachineActivationRequest>(
+            r#"{"machine_name":"fwcloud-web-01","local_remediation":true,"backend":"nftables","bouncer_api_key":"machine-bouncer-key"}"#,
+        )
+        .unwrap();
+
+        assert!(request.local_remediation);
+        assert_eq!(request.backend, CrowdSecFirewallBackend::Nftables);
+        assert_eq!(
+            request.bouncer_api_key.as_deref(),
+            Some("machine-bouncer-key")
         );
     }
 
