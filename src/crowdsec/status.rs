@@ -31,6 +31,7 @@ use crate::{
         command::CrowdSecCommand,
         console, decisions,
         errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
+        lapi,
         models::{
             CrowdSecConsoleState, CrowdSecConsoleStatusResponse, CrowdSecDecisionsQuery,
             CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus, CrowdSecHealthState,
@@ -287,6 +288,11 @@ async fn local_api_status() -> CrowdSecHealthStatus {
         CrowdSecHealthStatus {
             state: CrowdSecHealthState::Ready,
             message: "CrowdSec Local API is reachable".to_string(),
+        }
+    } else if lapi::requires_machine_reauthentication(&output) {
+        CrowdSecHealthStatus {
+            state: CrowdSecHealthState::ReauthenticationRequired,
+            message: "CrowdSec machine is no longer registered in the central Local API. Register and validate it again.".to_string(),
         }
     } else {
         CrowdSecHealthStatus {

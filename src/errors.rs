@@ -139,6 +139,7 @@ impl ResponseError for FwcError {
                     crate::crowdsec::errors::COLLECTION_TAINTED
                         | crate::crowdsec::errors::COLLECTION_CONFLICT
                         | crate::crowdsec::errors::MACHINE_CONFLICT
+                        | crate::crowdsec::errors::MACHINE_REAUTHENTICATION_REQUIRED
                 ) =>
             {
                 StatusCode::CONFLICT

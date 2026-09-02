@@ -59,6 +59,7 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(crowdsec::preflight_crowdsec_lapi)
             .service(crowdsec::crowdsec_lapi_machines)
             .service(crowdsec::validate_crowdsec_lapi_machine)
+            .service(crowdsec::activate_crowdsec_remote_machine)
             .service(crowdsec::remove_crowdsec_lapi_machine)
             .service(crowdsec::register_crowdsec_lapi_bouncer)
             .service(crowdsec::crowdsec_bouncers)

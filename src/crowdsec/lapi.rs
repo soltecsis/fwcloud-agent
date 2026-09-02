@@ -42,17 +42,18 @@ use uuid::Uuid;
 
 use crate::{
     crowdsec::{
-        command::CrowdSecCommand,
+        command::{CrowdSecCommand, CrowdSecCommandOutput},
         errors::{
             COMMAND_FAILED, LAPI_INVALID, LAPI_PREFLIGHT_FAILED, LAPI_PREFLIGHT_TOKEN_INVALID,
             LAPI_UNREACHABLE, MACHINE_INVALID, MACHINE_NOT_FOUND,
+            MACHINE_REAUTHENTICATION_REQUIRED,
         },
         install,
         models::{
             CrowdSecCentralLapiConfigureResponse, CrowdSecLapiPreflightTokenResponse,
             CrowdSecMachine, CrowdSecMachineRemoveResponse, CrowdSecMachineState,
             CrowdSecMachineValidationResponse, CrowdSecMachinesResponse,
-            CrowdSecRemoteMachineInstallResponse,
+            CrowdSecRemoteMachineActivationResponse, CrowdSecRemoteMachineInstallResponse,
         },
         packages,
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
@@ -360,6 +361,34 @@ pub async fn install_remote_machine(
     })
 }
 
+pub async fn activate_remote_machine(
+    machine_name: &str,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecRemoteMachineActivationResponse> {
+    validate_machine_name(machine_name)?;
+    require_crowdsec_installed().await?;
+
+    emit_progress(
+        progress,
+        "Checking central validation of the CrowdSec machine",
+    );
+    ensure_remote_machine_is_validated().await?;
+    emit_success(
+        progress,
+        "CrowdSec machine is validated by the central Local API",
+    );
+
+    emit_progress(progress, "Starting CrowdSec machine service");
+    enable_crowdsec_service().await?;
+    emit_success(progress, "CrowdSec machine service is enabled and running");
+
+    Ok(CrowdSecRemoteMachineActivationResponse {
+        machine_name: machine_name.to_string(),
+        state: CrowdSecMachineState::Validated,
+        message: "CrowdSec machine is validated and running".to_string(),
+    })
+}
+
 async fn machine_by_name(name: &str) -> Result<CrowdSecMachine> {
     machines()
         .await?
@@ -395,6 +424,35 @@ async fn ensure_local_api_reachable() -> Result<()> {
     }
 }
 
+async fn ensure_remote_machine_is_validated() -> Result<()> {
+    let output = CrowdSecCommand::cscli(&["lapi", "status"])?
+        .execute_allow_failure()
+        .await?;
+
+    if output.succeeded() {
+        Ok(())
+    } else if requires_machine_reauthentication(&output) {
+        Err(FwcError::crowdsec(
+            MACHINE_REAUTHENTICATION_REQUIRED,
+            "CrowdSec machine is no longer registered in the central Local API. Register and validate it again.",
+        ))
+    } else {
+        Err(FwcError::crowdsec(
+            LAPI_UNREACHABLE,
+            "CrowdSec machine is not validated by the central Local API",
+        ))
+    }
+}
+
+pub(crate) fn requires_machine_reauthentication(output: &CrowdSecCommandOutput) -> bool {
+    machine_reauthentication_required_message(output.stdout())
+        || machine_reauthentication_required_message(output.stderr())
+}
+
+fn machine_reauthentication_required_message(value: &str) -> bool {
+    value.to_ascii_lowercase().contains("machine not found")
+}
+
 async fn restart_crowdsec_service() -> Result<()> {
     let output = timeout(
         SERVICE_COMMAND_TIMEOUT,
@@ -411,6 +469,26 @@ async fn restart_crowdsec_service() -> Result<()> {
         Err(FwcError::crowdsec(
             COMMAND_FAILED,
             "Unable to restart CrowdSec service",
+        ))
+    }
+}
+
+async fn enable_crowdsec_service() -> Result<()> {
+    let output = timeout(
+        SERVICE_COMMAND_TIMEOUT,
+        Command::new(SYSTEMCTL_COMMAND)
+            .args(["enable", "--now", CROWDSEC_SERVICE])
+            .output(),
+    )
+    .await
+    .map_err(|_| FwcError::crowdsec(COMMAND_FAILED, "CrowdSec service command timed out"))??;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            COMMAND_FAILED,
+            "Unable to start CrowdSec machine service",
         ))
     }
 }
@@ -955,7 +1033,8 @@ mod tests {
 
     use super::{
         central_lapi_configuration, consume_preflight_token, issue_preflight_token,
-        machine_from_json, remote_lapi_url, remote_machine_configuration, validate_listen_uri,
+        machine_from_json, machine_reauthentication_required_message, remote_lapi_url,
+        remote_machine_configuration, validate_listen_uri,
     };
     use crate::crowdsec::models::CrowdSecMachineState;
     use serde_json::json;
@@ -1002,6 +1081,16 @@ mod tests {
         assert!(remote_lapi_url("http://lapi.example.test:8080").is_err());
         assert!(remote_lapi_url("http://192.0.2.10").is_err());
         assert!(remote_lapi_url("http://192.0.2.10:8080/api").is_err());
+    }
+
+    #[test]
+    fn recognizes_a_removed_machine_in_lapi_diagnostics() {
+        assert!(machine_reauthentication_required_message(
+            "API error: ent: machine not found"
+        ));
+        assert!(!machine_reauthentication_required_message(
+            "connection refused"
+        ));
     }
 
     #[test]

@@ -281,6 +281,20 @@ pub struct CrowdSecRemoteMachineInstallResponse {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecRemoteMachineActivationRequest {
+    pub machine_name: String,
+    pub ws_id: Option<Uuid>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecRemoteMachineActivationResponse {
+    pub machine_name: String,
+    pub state: CrowdSecMachineState,
+    pub message: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CrowdSecPackageStatus {
     pub crowdsec_installed: bool,
@@ -311,6 +325,7 @@ pub enum CrowdSecHealthState {
     Unknown,
     Ready,
     NotConfigured,
+    ReauthenticationRequired,
     Unavailable,
     RateLimited,
     Error,
@@ -580,8 +595,8 @@ mod tests {
         CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep, CrowdSecBouncerUninstallStep,
         CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecFirewallBackend,
         CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecInstallStep, CrowdSecOperationRequest,
-        CrowdSecPackageStatus, CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse,
-        CrowdSecUninstallStep,
+        CrowdSecPackageStatus, CrowdSecRemoteMachineActivationRequest, CrowdSecStepResult,
+        CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
     };
 
     #[test]
@@ -657,6 +672,17 @@ mod tests {
 
         assert_eq!(request.mode, CrowdSecInstallMode::Machine);
         assert_eq!(request.machine_name.as_deref(), Some("fwcloud-web-01"));
+    }
+
+    #[test]
+    fn remote_machine_activation_request_requires_a_machine_name() {
+        assert!(serde_json::from_str::<CrowdSecRemoteMachineActivationRequest>(r#"{}"#).is_err());
+        assert!(
+            serde_json::from_str::<CrowdSecRemoteMachineActivationRequest>(
+                r#"{"machine_name":"fwcloud-web-01"}"#,
+            )
+            .is_ok()
+        );
     }
 
     #[test]

@@ -36,7 +36,8 @@ use crate::{
             CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
             CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
             CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecLapiPreflightRequest,
-            CrowdSecLapiPreflightTokenRequest, CrowdSecUninstallRequest,
+            CrowdSecLapiPreflightTokenRequest, CrowdSecRemoteMachineActivationRequest,
+            CrowdSecUninstallRequest,
         },
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
         status, uninstall,
@@ -386,6 +387,34 @@ async fn validate_crowdsec_lapi_machine(
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         validate_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/lapi/machines/activate")]
+async fn activate_crowdsec_remote_machine(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecRemoteMachineActivationRequest>,
+) -> Result<HttpResponse> {
+    let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let activation_result =
+            lapi::activate_remote_machine(&request.machine_name, Some(&progress)).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        match activation_result {
+            Ok(response) => response,
+            Err(error) => {
+                emit_progress_error(&progress, "CrowdSec machine activation failed");
+                return Err(error);
+            }
+        }
     };
 
     Ok(HttpResponse::Ok().json(response))
