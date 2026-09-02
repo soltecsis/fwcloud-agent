@@ -348,6 +348,7 @@ pub async fn install_remote_machine(
         progress,
         "Registering CrowdSec machine with the central Local API",
     );
+    remove_machine_credentials().await?;
     CrowdSecCommand::cscli(&[
         "lapi",
         "register",
@@ -591,6 +592,17 @@ async fn restrict_machine_credentials_permissions() -> Result<()> {
             COMMAND_FAILED,
             "Unable to protect CrowdSec machine credentials",
         ))
+    }
+}
+
+async fn remove_machine_credentials() -> Result<()> {
+    match fs::remove_file("/etc/crowdsec/local_api_credentials.yaml").await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(FwcError::crowdsec(
+            COMMAND_FAILED,
+            "Unable to remove existing CrowdSec machine credentials",
+        )),
     }
 }
 
