@@ -35,7 +35,7 @@ use crate::{
             CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
             CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
             CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
-            CrowdSecInstallRequest, CrowdSecLapiPreflightRequest,
+            CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecLapiPreflightRequest,
             CrowdSecLapiPreflightTokenRequest, CrowdSecUninstallRequest,
         },
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
@@ -483,20 +483,71 @@ async fn install_crowdsec(
         let _mutex_data = mutex.lock().await;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let install_result =
-            install::install_with_backend_and_progress(request.backend, Some(&progress)).await;
+        let response = match request.mode {
+            CrowdSecInstallMode::Standalone => {
+                let install_result =
+                    install::install_with_backend_and_progress(request.backend, Some(&progress))
+                        .await;
+                match install_result {
+                    Ok(response) => HttpResponse::Ok().json(response),
+                    Err(error) => {
+                        emit_progress_error(&progress, "CrowdSec installation failed");
+                        return Err(error);
+                    }
+                }
+            }
+            CrowdSecInstallMode::Machine => {
+                let install_result = lapi::install_remote_machine(
+                    required_machine_install_value(&request.machine_name, "machine_name")?,
+                    required_machine_install_value(&request.lapi_url, "lapi_url")?,
+                    required_machine_install_value(
+                        &request.central_agent_url,
+                        "central_agent_url",
+                    )?,
+                    required_machine_install_value(
+                        &request.central_agent_tls_fingerprint,
+                        "central_agent_tls_fingerprint",
+                    )?,
+                    required_machine_install_value(&request.preflight_token, "preflight_token")?,
+                    Some(&progress),
+                )
+                .await;
+                match install_result {
+                    Ok(response) => HttpResponse::Ok().json(response),
+                    Err(error) => {
+                        emit_progress_error(&progress, "CrowdSec machine installation failed");
+                        return Err(error);
+                    }
+                }
+            }
+        };
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
-        match install_result {
-            Ok(response) => response,
-            Err(error) => {
-                emit_progress_error(&progress, "CrowdSec installation failed");
-                return Err(error);
-            }
-        }
+        response
     };
 
-    Ok(HttpResponse::Ok().json(response))
+    Ok(response)
+}
+
+fn required_machine_install_value<'a>(value: &'a Option<String>, field: &str) -> Result<&'a str> {
+    value
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            crate::errors::FwcError::crowdsec(
+                crate::crowdsec::errors::MACHINE_INVALID,
+                match field {
+                    "machine_name" => "CrowdSec machine name is required",
+                    "lapi_url" => "CrowdSec Local API URL is required",
+                    "central_agent_url" => "Central CrowdSec agent URL is required",
+                    "central_agent_tls_fingerprint" => {
+                        "Central CrowdSec agent TLS fingerprint is required"
+                    }
+                    "preflight_token" => "CrowdSec Local API preflight token is required",
+                    _ => "Invalid CrowdSec machine installation request",
+                },
+            )
+        })
 }
 
 #[post("/crowdsec/uninstall")]

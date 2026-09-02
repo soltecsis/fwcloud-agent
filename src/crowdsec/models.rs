@@ -42,11 +42,26 @@ pub struct CrowdSecOperationRequest {
     pub operation: CrowdSecOperation,
 }
 
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecInstallMode {
+    #[default]
+    Standalone,
+    Machine,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecInstallRequest {
     #[serde(default)]
+    pub mode: CrowdSecInstallMode,
+    #[serde(default)]
     pub backend: CrowdSecFirewallBackend,
+    pub machine_name: Option<String>,
+    pub lapi_url: Option<String>,
+    pub central_agent_url: Option<String>,
+    pub central_agent_tls_fingerprint: Option<String>,
+    pub preflight_token: Option<String>,
     pub ws_id: Option<Uuid>,
 }
 
@@ -256,6 +271,14 @@ pub struct CrowdSecLapiPreflightRequest {
     pub central_agent_url: String,
     pub central_agent_tls_fingerprint: String,
     pub token: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecRemoteMachineInstallResponse {
+    pub machine_name: String,
+    pub lapi_url: String,
+    pub state: CrowdSecMachineState,
+    pub message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -556,7 +579,7 @@ mod tests {
     use super::{
         CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep, CrowdSecBouncerUninstallStep,
         CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecFirewallBackend,
-        CrowdSecInstallRequest, CrowdSecInstallStep, CrowdSecOperationRequest,
+        CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecInstallStep, CrowdSecOperationRequest,
         CrowdSecPackageStatus, CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse,
         CrowdSecUninstallStep,
     };
@@ -622,6 +645,18 @@ mod tests {
         let request = serde_json::from_str::<CrowdSecInstallRequest>(r#"{}"#).unwrap();
 
         assert_eq!(request.backend, CrowdSecFirewallBackend::Iptables);
+        assert_eq!(request.mode, CrowdSecInstallMode::Standalone);
+    }
+
+    #[test]
+    fn crowdsec_install_request_accepts_machine_mode() {
+        let request = serde_json::from_str::<CrowdSecInstallRequest>(
+            r#"{"mode":"machine","machine_name":"fwcloud-web-01"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(request.mode, CrowdSecInstallMode::Machine);
+        assert_eq!(request.machine_name.as_deref(), Some("fwcloud-web-01"));
     }
 
     #[test]
