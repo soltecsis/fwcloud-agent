@@ -315,6 +315,16 @@ pub async fn install_remote_machine(
         "CrowdSec service is stopped before machine configuration",
     );
 
+    emit_progress(
+        progress,
+        "Removing existing local CrowdSec Firewall Bouncer before machine configuration",
+    );
+    bouncers::uninstall_for_crowdsec_with_progress(progress).await?;
+    emit_success(
+        progress,
+        "Existing local CrowdSec Firewall Bouncer is removed before machine configuration",
+    );
+
     emit_progress(progress, "Installing CrowdSec packages and dependencies");
     packages::install_packages_with_progress(progress).await?;
     emit_success(progress, "CrowdSec packages and dependencies are ready");
