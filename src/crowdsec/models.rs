@@ -294,6 +294,26 @@ pub struct CrowdSecRemoteMachineActivationRequest {
     pub ws_id: Option<Uuid>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecRemoteMachineReauthenticationRequest {
+    pub machine_name: String,
+    pub lapi_url: String,
+    pub central_agent_url: String,
+    pub central_agent_tls_fingerprint: String,
+    pub preflight_token: String,
+    pub ws_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecRemoteMachineResumeRequest {
+    pub machine_name: String,
+    #[serde(default)]
+    pub local_remediation: bool,
+    pub ws_id: Option<Uuid>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CrowdSecRemoteMachineActivationResponse {
     pub machine_name: String,

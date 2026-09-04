@@ -434,6 +434,83 @@ pub async fn activate_remote_machine(
     })
 }
 
+pub async fn reauthenticate_remote_machine(
+    machine_name: &str,
+    lapi_url: &str,
+    central_agent_url: &str,
+    central_agent_tls_fingerprint: &str,
+    preflight_token: &str,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecRemoteMachineInstallResponse> {
+    validate_machine_name(machine_name)?;
+    require_crowdsec_installed().await?;
+    let lapi_url = remote_lapi_url(lapi_url)?;
+
+    emit_progress(progress, "Checking central CrowdSec agent connectivity");
+    preflight_remote_machine(
+        central_agent_url,
+        central_agent_tls_fingerprint,
+        preflight_token,
+    )
+    .await?;
+    emit_success(progress, "Central CrowdSec agent connectivity is confirmed");
+
+    emit_progress(progress, "Checking central CrowdSec Local API connectivity");
+    ensure_remote_lapi_reachable(&lapi_url).await?;
+    emit_success(progress, "Central CrowdSec Local API is reachable");
+
+    emit_progress(progress, "Stopping CrowdSec machine service before reauthentication");
+    disable_crowdsec_service().await?;
+    emit_success(progress, "CrowdSec machine service is stopped before reauthentication");
+    configure_remote_machine().await?;
+
+    emit_progress(progress, "Registering CrowdSec machine with the central Local API");
+    remove_machine_credentials().await?;
+    CrowdSecCommand::cscli(&[
+        "lapi",
+        "register",
+        "--machine",
+        machine_name,
+        "--url",
+        lapi_url.as_str(),
+    ])?
+    .execute()
+    .await?;
+    restrict_machine_credentials_permissions().await?;
+    emit_success(progress, "CrowdSec machine is registered and pending central validation");
+
+    Ok(CrowdSecRemoteMachineInstallResponse {
+        machine_name: machine_name.to_string(),
+        lapi_url: lapi_url.to_string(),
+        state: CrowdSecMachineState::Pending,
+        message: "CrowdSec machine is registered and awaits central validation".to_string(),
+    })
+}
+
+pub async fn resume_remote_machine(
+    machine_name: &str,
+    local_remediation: bool,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<CrowdSecRemoteMachineActivationResponse> {
+    validate_machine_name(machine_name)?;
+    require_crowdsec_installed().await?;
+
+    emit_progress(progress, "Checking central validation of the CrowdSec machine");
+    ensure_remote_machine_is_validated().await?;
+    emit_success(progress, "CrowdSec machine is validated by the central Local API");
+
+    emit_progress(progress, "Starting CrowdSec machine service");
+    enable_crowdsec_service().await?;
+    emit_success(progress, "CrowdSec machine service is enabled and running");
+
+    Ok(CrowdSecRemoteMachineActivationResponse {
+        machine_name: machine_name.to_string(),
+        state: CrowdSecMachineState::Validated,
+        local_remediation,
+        message: "CrowdSec machine is validated and running".to_string(),
+    })
+}
+
 async fn machine_by_name(name: &str) -> Result<CrowdSecMachine> {
     machines()
         .await?
