@@ -1054,13 +1054,9 @@ async fn uninstall_with_options(
                 "FWCloud CrowdSec IPSet boot service is removed",
                 "FWCloud CrowdSec IPSet boot service is already absent",
             );
-            emit_progress(progress, "Clearing FWCloud CrowdSec blacklist IPSet");
-            let cleared_ipsets = clear_blacklist_ipsets().await?;
-            emit_boolean_result(
+            emit_warning(
                 progress,
-                cleared_ipsets,
-                "FWCloud CrowdSec blacklist IPSet are cleared and preserved",
-                "FWCloud CrowdSec blacklist IPSet are already absent",
+                "FWCloud CrowdSec blacklist IPSet are preserved and are not managed by the agent",
             );
 
             (
@@ -1070,11 +1066,9 @@ async fn uninstall_with_options(
                     "FWCloud CrowdSec IPSet boot service is removed",
                     "FWCloud CrowdSec IPSet boot service is already absent",
                 ),
-                boolean_step(
+                skipped_step(
                     CrowdSecBouncerUninstallStep::BlacklistIpSets,
-                    cleared_ipsets,
-                    "FWCloud CrowdSec blacklist IPSet are cleared and preserved",
-                    "FWCloud CrowdSec blacklist IPSet are already absent",
+                    "FWCloud CrowdSec blacklist IPSet are preserved and are not managed by the agent",
                 ),
             )
         }
@@ -1757,27 +1751,6 @@ async fn remove_ipset_setup_service() -> Result<bool> {
     }
 
     Ok(service_exists || service_removed || drop_in_removed)
-}
-
-async fn clear_blacklist_ipsets() -> Result<bool> {
-    let mut cleared_ipsets = false;
-
-    for name in [IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST] {
-        if ipset_status(name).await?.exists {
-            let output = run_ipset(&["flush", name]).await?;
-
-            if !output.status.success() {
-                return Err(FwcError::crowdsec(
-                    FIREWALL_INTEGRATION_INVALID,
-                    "Unable to clear FWCloud CrowdSec blacklist IPSet",
-                ));
-            }
-
-            cleared_ipsets = true;
-        }
-    }
-
-    Ok(cleared_ipsets)
 }
 
 pub async fn ipset_status(name: &'static str) -> Result<CrowdSecIpSetStatus> {

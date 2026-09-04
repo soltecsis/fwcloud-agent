@@ -234,7 +234,7 @@ pub async fn uninstall_firewall_bouncer_packages_with_progress(
 
     for package in FIREWALL_BOUNCER_REMOVABLE_PACKAGES {
         if package_is_present(package_manager, package).await? {
-            remove_bouncer_package(package_manager, package, progress).await?;
+            purge_bouncer_package(package_manager, package, progress).await?;
             removed = true;
         }
     }
@@ -274,7 +274,7 @@ pub async fn uninstall_packages_with_progress(
 
     for package in CROWDSEC_REMOVABLE_PACKAGES {
         if package_is_present(package_manager, package).await? {
-            remove_package(package_manager, package, progress).await?;
+            purge_package(package_manager, package, progress).await?;
             removed_packages.push(*package);
         } else {
             absent_packages.push(*package);
@@ -327,9 +327,9 @@ fn package_manager_for_os_release(
 fn package_removal_message(removed_packages: &[&str], absent_packages: &[&str]) -> String {
     match (removed_packages.is_empty(), absent_packages.is_empty()) {
         (true, false) => "CrowdSec packages are already absent".to_string(),
-        (false, true) => format!("Removed CrowdSec packages: {}", removed_packages.join(", ")),
+        (false, true) => format!("Purged CrowdSec packages: {}", removed_packages.join(", ")),
         (false, false) => format!(
-            "Removed CrowdSec packages: {}; already absent: {}",
+            "Purged CrowdSec packages: {}; already absent: {}",
             removed_packages.join(", "),
             absent_packages.join(", ")
         ),
@@ -486,6 +486,20 @@ async fn remove_package(
     run_command(program, &arguments, progress).await
 }
 
+async fn purge_package(
+    package_manager: PackageManager,
+    package: &str,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<()> {
+    let (program, arguments): (&str, Vec<&str>) = match package_manager {
+        PackageManager::Apt => ("/usr/bin/apt-get", vec!["purge", "--yes", package]),
+        PackageManager::Dnf => ("/usr/bin/dnf", vec!["remove", "--assumeyes", package]),
+        PackageManager::Yum => ("/usr/bin/yum", vec!["remove", "--assumeyes", package]),
+    };
+
+    run_command(program, &arguments, progress).await
+}
+
 async fn remove_bouncer_package(
     package_manager: PackageManager,
     package: &str,
@@ -505,6 +519,26 @@ async fn remove_bouncer_package(
         PackageManager::Dnf | PackageManager::Yum => {
             remove_package(package_manager, package, progress).await
         }
+    }
+}
+
+async fn purge_bouncer_package(
+    package_manager: PackageManager,
+    package: &str,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<()> {
+    match package_manager {
+        PackageManager::Apt => {
+            let arguments = apt_bouncer_package_arguments("purge", package);
+            run_command_with_environment(
+                "/usr/bin/apt-get",
+                &arguments,
+                progress,
+                &[APT_NONINTERACTIVE_ENVIRONMENT],
+            )
+            .await
+        }
+        PackageManager::Dnf | PackageManager::Yum => purge_package(package_manager, package, progress).await,
     }
 }
 
@@ -742,7 +776,7 @@ mod tests {
         );
         assert_eq!(
             package_removal_message(&["crowdsec"], &["crowdsec-firewall-bouncer-iptables"]),
-            "Removed CrowdSec packages: crowdsec; already absent: crowdsec-firewall-bouncer-iptables"
+            "Purged CrowdSec packages: crowdsec; already absent: crowdsec-firewall-bouncer-iptables"
         );
     }
 
