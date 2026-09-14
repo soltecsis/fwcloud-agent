@@ -113,6 +113,30 @@ pub async fn configure_central(listen_uri: &str) -> Result<CrowdSecCentralLapiCo
     })
 }
 
+/// Restores an installed remote Machine as a standalone CrowdSec node. Remote
+/// credentials must never be reused against the local API: a new local client
+/// credential is generated before the engine is started.
+pub(crate) async fn restore_standalone_lapi() -> Result<()> {
+    require_crowdsec_installed().await?;
+    disable_crowdsec_service().await?;
+    let configuration = fs::read_to_string(CROWDSEC_CONFIG_PATH)
+        .await
+        .map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, "Unable to read CrowdSec Local API configuration"))?;
+    let updated_configuration = central_lapi_configuration(&configuration, "127.0.0.1:8080");
+    if updated_configuration != configuration {
+        fs::write(CROWDSEC_CONFIG_PATH, updated_configuration)
+            .await
+            .map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, "Unable to restore CrowdSec local Local API configuration"))?;
+    }
+    remove_machine_credentials().await?;
+    CrowdSecCommand::cscli(&["machines", "add", "--auto"])?
+        .execute()
+        .await?;
+    restrict_machine_credentials_permissions().await?;
+    enable_crowdsec_service().await?;
+    ensure_local_api_reachable().await
+}
+
 pub async fn machines() -> Result<CrowdSecMachinesResponse> {
     ensure_central_ready().await?;
 
@@ -652,7 +676,7 @@ async fn disable_crowdsec_service_if_present() -> Result<()> {
     disable_crowdsec_service().await
 }
 
-async fn restrict_machine_credentials_permissions() -> Result<()> {
+pub(crate) async fn restrict_machine_credentials_permissions() -> Result<()> {
     let output = Command::new("/usr/bin/chmod")
         .args(["0600", "/etc/crowdsec/local_api_credentials.yaml"])
         .output()
@@ -674,7 +698,7 @@ async fn restrict_machine_credentials_permissions() -> Result<()> {
     }
 }
 
-async fn remove_machine_credentials() -> Result<()> {
+pub(crate) async fn remove_machine_credentials() -> Result<()> {
     match fs::remove_file("/etc/crowdsec/local_api_credentials.yaml").await {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -685,7 +709,7 @@ async fn remove_machine_credentials() -> Result<()> {
     }
 }
 
-async fn configure_remote_machine() -> Result<()> {
+pub(crate) async fn configure_remote_machine() -> Result<()> {
     let configuration = fs::read_to_string(CROWDSEC_CONFIG_PATH)
         .await
         .map_err(|_| {
@@ -710,7 +734,7 @@ async fn configure_remote_machine() -> Result<()> {
     Ok(())
 }
 
-async fn configured_remote_lapi_url() -> Result<String> {
+pub(crate) async fn configured_remote_lapi_url() -> Result<String> {
     let credentials = fs::read_to_string("/etc/crowdsec/local_api_credentials.yaml")
         .await
         .map_err(|_| {
@@ -743,7 +767,7 @@ fn validate_listen_uri(listen_uri: &str) -> Result<()> {
     }
 }
 
-fn remote_lapi_url(value: &str) -> Result<Url> {
+pub(crate) fn remote_lapi_url(value: &str) -> Result<Url> {
     let url = Url::parse(value).map_err(|_| invalid_remote_lapi_error())?;
     if !matches!(url.scheme(), "http" | "https")
         || url.port().is_none()
@@ -760,7 +784,7 @@ fn remote_lapi_url(value: &str) -> Result<Url> {
     Ok(url)
 }
 
-async fn ensure_remote_lapi_reachable(url: &Url) -> Result<()> {
+pub(crate) async fn ensure_remote_lapi_reachable(url: &Url) -> Result<()> {
     let address = SocketAddr::new(
         url_ip_address(url).ok_or_else(invalid_remote_lapi_error)?,
         url.port().ok_or_else(invalid_remote_lapi_error)?,
@@ -801,7 +825,7 @@ fn emit_success(progress: Option<&CrowdSecProgress>, message: &str) {
     }
 }
 
-fn validate_machine_name(name: &str) -> Result<()> {
+pub(crate) fn validate_machine_name(name: &str) -> Result<()> {
     if name.is_empty()
         || name.len() > 128
         || !name.chars().all(|character| {

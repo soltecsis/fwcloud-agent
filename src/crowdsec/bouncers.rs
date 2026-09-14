@@ -973,6 +973,33 @@ pub async fn uninstall_with_progress(
     uninstall_with_options(progress, false).await
 }
 
+/// Removes only the local Firewall Bouncer remediation. The caller must
+/// remove its central LAPI registration separately, after it has established
+/// ownership of that registration. This deliberately preserves packages and
+/// FWCloud blacklist structures.
+pub async fn disable_local_remediation_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<()> {
+    let backend = configured_backend()
+        .await?
+        .ok_or_else(|| FwcError::crowdsec(BOUNCER_CONFLICT, "FWCloud CrowdSec Firewall Bouncer is not configured"))?;
+
+    emit_progress(progress, "Stopping local CrowdSec Firewall Bouncer remediation");
+    disable_systemd_service(FIREWALL_BOUNCER_SERVICE).await?;
+    remove_bouncer_package_transition_drop_in().await?;
+    remove_bouncer_configuration().await?;
+    remove_nftables_bouncer_drop_in().await?;
+    remove_managed_file(BOUNCER_PENDING_BACKEND_PATH).await?;
+    if backend == CrowdSecFirewallBackend::Iptables {
+        remove_ipset_setup_service().await?;
+    }
+    emit_success(
+        progress,
+        "Local CrowdSec Firewall Bouncer remediation is removed; central registration is unchanged",
+    );
+    Ok(())
+}
+
 pub async fn uninstall_for_crowdsec_with_progress(
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecBouncerUninstallResponse> {
@@ -1202,7 +1229,7 @@ async fn clear_pending_backend() -> Result<()> {
     }
 }
 
-async fn configured_backend() -> Result<Option<CrowdSecFirewallBackend>> {
+pub(crate) async fn configured_backend() -> Result<Option<CrowdSecFirewallBackend>> {
     match fs::read_to_string(BOUNCER_CONFIG_PATH).await {
         Ok(configuration) => Ok(configuration_backend(&configuration)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -1334,13 +1361,13 @@ fn pending_backend_from_contents(contents: &str) -> Option<CrowdSecFirewallBacke
     }
 }
 
-fn configuration_is_fwcloud_managed(configuration: &str) -> bool {
+pub(crate) fn configuration_is_fwcloud_managed(configuration: &str) -> bool {
     configuration
         .lines()
         .any(|line| line.trim() == FWCLOUD_BOUNCER_CONFIGURATION_MARKER)
 }
 
-fn configuration_is_set_only(configuration: &str, backend: CrowdSecFirewallBackend) -> bool {
+pub(crate) fn configuration_is_set_only(configuration: &str, backend: CrowdSecFirewallBackend) -> bool {
     let expected = match backend {
         CrowdSecFirewallBackend::Iptables => vec![
             ("mode", "ipset"),
@@ -2449,7 +2476,7 @@ mod tests {
         configuration_backend, configuration_is_fwcloud_managed, configuration_is_set_only,
         emit_backend_startup_configuration_cleanup, emit_boolean_result,
         emit_reconciliation_skipped, firewall_rules_contain_unmanaged_crowdsec, integration_status,
-        legacy_bouncer_ipset_names, legacy_bouncer_jump_chains,
+        legacy_bouncer_ipset_names, legacy_bouncer_jump_chains, local_api_enabled_in_configuration,
         nftables_blacklist_set_is_compatible, nftables_bouncer_service_action,
         nftables_set_only_configuration_contents, non_selected_firewall_backend,
         pending_backend_contents, pending_backend_from_contents, pending_policy_status,
