@@ -117,6 +117,11 @@ impl ResponseError for FwcError {
     fn status_code(&self) -> StatusCode {
         match self {
             FwcError::CrowdSec { code, .. }
+                if *code == crate::crowdsec::errors::TRANSITION_UNSUPPORTED =>
+            {
+                StatusCode::NOT_IMPLEMENTED
+            }
+            FwcError::CrowdSec { code, .. }
                 if *code == crate::crowdsec::errors::UNINSTALL_CONFIRMATION_REQUIRED =>
             {
                 StatusCode::BAD_REQUEST
@@ -125,6 +130,7 @@ impl ResponseError for FwcError {
                 if matches!(
                     *code,
                     crate::crowdsec::errors::INVALID_COMMAND
+                        | crate::crowdsec::errors::TRANSITION_INVALID
                         | crate::crowdsec::errors::COLLECTION_INVALID
                         | crate::crowdsec::errors::CONSOLE_INVALID_ENROLLMENT
                         | crate::crowdsec::errors::LAPI_INVALID

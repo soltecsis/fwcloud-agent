@@ -743,7 +743,7 @@ fn validate_listen_uri(listen_uri: &str) -> Result<()> {
     }
 }
 
-fn remote_lapi_url(value: &str) -> Result<Url> {
+pub(crate) fn remote_lapi_url(value: &str) -> Result<Url> {
     let url = Url::parse(value).map_err(|_| invalid_remote_lapi_error())?;
     if !matches!(url.scheme(), "http" | "https")
         || url.port().is_none()
@@ -760,7 +760,7 @@ fn remote_lapi_url(value: &str) -> Result<Url> {
     Ok(url)
 }
 
-async fn ensure_remote_lapi_reachable(url: &Url) -> Result<()> {
+pub(crate) async fn ensure_remote_lapi_reachable(url: &Url) -> Result<()> {
     let address = SocketAddr::new(
         url_ip_address(url).ok_or_else(invalid_remote_lapi_error)?,
         url.port().ok_or_else(invalid_remote_lapi_error)?,
@@ -801,7 +801,7 @@ fn emit_success(progress: Option<&CrowdSecProgress>, message: &str) {
     }
 }
 
-fn validate_machine_name(name: &str) -> Result<()> {
+pub(crate) fn validate_machine_name(name: &str) -> Result<()> {
     if name.is_empty()
         || name.len() > 128
         || !name.chars().all(|character| {

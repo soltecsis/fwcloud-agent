@@ -46,6 +46,50 @@ use crate::{
     errors::Result,
 };
 
+#[post("/crowdsec/transitions/preflight")]
+async fn preflight_crowdsec_transition(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<crate::crowdsec::transitions::TransitionPrepareRequest>,
+) -> Result<HttpResponse> {
+    let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
+    let _guard = cfg.mutex.crowdsec.lock().await;
+    match crate::crowdsec::transitions::preflight(&request, &progress).await {
+        Ok(response) => Ok(HttpResponse::Ok().json(response)),
+        Err(error) => {
+            progress.typed_message(CrowdSecProgressMessageType::Error, "CrowdSec transition preflight failed");
+            Err(error)
+        }
+    }
+}
+
+#[post("/crowdsec/transitions/prepare")]
+async fn prepare_crowdsec_transition(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<crate::crowdsec::transitions::TransitionPrepareRequest>,
+) -> Result<HttpResponse> {
+    let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
+    let _guard = cfg.mutex.crowdsec.lock().await;
+    crate::crowdsec::transitions::validate(&request)?;
+    progress.typed_message(CrowdSecProgressMessageType::Error, "CrowdSec transition preparation is not supported yet");
+    Err(crate::crowdsec::transitions::unsupported())
+}
+
+#[post("/crowdsec/transitions/activate")]
+async fn activate_crowdsec_transition(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<crate::crowdsec::transitions::TransitionActivateRequest>,
+) -> Result<HttpResponse> {
+    let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
+    let _guard = cfg.mutex.crowdsec.lock().await;
+    if request.transition_id.is_nil() {
+        return Err(crate::errors::FwcError::crowdsec(
+            crate::crowdsec::errors::TRANSITION_INVALID, "A transition identifier is required",
+        ));
+    }
+    progress.typed_message(CrowdSecProgressMessageType::Error, "CrowdSec transition activation is not supported yet");
+    Err(crate::crowdsec::transitions::unsupported())
+}
+
 #[get("/crowdsec/status")]
 async fn crowdsec_status(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
     let response = {

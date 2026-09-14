@@ -42,6 +42,9 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(ping::ping)
             .service(info::info)
             // CrowdSec.
+            .service(crowdsec::preflight_crowdsec_transition)
+            .service(crowdsec::prepare_crowdsec_transition)
+            .service(crowdsec::activate_crowdsec_transition)
             .service(crowdsec::crowdsec_status)
             .service(crowdsec::crowdsec_collections)
             .service(crowdsec::install_crowdsec_collection)

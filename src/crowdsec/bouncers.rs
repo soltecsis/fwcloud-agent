@@ -2449,7 +2449,7 @@ mod tests {
         configuration_backend, configuration_is_fwcloud_managed, configuration_is_set_only,
         emit_backend_startup_configuration_cleanup, emit_boolean_result,
         emit_reconciliation_skipped, firewall_rules_contain_unmanaged_crowdsec, integration_status,
-        legacy_bouncer_ipset_names, legacy_bouncer_jump_chains,
+        legacy_bouncer_ipset_names, legacy_bouncer_jump_chains, local_api_enabled_in_configuration,
         nftables_blacklist_set_is_compatible, nftables_bouncer_service_action,
         nftables_set_only_configuration_contents, non_selected_firewall_backend,
         pending_backend_contents, pending_backend_from_contents, pending_policy_status,

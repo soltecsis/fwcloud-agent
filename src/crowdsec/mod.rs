@@ -35,4 +35,5 @@ pub mod packages;
 pub mod progress;
 pub mod secrets;
 pub mod status;
+pub mod transitions;
 pub mod uninstall;
