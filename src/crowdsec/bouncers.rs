@@ -91,6 +91,7 @@ const IPTABLES_COMMAND: &str = "/usr/sbin/iptables";
 const IP6TABLES_COMMAND: &str = "/usr/sbin/ip6tables";
 const IPTABLES_SAVE_COMMAND: &str = "/usr/sbin/iptables-save";
 const IP6TABLES_SAVE_COMMAND: &str = "/usr/sbin/ip6tables-save";
+const CROWDSEC_CONFIG_PATH: &str = "/etc/crowdsec/config.yaml";
 const IPSET_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const IPSET_MAX_ELEMENTS: &str = "150000";
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
@@ -1053,13 +1054,9 @@ async fn uninstall_with_options(
                 "FWCloud CrowdSec IPSet boot service is removed",
                 "FWCloud CrowdSec IPSet boot service is already absent",
             );
-            emit_progress(progress, "Clearing FWCloud CrowdSec blacklist IPSet");
-            let cleared_ipsets = clear_blacklist_ipsets().await?;
-            emit_boolean_result(
+            emit_warning(
                 progress,
-                cleared_ipsets,
-                "FWCloud CrowdSec blacklist IPSet are cleared and preserved",
-                "FWCloud CrowdSec blacklist IPSet are already absent",
+                "FWCloud CrowdSec blacklist IPSet are preserved and are not managed by the agent",
             );
 
             (
@@ -1069,11 +1066,9 @@ async fn uninstall_with_options(
                     "FWCloud CrowdSec IPSet boot service is removed",
                     "FWCloud CrowdSec IPSet boot service is already absent",
                 ),
-                boolean_step(
+                skipped_step(
                     CrowdSecBouncerUninstallStep::BlacklistIpSets,
-                    cleared_ipsets,
-                    "FWCloud CrowdSec blacklist IPSet are cleared and preserved",
-                    "FWCloud CrowdSec blacklist IPSet are already absent",
+                    "FWCloud CrowdSec blacklist IPSet are preserved and are not managed by the agent",
                 ),
             )
         }
@@ -1677,6 +1672,13 @@ async fn remove_bouncer_registration() -> Result<bool> {
         return Ok(false);
     }
 
+    if !local_api_is_enabled().await? {
+        debug!(
+            "CrowdSec Local API is disabled; skipping local Firewall Bouncer registration removal"
+        );
+        return Ok(false);
+    }
+
     if !bouncer_is_registered().await? {
         return Ok(false);
     }
@@ -1686,6 +1688,44 @@ async fn remove_bouncer_registration() -> Result<bool> {
         .execute()
         .await?;
     Ok(true)
+}
+
+async fn local_api_is_enabled() -> Result<bool> {
+    match fs::read_to_string(CROWDSEC_CONFIG_PATH).await {
+        Ok(configuration) => Ok(local_api_enabled_in_configuration(&configuration)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to read CrowdSec Local API configuration",
+        )),
+    }
+}
+
+fn local_api_enabled_in_configuration(configuration: &str) -> bool {
+    let mut in_api_section = false;
+    let mut in_server_section = false;
+
+    for line in configuration.lines() {
+        let trimmed = line.trim();
+        if trimmed == "api:" {
+            in_api_section = true;
+            in_server_section = false;
+            continue;
+        }
+        if !line.starts_with(char::is_whitespace) {
+            in_api_section = false;
+            in_server_section = false;
+        }
+        if in_api_section && trimmed == "server:" {
+            in_server_section = true;
+            continue;
+        }
+        if in_server_section && trimmed.starts_with("enable:") {
+            return trimmed.trim_start_matches("enable:").trim() != "false";
+        }
+    }
+
+    true
 }
 
 async fn remove_ipset_setup_service() -> Result<bool> {
@@ -1711,27 +1751,6 @@ async fn remove_ipset_setup_service() -> Result<bool> {
     }
 
     Ok(service_exists || service_removed || drop_in_removed)
-}
-
-async fn clear_blacklist_ipsets() -> Result<bool> {
-    let mut cleared_ipsets = false;
-
-    for name in [IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST] {
-        if ipset_status(name).await?.exists {
-            let output = run_ipset(&["flush", name]).await?;
-
-            if !output.status.success() {
-                return Err(FwcError::crowdsec(
-                    FIREWALL_INTEGRATION_INVALID,
-                    "Unable to clear FWCloud CrowdSec blacklist IPSet",
-                ));
-            }
-
-            cleared_ipsets = true;
-        }
-    }
-
-    Ok(cleared_ipsets)
 }
 
 pub async fn ipset_status(name: &'static str) -> Result<CrowdSecIpSetStatus> {
@@ -2849,6 +2868,16 @@ mod tests {
         let absent = serde_json::from_str::<CrowdSecProgressMessage>(&data.lines[1]).unwrap();
         assert_eq!(completed.message_type, CrowdSecProgressMessageType::Success);
         assert_eq!(absent.message_type, CrowdSecProgressMessageType::Warning);
+    }
+
+    #[test]
+    fn detects_when_the_local_api_is_disabled_for_a_machine() {
+        assert!(!local_api_enabled_in_configuration(
+            "api:\n  server:\n    enable: false\n    listen_uri: 127.0.0.1:8080\n"
+        ));
+        assert!(local_api_enabled_in_configuration(
+            "api:\n  server:\n    enable: true\n    listen_uri: 127.0.0.1:8080\n"
+        ));
     }
 
     #[test]

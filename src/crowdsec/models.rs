@@ -151,6 +151,7 @@ pub struct CrowdSecStepResult<T> {
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecDataRetention {
     Preserve,
+    Purge,
 }
 
 #[derive(Debug, Serialize)]
@@ -290,6 +291,26 @@ pub struct CrowdSecRemoteMachineActivationRequest {
     #[serde(default)]
     pub backend: CrowdSecFirewallBackend,
     pub bouncer_api_key: Option<String>,
+    pub ws_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecRemoteMachineReauthenticationRequest {
+    pub machine_name: String,
+    pub lapi_url: String,
+    pub central_agent_url: String,
+    pub central_agent_tls_fingerprint: String,
+    pub preflight_token: String,
+    pub ws_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecRemoteMachineResumeRequest {
+    pub machine_name: String,
+    #[serde(default)]
+    pub local_remediation: bool,
     pub ws_id: Option<Uuid>,
 }
 
@@ -621,18 +642,18 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_response_preserves_data_and_reports_steps() {
+    fn uninstall_response_purges_data_and_reports_steps() {
         let response = CrowdSecUninstallResponse {
-            data_retention: CrowdSecDataRetention::Preserve,
+            data_retention: CrowdSecDataRetention::Purge,
             steps: vec![CrowdSecStepResult {
                 step: CrowdSecUninstallStep::Packages,
                 status: CrowdSecStepStatus::Completed,
-                message: "Removed CrowdSec packages: crowdsec".to_string(),
+                message: "Purged CrowdSec packages: crowdsec".to_string(),
             }],
         };
 
         let response = serde_json::to_value(response).unwrap();
-        assert_eq!(response["data_retention"], "preserve");
+        assert_eq!(response["data_retention"], "purge");
         assert_eq!(response["steps"][0]["step"], "packages");
         assert_eq!(response["steps"][0]["status"], "completed");
     }

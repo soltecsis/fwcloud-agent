@@ -23,7 +23,7 @@
 use std::time::Duration;
 
 use log::{debug, info};
-use tokio::{process::Command, time::timeout};
+use tokio::{fs, process::Command, time::timeout};
 
 use crate::{
     crowdsec::{
@@ -40,6 +40,9 @@ use crate::{
 };
 
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+const CROWDSEC_CONFIGURATION_DIRECTORY: &str = "/etc/crowdsec";
+const CROWDSEC_DATA_DIRECTORY: &str = "/var/lib/crowdsec";
+const FWCLOUD_CROWDSEC_STATE_DIRECTORY: &str = "./data/crowdsec";
 
 pub fn require_confirmation(confirm: bool) -> Result<()> {
     if confirm {
@@ -59,7 +62,7 @@ pub async fn uninstall() -> Result<CrowdSecUninstallResponse> {
 pub async fn uninstall_with_progress(
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecUninstallResponse> {
-    info!("Uninstalling CrowdSec services and packages while preserving data");
+    info!("Uninstalling CrowdSec services, packages and configuration");
 
     let mut steps = Vec::new();
     emit_progress(progress, "Disabling FWCloud CrowdSec Firewall Bouncer");
@@ -72,21 +75,43 @@ pub async fn uninstall_with_progress(
         disable_service(CrowdSecUninstallStep::CrowdSecService, "crowdsec.service").await?;
     emit_step_result(progress, &service_step);
     steps.push(service_step);
-    emit_progress(progress, "Removing CrowdSec packages while preserving data");
+    emit_progress(progress, "Purging CrowdSec packages and configuration");
     let packages_step = packages::uninstall_packages_with_progress(progress).await?;
     emit_step_result(progress, &packages_step);
     steps.push(packages_step);
+    remove_crowdsec_directories().await?;
 
-    info!("CrowdSec uninstall completed while preserving data");
+    info!("CrowdSec uninstall completed with configuration purged");
     emit_success(
         progress,
-        "CrowdSec uninstall completed while preserving data",
+        "CrowdSec uninstall completed with configuration purged",
     );
 
     Ok(CrowdSecUninstallResponse {
-        data_retention: CrowdSecDataRetention::Preserve,
+        data_retention: CrowdSecDataRetention::Purge,
         steps,
     })
+}
+
+async fn remove_crowdsec_directories() -> Result<()> {
+    for directory in [
+        CROWDSEC_CONFIGURATION_DIRECTORY,
+        CROWDSEC_DATA_DIRECTORY,
+        FWCLOUD_CROWDSEC_STATE_DIRECTORY,
+    ] {
+        match fs::remove_dir_all(directory).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {
+                return Err(FwcError::crowdsec(
+                    COMMAND_FAILED,
+                    "Unable to remove CrowdSec configuration data",
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn emit_progress(progress: Option<&CrowdSecProgress>, message: &str) {

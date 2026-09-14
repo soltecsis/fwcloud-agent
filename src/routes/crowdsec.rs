@@ -37,6 +37,7 @@ use crate::{
             CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
             CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecLapiPreflightRequest,
             CrowdSecLapiPreflightTokenRequest, CrowdSecRemoteMachineActivationRequest,
+            CrowdSecRemoteMachineReauthenticationRequest, CrowdSecRemoteMachineResumeRequest,
             CrowdSecUninstallRequest,
         },
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
@@ -421,6 +422,49 @@ async fn activate_crowdsec_remote_machine(
                 return Err(error);
             }
         }
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/lapi/machines/reauthenticate")]
+async fn reauthenticate_crowdsec_remote_machine(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecRemoteMachineReauthenticationRequest>,
+) -> Result<HttpResponse> {
+    let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
+    let response = {
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        lapi::reauthenticate_remote_machine(
+            &request.machine_name,
+            &request.lapi_url,
+            &request.central_agent_url,
+            &request.central_agent_tls_fingerprint,
+            &request.preflight_token,
+            Some(&progress),
+        )
+        .await?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/lapi/machines/resume")]
+async fn resume_crowdsec_remote_machine(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecRemoteMachineResumeRequest>,
+) -> Result<HttpResponse> {
+    let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
+    let response = {
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        lapi::resume_remote_machine(
+            &request.machine_name,
+            request.local_remediation,
+            Some(&progress),
+        )
+        .await?
     };
 
     Ok(HttpResponse::Ok().json(response))
