@@ -1229,7 +1229,7 @@ async fn clear_pending_backend() -> Result<()> {
     }
 }
 
-async fn configured_backend() -> Result<Option<CrowdSecFirewallBackend>> {
+pub(crate) async fn configured_backend() -> Result<Option<CrowdSecFirewallBackend>> {
     match fs::read_to_string(BOUNCER_CONFIG_PATH).await {
         Ok(configuration) => Ok(configuration_backend(&configuration)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),

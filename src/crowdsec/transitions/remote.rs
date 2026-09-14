@@ -283,6 +283,10 @@ pub async fn prepare(
     address::ensure_idle(data).await?;
     preflight(request, progress).await?;
     verify_source(&request.expected, request.backend).await?;
+    progress.typed_message(
+        CrowdSecProgressMessageType::Warning,
+        "Active CrowdSec decisions are not migrated to the new Local API",
+    );
     let backup = backup().await?;
     std::fs::create_dir_all(directory(data)).map_err(|_| failed())?;
     std::fs::set_permissions(directory(data), std::fs::Permissions::from_mode(0o700)).map_err(|_| failed())?;
@@ -298,6 +302,7 @@ pub async fn prepare(
     atomic_write(&backup_path(data, state.transition_id), &serde_json::to_vec(&backup).map_err(|_| failed())?)?;
     save(data, &state)?;
     progress.typed_message(CrowdSecProgressMessageType::Info, "Stopping CrowdSec services before remote Machine registration");
+    let mut registered = false;
     let result: Result<()> = async {
         service("disable --now", BOUNCER).await?;
         service("disable --now", ENGINE).await?;
@@ -309,11 +314,19 @@ pub async fn prepare(
             state.target.machine_name.as_deref().ok_or_else(conflict)?,
             "--url", lapi_url.as_str(),
         ])?.execute().await?;
+        registered = true;
         lapi::restrict_machine_credentials_permissions().await
     }.await;
     if let Err(error) = result {
-        progress.typed_message(CrowdSecProgressMessageType::Error, "CrowdSec Machine registration failed; restoring the previous role");
-        if restore(&backup).await.is_ok() {
+        if registered {
+            progress.typed_message(
+                CrowdSecProgressMessageType::Error,
+                "CrowdSec Machine registration may exist in the new central Local API; cleanup is required before recovery",
+            );
+            state.phase = TransitionPhase::RecoveryRequired;
+            save(data, &state)?;
+        } else if restore(&backup).await.is_ok() {
+            progress.typed_message(CrowdSecProgressMessageType::Error, "CrowdSec Machine registration failed; restoring the previous role");
             state.phase = TransitionPhase::RolledBack;
             save(data, &state)?;
             let _ = fs::remove_file(backup_path(data, state.transition_id)).await;

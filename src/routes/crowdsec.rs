@@ -158,18 +158,12 @@ async fn recover_crowdsec_transition(cfg: web::Data<Arc<Config>>, request: web::
         crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
             crate::crowdsec::transitions::remote::recover(cfg.data_dir, request.transition_id).await?,
         )),
-        crate::crowdsec::transitions::TransitionKind::Remediation => Err(
-            crate::errors::FwcError::crowdsec(
-                crate::crowdsec::errors::TRANSITION_RECOVERY_REQUIRED,
-                "Recover local Firewall Bouncer remediation through an explicit reconfiguration",
-            ),
-        ),
-        crate::crowdsec::transitions::TransitionKind::Standalone => Err(
-            crate::errors::FwcError::crowdsec(
-                crate::crowdsec::errors::TRANSITION_RECOVERY_REQUIRED,
-                "Recover standalone Local API configuration through an explicit reconfiguration",
-            ),
-        ),
+        crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::remediation::recover(cfg.data_dir, request.transition_id).await?,
+        )),
+        crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::standalone::recover(cfg.data_dir, request.transition_id).await?,
+        )),
     }
 }
 

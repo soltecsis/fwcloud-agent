@@ -301,4 +301,20 @@ mod tests {
         value.preflight = None;
         assert!(validate(&value).is_err());
     }
+
+    #[test]
+    fn accepts_remediation_removal_without_a_target_backend() {
+        let request: TransitionPrepareRequest = serde_json::from_value(serde_json::json!({
+            "transition_id": Uuid::new_v4(), "confirm": true,
+            "expected": {"mode":"machine", "local_remediation":true,
+                "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
+            "target": {"mode":"machine", "local_remediation":false,
+                "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
+            "authority_changed": false,
+            "preflight": {"central_agent_url":"https://192.0.2.1:33033",
+                "central_agent_tls_fingerprint":"a".repeat(64), "preflight_token":"secret"}
+        }))
+        .unwrap();
+        assert!(validate(&request).is_ok());
+    }
 }

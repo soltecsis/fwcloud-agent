@@ -124,6 +124,8 @@ pub async fn ensure_idle(data: &str) -> Result<()> {
         if matches!(
             phase,
             TransitionPhase::Activating
+                | TransitionPhase::Preparing
+                | TransitionPhase::AwaitingValidation
                 | TransitionPhase::RecoveryRequired
                 | TransitionPhase::ActivePendingFinalize
         ) {
@@ -547,6 +549,9 @@ mod tests {
             load(data, id).await.unwrap().phase,
             TransitionPhase::Activating
         );
+        state.phase = TransitionPhase::AwaitingValidation;
+        save(data, &state).unwrap();
+        assert!(ensure_idle(data).await.is_err());
         state.phase = TransitionPhase::ActivePendingFinalize;
         save(data, &state).unwrap();
         assert!(ensure_idle(data).await.is_err());

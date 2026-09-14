@@ -131,7 +131,12 @@ pub async fn prepare(
     }
     address::ensure_idle(data).await?;
     preflight(request, progress).await?;
-    remote::verify_source(&request.expected, request.backend).await?;
+    let source_backend = if request.expected.local_remediation {
+        Some(bouncers::configured_backend().await?.ok_or_else(conflict)?)
+    } else {
+        None
+    };
+    remote::verify_source(&request.expected, source_backend).await?;
     verify_remote_url(&request.expected).await?;
     if !request.expected.local_remediation
         && Path::new(bouncers::BOUNCER_CONFIG_PATH).exists()
@@ -214,6 +219,19 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<RemediationTransition> {
     Ok(state)
 }
 
+/// A prepared remediation transition has not changed local configuration and
+/// can be cancelled safely. Once removal has started, recreating the central
+/// Bouncer registration is an API-coordinated operation, so the agent keeps
+/// the failure visible instead of guessing a replacement key.
+pub async fn recover(data: &str, id: Uuid) -> Result<RemediationTransition> {
+    let mut state = load(data, id).await?;
+    if state.phase == TransitionPhase::RolledBack { return Ok(state); }
+    if state.phase != TransitionPhase::Prepared { return Err(recovery()); }
+    state.phase = TransitionPhase::RolledBack;
+    save(data, &state)?;
+    Ok(state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,5 +250,33 @@ mod tests {
             backend: Some(CrowdSecFirewallBackend::Iptables), preflight: None, ws_id: None,
         };
         assert!(supported(&request));
+    }
+
+    #[tokio::test]
+    async fn cancels_a_prepared_plan_without_storing_a_bouncer_key() {
+        let root = std::env::temp_dir().join(format!("fwcloud-remediation-test-{}", Uuid::new_v4()));
+        let data = root.to_str().unwrap();
+        std::fs::create_dir_all(directory(data)).unwrap();
+        let id = Uuid::new_v4();
+        let target = TransitionTarget {
+            mode: TransitionMode::Machine,
+            local_remediation: false,
+            machine_name: Some("fwcloud-node".into()),
+            lapi_url: Some("http://192.0.2.10:8080".into()),
+        };
+        let state = RemediationTransition {
+            kind: TransitionKind::Remediation,
+            transition_id: id,
+            phase: TransitionPhase::Prepared,
+            expected: target.clone(),
+            target,
+            backend: None,
+            changed: true,
+            central_registration_cleanup_required: true,
+        };
+        save(data, &state).unwrap();
+        assert!(!std::fs::read_to_string(state_path(data, id)).unwrap().contains("api_key"));
+        assert_eq!(recover(data, id).await.unwrap().phase, TransitionPhase::RolledBack);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

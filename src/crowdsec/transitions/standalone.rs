@@ -121,7 +121,18 @@ pub async fn prepare(
         return Ok(state);
     }
     address::ensure_idle(data).await?;
-    remote::verify_source(&request.expected, request.backend).await?;
+    let source_backend = if request.expected.local_remediation {
+        let backend = bouncers::configured_backend().await?.ok_or_else(conflict)?;
+        if Some(backend) != request.backend { return Err(conflict()); }
+        Some(backend)
+    } else {
+        None
+    };
+    remote::verify_source(&request.expected, source_backend).await?;
+    progress.typed_message(
+        CrowdSecProgressMessageType::Warning,
+        "Active CrowdSec decisions are not migrated to the restored local Local API",
+    );
     std::fs::create_dir_all(directory(data)).map_err(|_| failed())?;
     std::fs::set_permissions(directory(data), std::fs::Permissions::from_mode(0o700)).map_err(|_| failed())?;
     let state = StandaloneTransition {
@@ -187,6 +198,18 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<StandaloneTransition> {
     Ok(state)
 }
 
+/// Before activation no files or services have changed, so a prepared plan can
+/// be cancelled. After central registrations have been removed, restoring the
+/// former Machine is unsafe without API coordination and remains explicit.
+pub async fn recover(data: &str, id: Uuid) -> Result<StandaloneTransition> {
+    let mut state = load(data, id).await?;
+    if state.phase == TransitionPhase::RolledBack { return Ok(state); }
+    if state.phase != TransitionPhase::Prepared { return Err(recovery()); }
+    state.phase = TransitionPhase::RolledBack;
+    save(data, &state)?;
+    Ok(state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,5 +231,38 @@ mod tests {
             preflight: None, ws_id: None,
         };
         assert!(supported(&request));
+    }
+
+    #[tokio::test]
+    async fn cancels_a_prepared_plan_without_storing_machine_credentials() {
+        let root = std::env::temp_dir().join(format!("fwcloud-standalone-test-{}", Uuid::new_v4()));
+        let data = root.to_str().unwrap();
+        std::fs::create_dir_all(directory(data)).unwrap();
+        let id = Uuid::new_v4();
+        let state = StandaloneTransition {
+            kind: TransitionKind::Standalone,
+            transition_id: id,
+            phase: TransitionPhase::Prepared,
+            expected: TransitionTarget {
+                mode: TransitionMode::Machine,
+                local_remediation: false,
+                machine_name: Some("fwcloud-node".into()),
+                lapi_url: Some("http://192.0.2.10:8080".into()),
+            },
+            target: TransitionTarget {
+                mode: TransitionMode::Standalone,
+                local_remediation: true,
+                machine_name: None,
+                lapi_url: None,
+            },
+            backend: Some(CrowdSecFirewallBackend::Iptables),
+            changed: true,
+            central_machine_cleanup_required: true,
+            central_bouncer_cleanup_required: false,
+        };
+        save(data, &state).unwrap();
+        assert!(!std::fs::read_to_string(state_path(data, id)).unwrap().contains("password"));
+        assert_eq!(recover(data, id).await.unwrap().phase, TransitionPhase::RolledBack);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
