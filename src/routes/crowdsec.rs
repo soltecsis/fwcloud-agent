@@ -69,7 +69,15 @@ async fn prepare_crowdsec_transition(
 ) -> Result<HttpResponse> {
     let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
     let _guard = cfg.mutex.crowdsec.lock().await;
-    if request.authority_changed
+    if !request.authority_changed
+        && request.expected.mode == crate::crowdsec::transitions::TransitionMode::Machine
+        && request.target.mode == crate::crowdsec::transitions::TransitionMode::Machine
+        && request.expected.local_remediation != request.target.local_remediation
+    {
+        Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::remediation::prepare(cfg.data_dir, &request, &progress).await?,
+        ))
+    } else if request.authority_changed
         && request.target.mode == crate::crowdsec::transitions::TransitionMode::Machine
     {
         Ok(HttpResponse::Ok().json(
@@ -101,6 +109,9 @@ async fn activate_crowdsec_transition(
         crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
             crate::crowdsec::transitions::remote::activate(cfg.data_dir, &request, &progress).await?,
         )),
+        crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::remediation::activate(cfg.data_dir, &request, &progress).await?,
+        )),
     }
 }
 
@@ -113,6 +124,9 @@ async fn crowdsec_transition(cfg: web::Data<Arc<Config>>, id: web::Path<uuid::Uu
         )),
         crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
             crate::crowdsec::transitions::remote::load(cfg.data_dir, *id).await?,
+        )),
+        crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::remediation::load(cfg.data_dir, *id).await?,
         )),
     }
 }
@@ -132,6 +146,12 @@ async fn recover_crowdsec_transition(cfg: web::Data<Arc<Config>>, request: web::
         crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
             crate::crowdsec::transitions::remote::recover(cfg.data_dir, request.transition_id).await?,
         )),
+        crate::crowdsec::transitions::TransitionKind::Remediation => Err(
+            crate::errors::FwcError::crowdsec(
+                crate::crowdsec::errors::TRANSITION_RECOVERY_REQUIRED,
+                "Recover local Firewall Bouncer remediation through an explicit reconfiguration",
+            ),
+        ),
     }
 }
 
@@ -145,6 +165,9 @@ async fn finalize_crowdsec_transition(cfg: web::Data<Arc<Config>>, request: web:
         )),
         crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
             crate::crowdsec::transitions::remote::finalize(cfg.data_dir, request.transition_id).await?,
+        )),
+        crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::remediation::finalize(cfg.data_dir, request.transition_id).await?,
         )),
     }
 }

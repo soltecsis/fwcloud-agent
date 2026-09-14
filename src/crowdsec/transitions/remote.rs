@@ -179,7 +179,7 @@ async fn backup() -> Result<Backup> {
     })
 }
 
-fn root_scalar(contents: &str, key: &str) -> Result<String> {
+pub(crate) fn root_scalar(contents: &str, key: &str) -> Result<String> {
     let mut values = contents
         .lines()
         .filter_map(|line| line.strip_prefix(&format!("{key}:")));
@@ -194,7 +194,10 @@ fn root_scalar(contents: &str, key: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
-async fn verify_source(expected: &TransitionTarget, backend: Option<CrowdSecFirewallBackend>) -> Result<()> {
+pub(crate) async fn verify_source(
+    expected: &TransitionTarget,
+    backend: Option<CrowdSecFirewallBackend>,
+) -> Result<()> {
     let configuration = fs::read_to_string(CONFIG).await.map_err(|_| conflict())?;
     match expected.mode {
         TransitionMode::Standalone => {

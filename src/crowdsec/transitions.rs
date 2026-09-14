@@ -36,6 +36,7 @@ use crate::errors::{FwcError, Result};
 
 pub mod address;
 pub mod remote;
+pub mod remediation;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -102,6 +103,7 @@ pub enum TransitionPhase {
 pub enum TransitionKind {
     Address,
     Remote,
+    Remediation,
 }
 
 pub async fn kind(data_directory: &str, transition_id: Uuid) -> Result<TransitionKind> {

@@ -710,7 +710,7 @@ pub(crate) async fn configure_remote_machine() -> Result<()> {
     Ok(())
 }
 
-async fn configured_remote_lapi_url() -> Result<String> {
+pub(crate) async fn configured_remote_lapi_url() -> Result<String> {
     let credentials = fs::read_to_string("/etc/crowdsec/local_api_credentials.yaml")
         .await
         .map_err(|_| {

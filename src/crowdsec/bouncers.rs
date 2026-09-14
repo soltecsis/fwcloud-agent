@@ -973,6 +973,33 @@ pub async fn uninstall_with_progress(
     uninstall_with_options(progress, false).await
 }
 
+/// Removes only the local Firewall Bouncer remediation. The caller must
+/// remove its central LAPI registration separately, after it has established
+/// ownership of that registration. This deliberately preserves packages and
+/// FWCloud blacklist structures.
+pub async fn disable_local_remediation_with_progress(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<()> {
+    let backend = configured_backend()
+        .await?
+        .ok_or_else(|| FwcError::crowdsec(BOUNCER_CONFLICT, "FWCloud CrowdSec Firewall Bouncer is not configured"))?;
+
+    emit_progress(progress, "Stopping local CrowdSec Firewall Bouncer remediation");
+    disable_systemd_service(FIREWALL_BOUNCER_SERVICE).await?;
+    remove_bouncer_package_transition_drop_in().await?;
+    remove_bouncer_configuration().await?;
+    remove_nftables_bouncer_drop_in().await?;
+    remove_managed_file(BOUNCER_PENDING_BACKEND_PATH).await?;
+    if backend == CrowdSecFirewallBackend::Iptables {
+        remove_ipset_setup_service().await?;
+    }
+    emit_success(
+        progress,
+        "Local CrowdSec Firewall Bouncer remediation is removed; central registration is unchanged",
+    );
+    Ok(())
+}
+
 pub async fn uninstall_for_crowdsec_with_progress(
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecBouncerUninstallResponse> {
