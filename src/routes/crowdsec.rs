@@ -83,6 +83,12 @@ async fn prepare_crowdsec_transition(
         Ok(HttpResponse::Ok().json(
             crate::crowdsec::transitions::remote::prepare(cfg.data_dir, &request, &progress).await?,
         ))
+    } else if request.authority_changed
+        && request.target.mode == crate::crowdsec::transitions::TransitionMode::Standalone
+    {
+        Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::standalone::prepare(cfg.data_dir, &request, &progress).await?,
+        ))
     } else {
         Ok(HttpResponse::Ok().json(
             crate::crowdsec::transitions::address::prepare(cfg.data_dir, &request, &progress).await?,
@@ -112,6 +118,9 @@ async fn activate_crowdsec_transition(
         crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
             crate::crowdsec::transitions::remediation::activate(cfg.data_dir, &request, &progress).await?,
         )),
+        crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::standalone::activate(cfg.data_dir, &request, &progress).await?,
+        )),
     }
 }
 
@@ -127,6 +136,9 @@ async fn crowdsec_transition(cfg: web::Data<Arc<Config>>, id: web::Path<uuid::Uu
         )),
         crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
             crate::crowdsec::transitions::remediation::load(cfg.data_dir, *id).await?,
+        )),
+        crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::standalone::load(cfg.data_dir, *id).await?,
         )),
     }
 }
@@ -152,6 +164,12 @@ async fn recover_crowdsec_transition(cfg: web::Data<Arc<Config>>, request: web::
                 "Recover local Firewall Bouncer remediation through an explicit reconfiguration",
             ),
         ),
+        crate::crowdsec::transitions::TransitionKind::Standalone => Err(
+            crate::errors::FwcError::crowdsec(
+                crate::crowdsec::errors::TRANSITION_RECOVERY_REQUIRED,
+                "Recover standalone Local API configuration through an explicit reconfiguration",
+            ),
+        ),
     }
 }
 
@@ -168,6 +186,9 @@ async fn finalize_crowdsec_transition(cfg: web::Data<Arc<Config>>, request: web:
         )),
         crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
             crate::crowdsec::transitions::remediation::finalize(cfg.data_dir, request.transition_id).await?,
+        )),
+        crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::standalone::finalize(cfg.data_dir, request.transition_id).await?,
         )),
     }
 }

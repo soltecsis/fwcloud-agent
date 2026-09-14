@@ -113,6 +113,30 @@ pub async fn configure_central(listen_uri: &str) -> Result<CrowdSecCentralLapiCo
     })
 }
 
+/// Restores an installed remote Machine as a standalone CrowdSec node. Remote
+/// credentials must never be reused against the local API: a new local client
+/// credential is generated before the engine is started.
+pub(crate) async fn restore_standalone_lapi() -> Result<()> {
+    require_crowdsec_installed().await?;
+    disable_crowdsec_service().await?;
+    let configuration = fs::read_to_string(CROWDSEC_CONFIG_PATH)
+        .await
+        .map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, "Unable to read CrowdSec Local API configuration"))?;
+    let updated_configuration = central_lapi_configuration(&configuration, "127.0.0.1:8080");
+    if updated_configuration != configuration {
+        fs::write(CROWDSEC_CONFIG_PATH, updated_configuration)
+            .await
+            .map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, "Unable to restore CrowdSec local Local API configuration"))?;
+    }
+    remove_machine_credentials().await?;
+    CrowdSecCommand::cscli(&["machines", "add", "--auto"])?
+        .execute()
+        .await?;
+    restrict_machine_credentials_permissions().await?;
+    enable_crowdsec_service().await?;
+    ensure_local_api_reachable().await
+}
+
 pub async fn machines() -> Result<CrowdSecMachinesResponse> {
     ensure_central_ready().await?;
 
