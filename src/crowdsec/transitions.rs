@@ -21,6 +21,8 @@
 */
 
 use serde::{Deserialize, Serialize};
+use std::path::Path;
+use tokio::fs;
 use uuid::Uuid;
 
 use super::{
@@ -33,6 +35,7 @@ use super::{
 use crate::errors::{FwcError, Result};
 
 pub mod address;
+pub mod remote;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -92,6 +95,32 @@ pub enum TransitionPhase {
     Completed,
     RecoveryRequired,
     RolledBack,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransitionKind {
+    Address,
+    Remote,
+}
+
+pub async fn kind(data_directory: &str, transition_id: Uuid) -> Result<TransitionKind> {
+    let path = Path::new(data_directory)
+        .join("crowdsec/transitions")
+        .join(format!("{transition_id}.json"));
+    let state: serde_json::Value = serde_json::from_slice(
+        &fs::read(path)
+            .await
+            .map_err(|_| FwcError::crowdsec(TRANSITION_UNSUPPORTED, "CrowdSec transition is not found"))?,
+    )
+    .map_err(|_| FwcError::crowdsec(TRANSITION_INVALID, "CrowdSec transition state is invalid"))?;
+    serde_json::from_value(
+        state
+            .get("kind")
+            .cloned()
+            .ok_or_else(|| FwcError::crowdsec(TRANSITION_INVALID, "CrowdSec transition state is invalid"))?,
+    )
+    .map_err(|_| FwcError::crowdsec(TRANSITION_INVALID, "CrowdSec transition state is invalid"))
 }
 
 #[derive(Debug, Serialize)]

@@ -22,6 +22,7 @@ const BOUNCER: &str = "crowdsec-firewall-bouncer.service";
 
 #[derive(Deserialize, Serialize)]
 pub struct AddressTransition {
+    pub kind: TransitionKind,
     pub transition_id: Uuid,
     pub phase: TransitionPhase,
     pub expected: TransitionTarget,
@@ -113,11 +114,15 @@ pub async fn ensure_idle(data: &str) -> Result<()> {
         if entry.path().extension().and_then(|x| x.to_str()) != Some("json") {
             continue;
         }
-        let state: AddressTransition =
+        let state: serde_json::Value =
             serde_json::from_slice(&fs::read(entry.path()).await.map_err(|_| recovery())?)
                 .map_err(|_| recovery())?;
+        let phase: TransitionPhase = serde_json::from_value(
+            state.get("phase").cloned().ok_or_else(recovery)?,
+        )
+        .map_err(|_| recovery())?;
         if matches!(
-            state.phase,
+            phase,
             TransitionPhase::Activating
                 | TransitionPhase::RecoveryRequired
                 | TransitionPhase::ActivePendingFinalize
@@ -319,6 +324,7 @@ pub async fn prepare(
     std::fs::set_permissions(directory(data), std::fs::Permissions::from_mode(0o700))
         .map_err(|_| failed())?;
     let state = AddressTransition {
+        kind: TransitionKind::Address,
         transition_id: request.transition_id,
         phase: if changed {
             TransitionPhase::Prepared
@@ -516,6 +522,7 @@ mod tests {
             local_remediation: false,
         };
         let mut state = AddressTransition {
+            kind: TransitionKind::Address,
             transition_id: id,
             phase: TransitionPhase::Prepared,
             expected: target.clone(),

@@ -652,7 +652,7 @@ async fn disable_crowdsec_service_if_present() -> Result<()> {
     disable_crowdsec_service().await
 }
 
-async fn restrict_machine_credentials_permissions() -> Result<()> {
+pub(crate) async fn restrict_machine_credentials_permissions() -> Result<()> {
     let output = Command::new("/usr/bin/chmod")
         .args(["0600", "/etc/crowdsec/local_api_credentials.yaml"])
         .output()
@@ -674,7 +674,7 @@ async fn restrict_machine_credentials_permissions() -> Result<()> {
     }
 }
 
-async fn remove_machine_credentials() -> Result<()> {
+pub(crate) async fn remove_machine_credentials() -> Result<()> {
     match fs::remove_file("/etc/crowdsec/local_api_credentials.yaml").await {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -685,7 +685,7 @@ async fn remove_machine_credentials() -> Result<()> {
     }
 }
 
-async fn configure_remote_machine() -> Result<()> {
+pub(crate) async fn configure_remote_machine() -> Result<()> {
     let configuration = fs::read_to_string(CROWDSEC_CONFIG_PATH)
         .await
         .map_err(|_| {

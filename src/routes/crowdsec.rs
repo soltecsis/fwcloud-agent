@@ -69,8 +69,17 @@ async fn prepare_crowdsec_transition(
 ) -> Result<HttpResponse> {
     let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
     let _guard = cfg.mutex.crowdsec.lock().await;
-    let result = crate::crowdsec::transitions::address::prepare(cfg.data_dir, &request, &progress).await?;
-    Ok(HttpResponse::Ok().json(result))
+    if request.authority_changed
+        && request.target.mode == crate::crowdsec::transitions::TransitionMode::Machine
+    {
+        Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::remote::prepare(cfg.data_dir, &request, &progress).await?,
+        ))
+    } else {
+        Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::address::prepare(cfg.data_dir, &request, &progress).await?,
+        ))
+    }
 }
 
 #[post("/crowdsec/transitions/activate")]
@@ -85,14 +94,27 @@ async fn activate_crowdsec_transition(
             crate::crowdsec::errors::TRANSITION_INVALID, "A transition identifier is required",
         ));
     }
-    let result = crate::crowdsec::transitions::address::activate(cfg.data_dir, &request, &progress).await?;
-    Ok(HttpResponse::Ok().json(result))
+    match crate::crowdsec::transitions::kind(cfg.data_dir, request.transition_id).await? {
+        crate::crowdsec::transitions::TransitionKind::Address => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::address::activate(cfg.data_dir, &request, &progress).await?,
+        )),
+        crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::remote::activate(cfg.data_dir, &request, &progress).await?,
+        )),
+    }
 }
 
 #[get("/crowdsec/transitions/{id}")]
 async fn crowdsec_transition(cfg: web::Data<Arc<Config>>, id: web::Path<uuid::Uuid>) -> Result<HttpResponse> {
     let _guard = cfg.mutex.crowdsec.lock().await;
-    Ok(HttpResponse::Ok().json(crate::crowdsec::transitions::address::load(cfg.data_dir, *id).await?))
+    match crate::crowdsec::transitions::kind(cfg.data_dir, *id).await? {
+        crate::crowdsec::transitions::TransitionKind::Address => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::address::load(cfg.data_dir, *id).await?,
+        )),
+        crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::remote::load(cfg.data_dir, *id).await?,
+        )),
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -103,14 +125,28 @@ struct TransitionConfirmation { transition_id: uuid::Uuid, confirm: bool }
 async fn recover_crowdsec_transition(cfg: web::Data<Arc<Config>>, request: web::Json<TransitionConfirmation>) -> Result<HttpResponse> {
     let _guard = cfg.mutex.crowdsec.lock().await;
     if !request.confirm { return Err(crate::errors::FwcError::crowdsec(crate::crowdsec::errors::TRANSITION_INVALID, "Explicit confirmation is required")); }
-    Ok(HttpResponse::Ok().json(crate::crowdsec::transitions::address::recover(cfg.data_dir, request.transition_id).await?))
+    match crate::crowdsec::transitions::kind(cfg.data_dir, request.transition_id).await? {
+        crate::crowdsec::transitions::TransitionKind::Address => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::address::recover(cfg.data_dir, request.transition_id).await?,
+        )),
+        crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::remote::recover(cfg.data_dir, request.transition_id).await?,
+        )),
+    }
 }
 
 #[post("/crowdsec/transitions/finalize")]
 async fn finalize_crowdsec_transition(cfg: web::Data<Arc<Config>>, request: web::Json<TransitionConfirmation>) -> Result<HttpResponse> {
     let _guard = cfg.mutex.crowdsec.lock().await;
     if !request.confirm { return Err(crate::errors::FwcError::crowdsec(crate::crowdsec::errors::TRANSITION_INVALID, "Explicit confirmation is required")); }
-    Ok(HttpResponse::Ok().json(crate::crowdsec::transitions::address::finalize(cfg.data_dir, request.transition_id).await?))
+    match crate::crowdsec::transitions::kind(cfg.data_dir, request.transition_id).await? {
+        crate::crowdsec::transitions::TransitionKind::Address => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::address::finalize(cfg.data_dir, request.transition_id).await?,
+        )),
+        crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::remote::finalize(cfg.data_dir, request.transition_id).await?,
+        )),
+    }
 }
 
 #[get("/crowdsec/status")]
