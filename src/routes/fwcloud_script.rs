@@ -47,6 +47,10 @@ async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Resu
         let _mutex_data = mutex.lock().await;
         debug!("Script mutex locked (thread id: {})", thread_id::get());
 
+        let crowdsec_mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _crowdsec_mutex_data = crowdsec_mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
+
         let mut files = HttpFiles::new(cfg.tmp_dir, false);
         res = files.fwcloud_script(payload, &cfg).await?;
         let _crowdsec_progress = CrowdSecProgress::from_request(&cfg, files.websocket_id())?;
@@ -56,8 +60,6 @@ async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Resu
                 "Reconciling CrowdSec Firewall Bouncer after FWCloud policy deployment ({:?})",
                 backend
             );
-            let crowdsec_mutex = Arc::clone(&cfg.mutex.crowdsec);
-            let _crowdsec_mutex_data = crowdsec_mutex.lock().await;
             if let Err(error) =
                 bouncers::reconcile_after_policy_deployment(backend, Some(&_crowdsec_progress))
                     .await

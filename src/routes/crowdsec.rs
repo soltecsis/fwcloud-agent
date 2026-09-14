@@ -69,9 +69,8 @@ async fn prepare_crowdsec_transition(
 ) -> Result<HttpResponse> {
     let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
     let _guard = cfg.mutex.crowdsec.lock().await;
-    crate::crowdsec::transitions::validate(&request)?;
-    progress.typed_message(CrowdSecProgressMessageType::Error, "CrowdSec transition preparation is not supported yet");
-    Err(crate::crowdsec::transitions::unsupported())
+    let result = crate::crowdsec::transitions::address::prepare(cfg.data_dir, &request, &progress).await?;
+    Ok(HttpResponse::Ok().json(result))
 }
 
 #[post("/crowdsec/transitions/activate")]
@@ -86,8 +85,32 @@ async fn activate_crowdsec_transition(
             crate::crowdsec::errors::TRANSITION_INVALID, "A transition identifier is required",
         ));
     }
-    progress.typed_message(CrowdSecProgressMessageType::Error, "CrowdSec transition activation is not supported yet");
-    Err(crate::crowdsec::transitions::unsupported())
+    let result = crate::crowdsec::transitions::address::activate(cfg.data_dir, &request, &progress).await?;
+    Ok(HttpResponse::Ok().json(result))
+}
+
+#[get("/crowdsec/transitions/{id}")]
+async fn crowdsec_transition(cfg: web::Data<Arc<Config>>, id: web::Path<uuid::Uuid>) -> Result<HttpResponse> {
+    let _guard = cfg.mutex.crowdsec.lock().await;
+    Ok(HttpResponse::Ok().json(crate::crowdsec::transitions::address::load(cfg.data_dir, *id).await?))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TransitionConfirmation { transition_id: uuid::Uuid, confirm: bool }
+
+#[post("/crowdsec/transitions/recover")]
+async fn recover_crowdsec_transition(cfg: web::Data<Arc<Config>>, request: web::Json<TransitionConfirmation>) -> Result<HttpResponse> {
+    let _guard = cfg.mutex.crowdsec.lock().await;
+    if !request.confirm { return Err(crate::errors::FwcError::crowdsec(crate::crowdsec::errors::TRANSITION_INVALID, "Explicit confirmation is required")); }
+    Ok(HttpResponse::Ok().json(crate::crowdsec::transitions::address::recover(cfg.data_dir, request.transition_id).await?))
+}
+
+#[post("/crowdsec/transitions/finalize")]
+async fn finalize_crowdsec_transition(cfg: web::Data<Arc<Config>>, request: web::Json<TransitionConfirmation>) -> Result<HttpResponse> {
+    let _guard = cfg.mutex.crowdsec.lock().await;
+    if !request.confirm { return Err(crate::errors::FwcError::crowdsec(crate::crowdsec::errors::TRANSITION_INVALID, "Explicit confirmation is required")); }
+    Ok(HttpResponse::Ok().json(crate::crowdsec::transitions::address::finalize(cfg.data_dir, request.transition_id).await?))
 }
 
 #[get("/crowdsec/status")]
@@ -136,6 +159,7 @@ async fn install_crowdsec_collection(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let install_result = collections::install(&request.name).await;
@@ -156,6 +180,7 @@ async fn remove_crowdsec_collection(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let remove_result = collections::remove(&request.name).await;
@@ -176,6 +201,7 @@ async fn update_crowdsec_collections(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let update_result = collections::update().await;
@@ -213,6 +239,7 @@ async fn enroll_crowdsec_console(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let enroll_result = console::enroll(
@@ -259,6 +286,7 @@ async fn delete_crowdsec_decision(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let delete_result = decisions::delete(&id).await;
@@ -281,6 +309,7 @@ async fn flush_crowdsec_decisions(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let flush_result = decisions::flush().await;
@@ -338,6 +367,7 @@ async fn configure_crowdsec_central_lapi(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let configure_result = lapi::configure_central(&request.listen_uri).await;
@@ -358,6 +388,7 @@ async fn issue_crowdsec_lapi_preflight_token(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         lapi::ensure_central_ready().await?;
@@ -384,6 +415,7 @@ async fn preflight_crowdsec_lapi(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let preflight_result = lapi::preflight_remote_machine(
@@ -426,6 +458,7 @@ async fn validate_crowdsec_lapi_machine(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let validate_result = lapi::validate_machine(&name).await;
@@ -447,6 +480,7 @@ async fn activate_crowdsec_remote_machine(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let activation_result = lapi::activate_remote_machine(
@@ -480,6 +514,7 @@ async fn reauthenticate_crowdsec_remote_machine(
     let response = {
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         lapi::reauthenticate_remote_machine(
             &request.machine_name,
             &request.lapi_url,
@@ -503,6 +538,7 @@ async fn resume_crowdsec_remote_machine(
     let response = {
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         lapi::resume_remote_machine(
             &request.machine_name,
             request.local_remediation,
@@ -523,6 +559,7 @@ async fn remove_crowdsec_lapi_machine(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let remove_result = lapi::remove_machine(&name).await;
@@ -543,6 +580,7 @@ async fn register_crowdsec_bouncer(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let register_result = bouncers::register(&request.name).await;
@@ -563,6 +601,7 @@ async fn remove_crowdsec_bouncer(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let remove_result = bouncers::remove(&name).await;
@@ -584,6 +623,7 @@ async fn install_crowdsec(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let response = match request.mode {
@@ -665,6 +705,7 @@ async fn uninstall_crowdsec(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let uninstall_result = uninstall::uninstall_with_progress(Some(&progress)).await;
@@ -693,6 +734,7 @@ async fn install_crowdsec_bouncer(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let install_result =
@@ -736,6 +778,7 @@ async fn uninstall_crowdsec_bouncer(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let uninstall_result = bouncers::uninstall_with_progress(Some(&progress)).await;

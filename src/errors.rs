@@ -143,6 +143,8 @@ impl ResponseError for FwcError {
                 if matches!(
                     *code,
                     crate::crowdsec::errors::COLLECTION_TAINTED
+                        | crate::crowdsec::errors::TRANSITION_CONFLICT
+                        | crate::crowdsec::errors::TRANSITION_RECOVERY_REQUIRED
                         | crate::crowdsec::errors::COLLECTION_CONFLICT
                         | crate::crowdsec::errors::MACHINE_CONFLICT
                         | crate::crowdsec::errors::MACHINE_REAUTHENTICATION_REQUIRED

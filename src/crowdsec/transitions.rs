@@ -32,14 +32,16 @@ use super::{
 };
 use crate::errors::{FwcError, Result};
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub mod address;
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransitionMode {
     Standalone,
     Machine,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct TransitionTarget {
     pub mode: TransitionMode,

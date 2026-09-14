@@ -1334,13 +1334,13 @@ fn pending_backend_from_contents(contents: &str) -> Option<CrowdSecFirewallBacke
     }
 }
 
-fn configuration_is_fwcloud_managed(configuration: &str) -> bool {
+pub(crate) fn configuration_is_fwcloud_managed(configuration: &str) -> bool {
     configuration
         .lines()
         .any(|line| line.trim() == FWCLOUD_BOUNCER_CONFIGURATION_MARKER)
 }
 
-fn configuration_is_set_only(configuration: &str, backend: CrowdSecFirewallBackend) -> bool {
+pub(crate) fn configuration_is_set_only(configuration: &str, backend: CrowdSecFirewallBackend) -> bool {
     let expected = match backend {
         CrowdSecFirewallBackend::Iptables => vec![
             ("mode", "ipset"),
