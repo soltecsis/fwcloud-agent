@@ -261,7 +261,6 @@ async fn restore(backup: &Backup) -> Result<()> {
 fn is_supported(request: &TransitionPrepareRequest) -> bool {
     request.authority_changed
         && request.target.mode == TransitionMode::Machine
-        && request.expected.local_remediation == request.target.local_remediation
 }
 
 pub async fn prepare(
@@ -282,7 +281,12 @@ pub async fn prepare(
     }
     address::ensure_idle(data).await?;
     preflight(request, progress).await?;
-    verify_source(&request.expected, request.backend).await?;
+    let source_backend = if request.expected.local_remediation {
+        Some(bouncers::configured_backend().await?.ok_or_else(conflict)?)
+    } else {
+        None
+    };
+    verify_source(&request.expected, source_backend).await?;
     progress.typed_message(
         CrowdSecProgressMessageType::Warning,
         "Active CrowdSec decisions are not migrated to the new Local API",
@@ -306,6 +310,9 @@ pub async fn prepare(
     let result: Result<()> = async {
         service("disable --now", BOUNCER).await?;
         service("disable --now", ENGINE).await?;
+        if request.expected.local_remediation && !state.target.local_remediation {
+            bouncers::disable_local_remediation_with_progress(Some(progress)).await?;
+        }
         lapi::configure_remote_machine().await?;
         lapi::remove_machine_credentials().await?;
         let lapi_url = lapi::remote_lapi_url(state.target.lapi_url.as_deref().ok_or_else(conflict)?)?;
@@ -406,7 +413,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_prepares_authority_changes_to_a_machine() {
+    fn prepares_authority_changes_to_a_machine_with_or_without_remediation() {
         let target = TransitionTarget {
             mode: TransitionMode::Machine,
             local_remediation: false,
@@ -429,6 +436,27 @@ mod tests {
             ws_id: None,
         };
         assert!(is_supported(&request));
+        let without_remediation = TransitionPrepareRequest {
+            transition_id: Uuid::new_v4(),
+            confirm: true,
+            expected: TransitionTarget {
+                mode: TransitionMode::Standalone,
+                local_remediation: true,
+                machine_name: None,
+                lapi_url: None,
+            },
+            target: TransitionTarget {
+                mode: TransitionMode::Machine,
+                local_remediation: false,
+                machine_name: Some("fwcloud-node".to_string()),
+                lapi_url: Some("http://192.0.2.10:8080".to_string()),
+            },
+            authority_changed: true,
+            backend: None,
+            preflight: None,
+            ws_id: None,
+        };
+        assert!(is_supported(&without_remediation));
         let mut unchanged = request;
         unchanged.authority_changed = false;
         assert!(!is_supported(&unchanged));
