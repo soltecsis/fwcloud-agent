@@ -216,17 +216,7 @@ pub async fn preflight(
             "CrowdSec is not installed",
         ));
     }
-    if let Some(remote) = &request.preflight {
-        progress.typed_message(
-            CrowdSecProgressMessageType::Info,
-            "Checking central CrowdSec agent connectivity",
-        );
-        lapi::preflight_remote_machine(
-            &remote.central_agent_url,
-            &remote.central_agent_tls_fingerprint,
-            &remote.preflight_token,
-        )
-        .await?;
+    if request.target.mode == TransitionMode::Machine {
         progress.typed_message(
             CrowdSecProgressMessageType::Info,
             "Checking central CrowdSec Local API connectivity",
@@ -247,7 +237,7 @@ pub async fn preflight(
     Ok(TransitionPreflightResponse {
         transition_id: request.transition_id,
         phase: TransitionPhase::Checking,
-        connectivity_checked: request.preflight.is_some(),
+        connectivity_checked: request.target.mode == TransitionMode::Machine,
         message: "Preflight completed; transition has not been prepared",
     })
 }

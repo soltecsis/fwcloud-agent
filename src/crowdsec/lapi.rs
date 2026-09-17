@@ -309,22 +309,13 @@ pub async fn preflight_remote_machine(
 pub async fn install_remote_machine(
     machine_name: &str,
     lapi_url: &str,
-    central_agent_url: &str,
-    central_agent_tls_fingerprint: &str,
-    preflight_token: &str,
+    _central_agent_url: &str,
+    _central_agent_tls_fingerprint: &str,
+    _preflight_token: &str,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecRemoteMachineInstallResponse> {
     validate_machine_name(machine_name)?;
     let lapi_url = remote_lapi_url(lapi_url)?;
-
-    emit_progress(progress, "Checking central CrowdSec agent connectivity");
-    preflight_remote_machine(
-        central_agent_url,
-        central_agent_tls_fingerprint,
-        preflight_token,
-    )
-    .await?;
-    emit_success(progress, "Central CrowdSec agent connectivity is confirmed");
 
     emit_progress(progress, "Checking central CrowdSec Local API connectivity");
     ensure_remote_lapi_reachable(&lapi_url).await?;
@@ -462,23 +453,14 @@ pub async fn activate_remote_machine(
 pub async fn reauthenticate_remote_machine(
     machine_name: &str,
     lapi_url: &str,
-    central_agent_url: &str,
-    central_agent_tls_fingerprint: &str,
-    preflight_token: &str,
+    _central_agent_url: &str,
+    _central_agent_tls_fingerprint: &str,
+    _preflight_token: &str,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecRemoteMachineInstallResponse> {
     validate_machine_name(machine_name)?;
     require_crowdsec_installed().await?;
     let lapi_url = remote_lapi_url(lapi_url)?;
-
-    emit_progress(progress, "Checking central CrowdSec agent connectivity");
-    preflight_remote_machine(
-        central_agent_url,
-        central_agent_tls_fingerprint,
-        preflight_token,
-    )
-    .await?;
-    emit_success(progress, "Central CrowdSec agent connectivity is confirmed");
 
     emit_progress(progress, "Checking central CrowdSec Local API connectivity");
     ensure_remote_lapi_reachable(&lapi_url).await?;
