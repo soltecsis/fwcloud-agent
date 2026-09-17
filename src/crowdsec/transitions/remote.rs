@@ -510,7 +510,6 @@ mod tests {
             target,
             authority_changed: true,
             backend: None,
-            preflight: None,
             ws_id: None,
         };
         assert!(is_supported(&request));
@@ -531,7 +530,6 @@ mod tests {
             },
             authority_changed: true,
             backend: None,
-            preflight: None,
             ws_id: None,
         };
         assert!(is_supported(&without_remediation));

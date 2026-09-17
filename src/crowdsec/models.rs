@@ -59,9 +59,6 @@ pub struct CrowdSecInstallRequest {
     pub backend: CrowdSecFirewallBackend,
     pub machine_name: Option<String>,
     pub lapi_url: Option<String>,
-    pub central_agent_url: Option<String>,
-    pub central_agent_tls_fingerprint: Option<String>,
-    pub preflight_token: Option<String>,
     pub ws_id: Option<Uuid>,
 }
 
@@ -254,26 +251,6 @@ pub struct CrowdSecMachineRemoveResponse {
     pub message: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CrowdSecLapiPreflightTokenRequest {
-    pub machine_name: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CrowdSecLapiPreflightTokenResponse {
-    pub token: String,
-    pub expires_in_seconds: u64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CrowdSecLapiPreflightRequest {
-    pub central_agent_url: String,
-    pub central_agent_tls_fingerprint: String,
-    pub token: String,
-}
-
 #[derive(Debug, Serialize)]
 pub struct CrowdSecRemoteMachineInstallResponse {
     pub machine_name: String,
@@ -299,9 +276,6 @@ pub struct CrowdSecRemoteMachineActivationRequest {
 pub struct CrowdSecRemoteMachineReauthenticationRequest {
     pub machine_name: String,
     pub lapi_url: String,
-    pub central_agent_url: String,
-    pub central_agent_tls_fingerprint: String,
-    pub preflight_token: String,
     pub ws_id: Option<Uuid>,
 }
 

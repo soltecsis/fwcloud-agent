@@ -55,15 +55,6 @@ pub struct TransitionTarget {
     pub lapi_url: Option<String>,
 }
 
-// Deliberately not Debug or Serialize: this structure contains a one-time secret.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TransitionPreflight {
-    pub central_agent_url: String,
-    pub central_agent_tls_fingerprint: String,
-    pub preflight_token: String,
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransitionPrepareRequest {
@@ -73,7 +64,6 @@ pub struct TransitionPrepareRequest {
     pub target: TransitionTarget,
     pub authority_changed: bool,
     pub backend: Option<CrowdSecFirewallBackend>,
-    pub preflight: Option<TransitionPreflight>,
     pub ws_id: Option<Uuid>,
 }
 
@@ -177,11 +167,6 @@ pub fn validate(request: &TransitionPrepareRequest) -> Result<()> {
             "A firewall backend is required only for local remediation",
         ));
     }
-    if (request.target.mode == TransitionMode::Machine) != request.preflight.is_some() {
-        return Err(invalid(
-            "Remote Machine transitions require central agent preflight data",
-        ));
-    }
     if request.expected.mode != request.target.mode && !request.authority_changed {
         return Err(invalid(
             "Changing between standalone and Machine changes the Local API authority",
@@ -259,9 +244,7 @@ mod tests {
             "expected": {"mode":"standalone", "local_remediation":true},
             "target": {"mode":"machine", "local_remediation":false,
                 "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
-            "authority_changed":true,
-            "preflight": {"central_agent_url":"https://192.0.2.1:33033",
-                "central_agent_tls_fingerprint":"a".repeat(64), "preflight_token":"secret"}
+            "authority_changed":true
         }))
         .unwrap()
     }
@@ -278,12 +261,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_preflight_and_backend() {
+    fn rejects_missing_backend_for_local_remediation() {
         let mut value = request();
         value.target.local_remediation = true;
-        assert!(validate(&value).is_err());
-        value.target.local_remediation = false;
-        value.preflight = None;
         assert!(validate(&value).is_err());
     }
 
@@ -295,9 +275,7 @@ mod tests {
                 "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
             "target": {"mode":"machine", "local_remediation":false,
                 "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
-            "authority_changed": false,
-            "preflight": {"central_agent_url":"https://192.0.2.1:33033",
-                "central_agent_tls_fingerprint":"a".repeat(64), "preflight_token":"secret"}
+            "authority_changed": false
         }))
         .unwrap();
         assert!(validate(&request).is_ok());

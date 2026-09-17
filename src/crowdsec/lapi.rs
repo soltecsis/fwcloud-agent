@@ -21,24 +21,15 @@
 */
 
 use std::{
-    fs::{self as std_fs, OpenOptions},
-    io::{self, ErrorKind, Read, Write},
-    net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs},
-    os::unix::fs::OpenOptionsExt,
-    path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    io::{self, ErrorKind},
+    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    time::Duration,
 };
 
 use log::debug;
-use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
-use rand::RngExt;
-use rand_distr::Alphanumeric;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use tokio::{fs, process::Command, task, time::timeout};
-use url::{Host, Url};
-use uuid::Uuid;
+use url::Url;
 
 use crate::{
     crowdsec::{
@@ -46,14 +37,14 @@ use crate::{
         command::{CrowdSecCommand, CrowdSecCommandOutput},
         errors::{
             COMMAND_FAILED, LAPI_CONNECTION_FAILED, LAPI_CONNECTION_REFUSED,
-            LAPI_CONNECTION_TIMEOUT, LAPI_HOST_UNRESOLVABLE, LAPI_INVALID, LAPI_PREFLIGHT_FAILED,
-            LAPI_PREFLIGHT_TOKEN_INVALID, LAPI_UNREACHABLE, MACHINE_INVALID, MACHINE_NOT_FOUND,
+            LAPI_CONNECTION_TIMEOUT, LAPI_HOST_UNRESOLVABLE, LAPI_INVALID, LAPI_UNREACHABLE,
+            MACHINE_INVALID, MACHINE_NOT_FOUND,
             MACHINE_REAUTHENTICATION_REQUIRED,
         },
         install,
         models::{
-            CrowdSecCentralLapiConfigureResponse, CrowdSecFirewallBackend,
-            CrowdSecLapiPreflightTokenResponse, CrowdSecMachine, CrowdSecMachineRemoveResponse,
+            CrowdSecCentralLapiConfigureResponse, CrowdSecFirewallBackend, CrowdSecMachine,
+            CrowdSecMachineRemoveResponse,
             CrowdSecMachineState, CrowdSecMachineValidationResponse, CrowdSecMachinesResponse,
             CrowdSecRemoteMachineActivationResponse, CrowdSecRemoteMachineInstallResponse,
         },
@@ -67,17 +58,7 @@ const CROWDSEC_CONFIG_PATH: &str = "/etc/crowdsec/config.yaml";
 const CROWDSEC_SERVICE: &str = "crowdsec.service";
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
-const PREFLIGHT_TOKEN_DIRECTORY: &str = "crowdsec/lapi-preflight";
-pub const PREFLIGHT_TOKEN_HEADER: &str = "X-FWCloud-CrowdSec-LAPI-Preflight-Token";
-pub const PREFLIGHT_TOKEN_DURATION: Duration = Duration::from_secs(60);
-const PREFLIGHT_TOKEN_LENGTH: usize = 64;
-const PREFLIGHT_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const REMOTE_LAPI_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-
-#[derive(Deserialize, Serialize)]
-struct PreflightTokenState {
-    expires_at_unix_seconds: u64,
-}
 
 pub async fn configure_central(listen_uri: &str) -> Result<CrowdSecCentralLapiConfigureResponse> {
     validate_listen_uri(listen_uri)?;
@@ -196,122 +177,9 @@ pub async fn remove_machine(name: &str) -> Result<CrowdSecMachineRemoveResponse>
     })
 }
 
-pub fn issue_preflight_token(
-    data_directory: &str,
-    machine_name: &str,
-) -> Result<CrowdSecLapiPreflightTokenResponse> {
-    validate_machine_name(machine_name)?;
-
-    let directory = preflight_token_directory(data_directory);
-    std_fs::create_dir_all(&directory).map_err(|_| {
-        FwcError::crowdsec(
-            LAPI_UNREACHABLE,
-            "Unable to prepare CrowdSec Local API preflight state",
-        )
-    })?;
-    cleanup_expired_preflight_tokens(&directory)?;
-
-    let state = serde_json::to_vec(&PreflightTokenState {
-        expires_at_unix_seconds: current_unix_seconds()? + PREFLIGHT_TOKEN_DURATION.as_secs(),
-    })
-    .map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, "Unable to create LAPI preflight token"))?;
-
-    for _ in 0..3 {
-        let token = random_preflight_token();
-        let path = preflight_token_path(&directory, &token);
-        let mut file = match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)
-        {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(_) => {
-                return Err(FwcError::crowdsec(
-                    LAPI_UNREACHABLE,
-                    "Unable to store CrowdSec Local API preflight token",
-                ))
-            }
-        };
-        file.write_all(&state).map_err(|_| {
-            FwcError::crowdsec(
-                LAPI_UNREACHABLE,
-                "Unable to store CrowdSec Local API preflight token",
-            )
-        })?;
-
-        return Ok(CrowdSecLapiPreflightTokenResponse {
-            token,
-            expires_in_seconds: PREFLIGHT_TOKEN_DURATION.as_secs(),
-        });
-    }
-
-    Err(FwcError::crowdsec(
-        LAPI_UNREACHABLE,
-        "Unable to create CrowdSec Local API preflight token",
-    ))
-}
-
-pub fn consume_preflight_token(data_directory: &str, token: &str) -> Result<()> {
-    if !valid_preflight_token(token) {
-        return Err(invalid_preflight_token_error());
-    }
-
-    let path = preflight_token_path(&preflight_token_directory(data_directory), token);
-    let claimed_path = path.with_extension(format!("consuming-{}", Uuid::new_v4()));
-    std_fs::rename(&path, &claimed_path).map_err(|_| invalid_preflight_token_error())?;
-
-    let state = std_fs::read(&claimed_path)
-        .ok()
-        .and_then(|contents| serde_json::from_slice::<PreflightTokenState>(&contents).ok());
-    let _ = std_fs::remove_file(&claimed_path);
-
-    let Some(state) = state else {
-        return Err(invalid_preflight_token_error());
-    };
-    if state.expires_at_unix_seconds <= current_unix_seconds()? {
-        return Err(invalid_preflight_token_error());
-    }
-
-    Ok(())
-}
-
-pub async fn preflight_remote_machine(
-    central_agent_url: &str,
-    central_agent_tls_fingerprint: &str,
-    token: &str,
-) -> Result<()> {
-    let url = preflight_url(central_agent_url)?;
-    let fingerprint = normalized_certificate_fingerprint(central_agent_tls_fingerprint)?;
-    if !valid_preflight_token(token) {
-        return Err(invalid_preflight_token_error());
-    }
-    let token = token.to_string();
-
-    let succeeded =
-        task::spawn_blocking(move || execute_preflight_request(&url, &fingerprint, &token).is_ok())
-            .await
-            .map_err(|_| {
-                FwcError::crowdsec(
-                    LAPI_PREFLIGHT_FAILED,
-                    "CrowdSec Local API agent preflight failed",
-                )
-            })?;
-
-    if succeeded {
-        Ok(())
-    } else {
-        Err(preflight_failed_error())
-    }
-}
-
 pub async fn install_remote_machine(
     machine_name: &str,
     lapi_url: &str,
-    _central_agent_url: &str,
-    _central_agent_tls_fingerprint: &str,
-    _preflight_token: &str,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecRemoteMachineInstallResponse> {
     validate_machine_name(machine_name)?;
@@ -453,9 +321,6 @@ pub async fn activate_remote_machine(
 pub async fn reauthenticate_remote_machine(
     machine_name: &str,
     lapi_url: &str,
-    _central_agent_url: &str,
-    _central_agent_tls_fingerprint: &str,
-    _preflight_token: &str,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecRemoteMachineInstallResponse> {
     validate_machine_name(machine_name)?;
@@ -863,181 +728,6 @@ pub(crate) fn validate_machine_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn preflight_token_directory(data_directory: &str) -> PathBuf {
-    Path::new(data_directory).join(PREFLIGHT_TOKEN_DIRECTORY)
-}
-
-fn preflight_token_path(directory: &Path, token: &str) -> PathBuf {
-    directory.join(hex::encode(Sha256::digest(token.as_bytes())))
-}
-
-fn random_preflight_token() -> String {
-    rand::rng()
-        .sample_iter(Alphanumeric)
-        .take(PREFLIGHT_TOKEN_LENGTH)
-        .map(char::from)
-        .collect()
-}
-
-fn valid_preflight_token(token: &str) -> bool {
-    token.len() == PREFLIGHT_TOKEN_LENGTH
-        && token
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric())
-}
-
-fn current_unix_seconds() -> Result<u64> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, "Unable to read current time"))
-}
-
-fn cleanup_expired_preflight_tokens(directory: &Path) -> Result<()> {
-    let now = current_unix_seconds()?;
-    let entries = std_fs::read_dir(directory).map_err(|_| {
-        FwcError::crowdsec(
-            LAPI_UNREACHABLE,
-            "Unable to clean CrowdSec Local API preflight state",
-        )
-    })?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let expired = std_fs::read(&path)
-            .ok()
-            .and_then(|contents| serde_json::from_slice::<PreflightTokenState>(&contents).ok())
-            .is_some_and(|state| state.expires_at_unix_seconds <= now);
-        if expired {
-            let _ = std_fs::remove_file(path);
-        }
-    }
-
-    Ok(())
-}
-
-fn invalid_preflight_token_error() -> FwcError {
-    FwcError::crowdsec(
-        LAPI_PREFLIGHT_TOKEN_INVALID,
-        "Invalid, expired or already consumed CrowdSec Local API preflight token",
-    )
-}
-
-fn preflight_url(value: &str) -> Result<Url> {
-    let url = Url::parse(value).map_err(|_| invalid_preflight_request_error())?;
-    if url.scheme() != "https"
-        || url_ip_address(&url).is_none()
-        || url.port_or_known_default().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-        || url.path() != "/"
-    {
-        return Err(invalid_preflight_request_error());
-    }
-
-    Ok(url)
-}
-
-fn normalized_certificate_fingerprint(value: &str) -> Result<String> {
-    let fingerprint = value.replace(':', "").to_ascii_lowercase();
-    if fingerprint.len() == 64
-        && fingerprint
-            .chars()
-            .all(|character| character.is_ascii_hexdigit())
-    {
-        Ok(fingerprint)
-    } else {
-        Err(invalid_preflight_request_error())
-    }
-}
-
-fn execute_preflight_request(url: &Url, expected_fingerprint: &str, token: &str) -> Result<()> {
-    let ip_address = url_ip_address(url).ok_or_else(invalid_preflight_request_error)?;
-    let host = ip_address.to_string();
-    let port = url
-        .port_or_known_default()
-        .ok_or_else(invalid_preflight_request_error)?;
-    let socket_address = SocketAddr::new(ip_address, port);
-    let tcp_stream = TcpStream::connect_timeout(&socket_address, PREFLIGHT_REQUEST_TIMEOUT)
-        .map_err(|_| preflight_failed_error())?;
-    tcp_stream
-        .set_read_timeout(Some(PREFLIGHT_REQUEST_TIMEOUT))
-        .map_err(|_| preflight_failed_error())?;
-    tcp_stream
-        .set_write_timeout(Some(PREFLIGHT_REQUEST_TIMEOUT))
-        .map_err(|_| preflight_failed_error())?;
-
-    let mut connector =
-        SslConnector::builder(SslMethod::tls()).map_err(|_| preflight_failed_error())?;
-    connector.set_verify(SslVerifyMode::NONE);
-    let mut stream = connector
-        .build()
-        .connect(&host, tcp_stream)
-        .map_err(|_| preflight_failed_error())?;
-    let certificate = stream
-        .ssl()
-        .peer_certificate()
-        .ok_or_else(preflight_failed_error)?;
-    let actual_fingerprint = hex::encode(Sha256::digest(
-        certificate.to_der().map_err(|_| preflight_failed_error())?,
-    ));
-    if actual_fingerprint != expected_fingerprint {
-        return Err(preflight_failed_error());
-    }
-
-    let host_header = if url.port() == Some(443) {
-        match ip_address {
-            IpAddr::V4(_) => host.to_string(),
-            IpAddr::V6(_) => format!("[{host}]"),
-        }
-    } else {
-        match ip_address {
-            IpAddr::V4(_) => format!("{host}:{port}"),
-            IpAddr::V6(_) => format!("[{host}]:{port}"),
-        }
-    };
-    let request = format!(
-        "POST /api/v1/crowdsec/lapi/ping HTTP/1.1\r\nHost: {host_header}\r\n{PREFLIGHT_TOKEN_HEADER}: {token}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-    );
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|_| preflight_failed_error())?;
-    let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .map_err(|_| preflight_failed_error())?;
-
-    if response.starts_with("HTTP/1.1 204 ") || response.starts_with("HTTP/1.0 204 ") {
-        Ok(())
-    } else {
-        Err(preflight_failed_error())
-    }
-}
-
-fn url_ip_address(url: &Url) -> Option<IpAddr> {
-    match url.host()? {
-        Host::Ipv4(address) => Some(IpAddr::V4(address)),
-        Host::Ipv6(address) => Some(IpAddr::V6(address)),
-        Host::Domain(_) => None,
-    }
-}
-
-fn invalid_preflight_request_error() -> FwcError {
-    FwcError::crowdsec(
-        LAPI_INVALID,
-        "Invalid CrowdSec Local API agent preflight request",
-    )
-}
-
-fn preflight_failed_error() -> FwcError {
-    FwcError::crowdsec(
-        LAPI_PREFLIGHT_FAILED,
-        "CrowdSec Local API agent preflight failed",
-    )
-}
-
 fn machines_from_json(value: &Value) -> Vec<CrowdSecMachine> {
     let Some(machines) = value.as_array() else {
         return Vec::new();
@@ -1252,13 +942,13 @@ fn with_trailing_newline(lines: Vec<String>, trailing_newline: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, io::ErrorKind};
+    use std::io::ErrorKind;
 
     use super::{
-        central_lapi_configuration, consume_preflight_token, issue_preflight_token,
-        machine_from_json, machine_reauthentication_required_message, machines_from_json,
-        remote_lapi_connection_error, remote_lapi_socket_address, remote_lapi_url,
-        remote_machine_configuration, validate_listen_uri, validate_machine_name,
+        central_lapi_configuration, machine_from_json, machine_reauthentication_required_message,
+        machines_from_json, remote_lapi_connection_error, remote_lapi_socket_address,
+        remote_lapi_url, remote_machine_configuration, validate_listen_uri,
+        validate_machine_name,
     };
     use crate::{
         crowdsec::{
@@ -1394,30 +1084,6 @@ mod tests {
         assert_eq!(machines[0].name, "fwcloud-machine-1");
         assert_eq!(machines[1].name, "fwcloud-machine-2");
         assert!(serialized[1].get("api_key").is_none());
-    }
-
-    #[test]
-    fn preflight_tokens_are_consumed_once_without_storing_the_raw_secret() {
-        let data_directory =
-            std::env::temp_dir().join(format!("fwcloud-agent-lapi-{}", uuid::Uuid::new_v4()));
-        let data_directory = data_directory.to_string_lossy().to_string();
-        let response = issue_preflight_token(&data_directory, "fwcloud-machine-test").unwrap();
-
-        let state_directory = std::path::Path::new(&data_directory).join("crowdsec/lapi-preflight");
-        let state_entries = fs::read_dir(&state_directory)
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(state_entries.len(), 1);
-        assert!(!state_entries[0]
-            .file_name()
-            .to_string_lossy()
-            .contains(&response.token));
-
-        consume_preflight_token(&data_directory, &response.token).unwrap();
-        assert!(consume_preflight_token(&data_directory, &response.token).is_err());
-
-        fs::remove_dir_all(data_directory).unwrap();
     }
 
     fn crowdsec_error_code(error: FwcError) -> &'static str {

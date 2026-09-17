@@ -296,7 +296,6 @@ mod tests {
             target: machine(true),
             authority_changed: false,
             backend: Some(CrowdSecFirewallBackend::Iptables),
-            preflight: None,
             ws_id: None,
         };
         assert!(supported(&request));

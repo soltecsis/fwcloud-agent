@@ -35,8 +35,7 @@ use crate::{
             CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
             CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
             CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
-            CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecLapiPreflightRequest,
-            CrowdSecLapiPreflightTokenRequest, CrowdSecRemoteMachineActivationRequest,
+            CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecRemoteMachineActivationRequest,
             CrowdSecRemoteMachineReauthenticationRequest, CrowdSecRemoteMachineResumeRequest,
             CrowdSecUninstallRequest,
         },
@@ -494,59 +493,6 @@ async fn configure_crowdsec_central_lapi(
     Ok(HttpResponse::Ok().json(response))
 }
 
-#[post("/crowdsec/lapi/preflight-tokens")]
-async fn issue_crowdsec_lapi_preflight_token(
-    cfg: web::Data<Arc<Config>>,
-    request: web::Json<CrowdSecLapiPreflightTokenRequest>,
-) -> Result<HttpResponse> {
-    let response = {
-        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
-        let mutex = Arc::clone(&cfg.mutex.crowdsec);
-        let _mutex_data = mutex.lock().await;
-        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
-        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
-
-        lapi::ensure_central_ready().await?;
-        let token_result = lapi::issue_preflight_token(cfg.data_dir, &request.machine_name);
-
-        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
-        token_result?
-    };
-
-    Ok(HttpResponse::Ok().json(response))
-}
-
-#[post("/crowdsec/lapi/ping")]
-async fn crowdsec_lapi_ping() -> HttpResponse {
-    HttpResponse::NoContent().finish()
-}
-
-#[post("/crowdsec/lapi/preflight")]
-async fn preflight_crowdsec_lapi(
-    cfg: web::Data<Arc<Config>>,
-    request: web::Json<CrowdSecLapiPreflightRequest>,
-) -> Result<HttpResponse> {
-    {
-        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
-        let mutex = Arc::clone(&cfg.mutex.crowdsec);
-        let _mutex_data = mutex.lock().await;
-        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
-        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
-
-        let preflight_result = lapi::preflight_remote_machine(
-            &request.central_agent_url,
-            &request.central_agent_tls_fingerprint,
-            &request.token,
-        )
-        .await;
-
-        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
-        preflight_result?;
-    }
-
-    Ok(HttpResponse::NoContent().finish())
-}
-
 #[get("/crowdsec/lapi/machines")]
 async fn crowdsec_lapi_machines(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
     let response = {
@@ -633,9 +579,6 @@ async fn reauthenticate_crowdsec_remote_machine(
         lapi::reauthenticate_remote_machine(
             &request.machine_name,
             &request.lapi_url,
-            &request.central_agent_url,
-            &request.central_agent_tls_fingerprint,
-            &request.preflight_token,
             Some(&progress),
         )
         .await?
@@ -758,15 +701,6 @@ async fn install_crowdsec(
                 let install_result = lapi::install_remote_machine(
                     required_machine_install_value(&request.machine_name, "machine_name")?,
                     required_machine_install_value(&request.lapi_url, "lapi_url")?,
-                    required_machine_install_value(
-                        &request.central_agent_url,
-                        "central_agent_url",
-                    )?,
-                    required_machine_install_value(
-                        &request.central_agent_tls_fingerprint,
-                        "central_agent_tls_fingerprint",
-                    )?,
-                    required_machine_install_value(&request.preflight_token, "preflight_token")?,
                     Some(&progress),
                 )
                 .await;
@@ -797,11 +731,6 @@ fn required_machine_install_value<'a>(value: &'a Option<String>, field: &str) ->
                 match field {
                     "machine_name" => "CrowdSec machine name is required",
                     "lapi_url" => "CrowdSec Local API URL is required",
-                    "central_agent_url" => "Central CrowdSec agent URL is required",
-                    "central_agent_tls_fingerprint" => {
-                        "Central CrowdSec agent TLS fingerprint is required"
-                    }
-                    "preflight_token" => "CrowdSec Local API preflight token is required",
                     _ => "Invalid CrowdSec machine installation request",
                 },
             )

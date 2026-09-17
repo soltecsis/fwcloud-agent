@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use actix_service::{Service, Transform};
-use actix_web::{dev::ServiceRequest, dev::ServiceResponse, http::Method, web, Error};
+use actix_web::{dev::ServiceRequest, dev::ServiceResponse, web, Error};
 use futures::future::{ok, Ready};
 use futures::Future;
 
@@ -94,9 +94,6 @@ where
             }
         };
 
-        let is_lapi_preflight_ping =
-            req.path() == "/api/v1/crowdsec/lapi/ping" && req.method() == Method::POST;
-
         // If the use of API Key is enabled.
         if cfg.enable_api_key {
             let api_key = req
@@ -107,20 +104,6 @@ where
 
             if global_api_key_is_valid {
                 if let Err(error) = check_allowed_ip(&req, cfg) {
-                    return err!(error);
-                }
-            } else if is_lapi_preflight_ping {
-                let token = req
-                    .headers()
-                    .get(crate::crowdsec::lapi::PREFLIGHT_TOKEN_HEADER)
-                    .and_then(|value| value.to_str().ok());
-                let Some(token) = token else {
-                    return err!(FwcError::ApiKeyNotFound);
-                };
-
-                if let Err(error) =
-                    crate::crowdsec::lapi::consume_preflight_token(cfg.data_dir, token)
-                {
                     return err!(error);
                 }
             } else if api_key.is_some() {
