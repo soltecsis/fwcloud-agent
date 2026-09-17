@@ -598,6 +598,7 @@ mod tests {
         CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecInstallStep, CrowdSecOperationRequest,
         CrowdSecPackageStatus, CrowdSecRemoteMachineActivationRequest, CrowdSecStepResult,
         CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
+        CrowdSecRemoteMachineReauthenticationRequest,
     };
 
     #[test]
@@ -673,6 +674,24 @@ mod tests {
 
         assert_eq!(request.mode, CrowdSecInstallMode::Machine);
         assert_eq!(request.machine_name.as_deref(), Some("fwcloud-web-01"));
+    }
+
+    #[test]
+    fn crowdsec_machine_install_request_rejects_legacy_preflight_fields() {
+        let request = serde_json::from_str::<CrowdSecInstallRequest>(
+            r#"{"mode":"machine","machine_name":"fwcloud-web-01","lapi_url":"http://192.0.2.10:8080","preflight_token":"obsolete"}"#,
+        );
+
+        assert!(request.is_err());
+    }
+
+    #[test]
+    fn remote_machine_reauthentication_requires_only_machine_and_lapi() {
+        let request = serde_json::from_str::<CrowdSecRemoteMachineReauthenticationRequest>(
+            r#"{"machine_name":"fwcloud-web-01","lapi_url":"http://192.0.2.10:8080"}"#,
+        );
+
+        assert!(request.is_ok());
     }
 
     #[test]
