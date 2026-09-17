@@ -538,7 +538,9 @@ async fn purge_bouncer_package(
             )
             .await
         }
-        PackageManager::Dnf | PackageManager::Yum => purge_package(package_manager, package, progress).await,
+        PackageManager::Dnf | PackageManager::Yum => {
+            purge_package(package_manager, package, progress).await
+        }
     }
 }
 

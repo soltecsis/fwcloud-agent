@@ -35,8 +35,8 @@ use super::{
 use crate::errors::{FwcError, Result};
 
 pub mod address;
-pub mod remote;
 pub mod remediation;
+pub mod remote;
 pub mod standalone;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -112,18 +112,13 @@ pub async fn kind(data_directory: &str, transition_id: Uuid) -> Result<Transitio
     let path = Path::new(data_directory)
         .join("crowdsec/transitions")
         .join(format!("{transition_id}.json"));
-    let state: serde_json::Value = serde_json::from_slice(
-        &fs::read(path)
-            .await
-            .map_err(|_| FwcError::crowdsec(TRANSITION_UNSUPPORTED, "CrowdSec transition is not found"))?,
-    )
+    let state: serde_json::Value = serde_json::from_slice(&fs::read(path).await.map_err(|_| {
+        FwcError::crowdsec(TRANSITION_UNSUPPORTED, "CrowdSec transition is not found")
+    })?)
     .map_err(|_| FwcError::crowdsec(TRANSITION_INVALID, "CrowdSec transition state is invalid"))?;
-    serde_json::from_value(
-        state
-            .get("kind")
-            .cloned()
-            .ok_or_else(|| FwcError::crowdsec(TRANSITION_INVALID, "CrowdSec transition state is invalid"))?,
-    )
+    serde_json::from_value(state.get("kind").cloned().ok_or_else(|| {
+        FwcError::crowdsec(TRANSITION_INVALID, "CrowdSec transition state is invalid")
+    })?)
     .map_err(|_| FwcError::crowdsec(TRANSITION_INVALID, "CrowdSec transition state is invalid"))
 }
 

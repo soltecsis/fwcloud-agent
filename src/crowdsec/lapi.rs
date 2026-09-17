@@ -22,8 +22,8 @@
 
 use std::{
     fs::{self as std_fs, OpenOptions},
-    io::{Read, Write},
-    net::{IpAddr, SocketAddr, TcpStream},
+    io::{self, ErrorKind, Read, Write},
+    net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -45,8 +45,9 @@ use crate::{
         bouncers,
         command::{CrowdSecCommand, CrowdSecCommandOutput},
         errors::{
-            COMMAND_FAILED, LAPI_INVALID, LAPI_PREFLIGHT_FAILED, LAPI_PREFLIGHT_TOKEN_INVALID,
-            LAPI_UNREACHABLE, MACHINE_INVALID, MACHINE_NOT_FOUND,
+            COMMAND_FAILED, LAPI_CONNECTION_FAILED, LAPI_CONNECTION_REFUSED,
+            LAPI_CONNECTION_TIMEOUT, LAPI_HOST_UNRESOLVABLE, LAPI_INVALID, LAPI_PREFLIGHT_FAILED,
+            LAPI_PREFLIGHT_TOKEN_INVALID, LAPI_UNREACHABLE, MACHINE_INVALID, MACHINE_NOT_FOUND,
             MACHINE_REAUTHENTICATION_REQUIRED,
         },
         install,
@@ -776,7 +777,7 @@ pub(crate) fn remote_lapi_url(value: &str) -> Result<Url> {
         || url.query().is_some()
         || url.fragment().is_some()
         || !matches!(url.path(), "" | "/")
-        || url_ip_address(&url).is_none()
+        || url.host().is_none()
     {
         return Err(invalid_remote_lapi_error());
     }
@@ -785,31 +786,70 @@ pub(crate) fn remote_lapi_url(value: &str) -> Result<Url> {
 }
 
 pub(crate) async fn ensure_remote_lapi_reachable(url: &Url) -> Result<()> {
-    let address = SocketAddr::new(
-        url_ip_address(url).ok_or_else(invalid_remote_lapi_error)?,
-        url.port().ok_or_else(invalid_remote_lapi_error)?,
-    );
+    let host = url
+        .host_str()
+        .ok_or_else(invalid_remote_lapi_error)?
+        .to_string();
+    let port = url.port().ok_or_else(invalid_remote_lapi_error)?;
+    let address = task::spawn_blocking(move || remote_lapi_socket_address(&host, port))
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                LAPI_CONNECTION_FAILED,
+                "CrowdSec Local API connection failed",
+            )
+        })?
+        .map_err(|_| remote_lapi_resolution_error())?;
 
-    let reachable = task::spawn_blocking(move || {
-        TcpStream::connect_timeout(&address, REMOTE_LAPI_CONNECT_TIMEOUT).is_ok()
+    task::spawn_blocking(move || TcpStream::connect_timeout(&address, REMOTE_LAPI_CONNECT_TIMEOUT))
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                LAPI_CONNECTION_FAILED,
+                "CrowdSec Local API connection failed",
+            )
+        })?
+        .map(|_| ())
+        .map_err(|error| remote_lapi_connection_error(error.kind()))
+}
+
+fn remote_lapi_socket_address(host: &str, port: u16) -> io::Result<SocketAddr> {
+    (host, port).to_socket_addrs()?.next().ok_or_else(|| {
+        io::Error::new(
+            ErrorKind::NotFound,
+            "CrowdSec Local API host has no address",
+        )
     })
-    .await
-    .map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, "CrowdSec Local API is unreachable"))?;
+}
 
-    if reachable {
-        Ok(())
-    } else {
-        Err(FwcError::crowdsec(
-            LAPI_UNREACHABLE,
-            "CrowdSec Local API is unreachable",
-        ))
+fn remote_lapi_resolution_error() -> FwcError {
+    FwcError::crowdsec(
+        LAPI_HOST_UNRESOLVABLE,
+        "CrowdSec Local API host cannot be resolved",
+    )
+}
+
+fn remote_lapi_connection_error(kind: ErrorKind) -> FwcError {
+    match kind {
+        ErrorKind::ConnectionRefused => FwcError::crowdsec(
+            LAPI_CONNECTION_REFUSED,
+            "CrowdSec Local API connection was refused",
+        ),
+        ErrorKind::TimedOut => FwcError::crowdsec(
+            LAPI_CONNECTION_TIMEOUT,
+            "CrowdSec Local API connection timed out",
+        ),
+        _ => FwcError::crowdsec(
+            LAPI_CONNECTION_FAILED,
+            "CrowdSec Local API connection failed",
+        ),
     }
 }
 
 fn invalid_remote_lapi_error() -> FwcError {
     FwcError::crowdsec(
         LAPI_INVALID,
-        "CrowdSec Local API URL must use an IP address and explicit port",
+        "CrowdSec Local API URL must use an HTTP or HTTPS host and explicit port",
     )
 }
 
@@ -1230,14 +1270,21 @@ fn with_trailing_newline(lines: Vec<String>, trailing_newline: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, io::ErrorKind};
 
     use super::{
         central_lapi_configuration, consume_preflight_token, issue_preflight_token,
         machine_from_json, machine_reauthentication_required_message, machines_from_json,
-        remote_lapi_url, remote_machine_configuration, validate_listen_uri, validate_machine_name,
+        remote_lapi_connection_error, remote_lapi_socket_address, remote_lapi_url,
+        remote_machine_configuration, validate_listen_uri, validate_machine_name,
     };
-    use crate::crowdsec::models::CrowdSecMachineState;
+    use crate::{
+        crowdsec::{
+            errors::{LAPI_CONNECTION_FAILED, LAPI_CONNECTION_REFUSED, LAPI_CONNECTION_TIMEOUT},
+            models::CrowdSecMachineState,
+        },
+        errors::FwcError,
+    };
     use serde_json::json;
 
     #[test]
@@ -1276,12 +1323,35 @@ mod tests {
     }
 
     #[test]
-    fn validates_a_remote_lapi_url_with_an_ip_address_and_port() {
+    fn validates_a_remote_lapi_url_with_a_host_and_port() {
         assert!(remote_lapi_url("http://192.0.2.10:8080").is_ok());
         assert!(remote_lapi_url("https://[2001:db8::10]:8443").is_ok());
-        assert!(remote_lapi_url("http://lapi.example.test:8080").is_err());
+        assert!(remote_lapi_url("http://lapi.example.test:8080").is_ok());
         assert!(remote_lapi_url("http://192.0.2.10").is_err());
         assert!(remote_lapi_url("http://192.0.2.10:8080/api").is_err());
+    }
+
+    #[test]
+    fn resolves_a_remote_lapi_ip_address_without_connecting() {
+        let address = remote_lapi_socket_address("192.0.2.10", 8080).unwrap();
+
+        assert_eq!(address.to_string(), "192.0.2.10:8080");
+    }
+
+    #[test]
+    fn normalizes_remote_lapi_connection_errors() {
+        assert_eq!(
+            crowdsec_error_code(remote_lapi_connection_error(ErrorKind::ConnectionRefused)),
+            LAPI_CONNECTION_REFUSED,
+        );
+        assert_eq!(
+            crowdsec_error_code(remote_lapi_connection_error(ErrorKind::TimedOut)),
+            LAPI_CONNECTION_TIMEOUT,
+        );
+        assert_eq!(
+            crowdsec_error_code(remote_lapi_connection_error(ErrorKind::ConnectionReset)),
+            LAPI_CONNECTION_FAILED,
+        );
     }
 
     #[test]
@@ -1366,5 +1436,12 @@ mod tests {
         assert!(consume_preflight_token(&data_directory, &response.token).is_err());
 
         fs::remove_dir_all(data_directory).unwrap();
+    }
+
+    fn crowdsec_error_code(error: FwcError) -> &'static str {
+        match error {
+            FwcError::CrowdSec { code, .. } => code,
+            _ => panic!("Expected a CrowdSec error"),
+        }
     }
 }

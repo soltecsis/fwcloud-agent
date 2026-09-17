@@ -117,10 +117,9 @@ pub async fn ensure_idle(data: &str) -> Result<()> {
         let state: serde_json::Value =
             serde_json::from_slice(&fs::read(entry.path()).await.map_err(|_| recovery())?)
                 .map_err(|_| recovery())?;
-        let phase: TransitionPhase = serde_json::from_value(
-            state.get("phase").cloned().ok_or_else(recovery)?,
-        )
-        .map_err(|_| recovery())?;
+        let phase: TransitionPhase =
+            serde_json::from_value(state.get("phase").cloned().ok_or_else(recovery)?)
+                .map_err(|_| recovery())?;
         if matches!(
             phase,
             TransitionPhase::Activating
