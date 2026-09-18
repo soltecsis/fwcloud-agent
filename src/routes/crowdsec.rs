@@ -701,6 +701,7 @@ async fn install_crowdsec(
                 let install_result = lapi::install_remote_machine(
                     required_machine_install_value(&request.machine_name, "machine_name")?,
                     required_machine_install_value(&request.lapi_url, "lapi_url")?,
+                    request.continue_without_lapi_connectivity,
                     Some(&progress),
                 )
                 .await;

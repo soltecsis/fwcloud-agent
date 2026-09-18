@@ -59,6 +59,8 @@ pub struct CrowdSecInstallRequest {
     pub backend: CrowdSecFirewallBackend,
     pub machine_name: Option<String>,
     pub lapi_url: Option<String>,
+    #[serde(default)]
+    pub continue_without_lapi_connectivity: bool,
     pub ws_id: Option<Uuid>,
 }
 
@@ -226,6 +228,14 @@ pub enum CrowdSecMachineState {
     Unknown,
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecRemoteMachineInstallState {
+    ConnectivityConfirmationRequired,
+    PendingConnectivity,
+    PendingValidation,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CrowdSecMachine {
     pub name: String,
@@ -256,6 +266,8 @@ pub struct CrowdSecRemoteMachineInstallResponse {
     pub machine_name: String,
     pub lapi_url: String,
     pub state: CrowdSecMachineState,
+    pub installation_state: CrowdSecRemoteMachineInstallState,
+    pub connectivity_error_code: Option<String>,
     pub message: String,
 }
 
@@ -596,9 +608,9 @@ mod tests {
         CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep, CrowdSecBouncerUninstallStep,
         CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecFirewallBackend,
         CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecInstallStep, CrowdSecOperationRequest,
-        CrowdSecPackageStatus, CrowdSecRemoteMachineActivationRequest, CrowdSecStepResult,
-        CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
-        CrowdSecRemoteMachineReauthenticationRequest,
+        CrowdSecPackageStatus, CrowdSecRemoteMachineActivationRequest,
+        CrowdSecRemoteMachineInstallState, CrowdSecRemoteMachineReauthenticationRequest,
+        CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
     };
 
     #[test]
@@ -677,6 +689,16 @@ mod tests {
     }
 
     #[test]
+    fn crowdsec_machine_install_request_accepts_connectivity_continuation() {
+        let request = serde_json::from_str::<CrowdSecInstallRequest>(
+            r#"{"mode":"machine","machine_name":"fwcloud-web-01","continue_without_lapi_connectivity":true}"#,
+        )
+        .unwrap();
+
+        assert!(request.continue_without_lapi_connectivity);
+    }
+
+    #[test]
     fn crowdsec_machine_install_request_rejects_legacy_preflight_fields() {
         let request = serde_json::from_str::<CrowdSecInstallRequest>(
             r#"{"mode":"machine","machine_name":"fwcloud-web-01","lapi_url":"http://192.0.2.10:8080","preflight_token":"obsolete"}"#,
@@ -692,6 +714,21 @@ mod tests {
         );
 
         assert!(request.is_ok());
+    }
+
+    #[test]
+    fn serializes_deferred_machine_connectivity_state() {
+        assert_eq!(
+            serde_json::to_value(CrowdSecRemoteMachineInstallState::PendingConnectivity).unwrap(),
+            "pending_connectivity",
+        );
+        assert_eq!(
+            serde_json::to_value(
+                CrowdSecRemoteMachineInstallState::ConnectivityConfirmationRequired,
+            )
+            .unwrap(),
+            "connectivity_confirmation_required",
+        );
     }
 
     #[test]

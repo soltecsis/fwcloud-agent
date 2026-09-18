@@ -38,15 +38,14 @@ use crate::{
         errors::{
             COMMAND_FAILED, LAPI_CONNECTION_FAILED, LAPI_CONNECTION_REFUSED,
             LAPI_CONNECTION_TIMEOUT, LAPI_HOST_UNRESOLVABLE, LAPI_INVALID, LAPI_UNREACHABLE,
-            MACHINE_INVALID, MACHINE_NOT_FOUND,
-            MACHINE_REAUTHENTICATION_REQUIRED,
+            MACHINE_INVALID, MACHINE_NOT_FOUND, MACHINE_REAUTHENTICATION_REQUIRED,
         },
         install,
         models::{
             CrowdSecCentralLapiConfigureResponse, CrowdSecFirewallBackend, CrowdSecMachine,
-            CrowdSecMachineRemoveResponse,
-            CrowdSecMachineState, CrowdSecMachineValidationResponse, CrowdSecMachinesResponse,
-            CrowdSecRemoteMachineActivationResponse, CrowdSecRemoteMachineInstallResponse,
+            CrowdSecMachineRemoveResponse, CrowdSecMachineState, CrowdSecMachineValidationResponse,
+            CrowdSecMachinesResponse, CrowdSecRemoteMachineActivationResponse,
+            CrowdSecRemoteMachineInstallResponse, CrowdSecRemoteMachineInstallState,
         },
         packages,
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
@@ -103,12 +102,22 @@ pub(crate) async fn restore_standalone_lapi() -> Result<()> {
     disable_crowdsec_service().await?;
     let configuration = fs::read_to_string(CROWDSEC_CONFIG_PATH)
         .await
-        .map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, "Unable to read CrowdSec Local API configuration"))?;
+        .map_err(|_| {
+            FwcError::crowdsec(
+                LAPI_UNREACHABLE,
+                "Unable to read CrowdSec Local API configuration",
+            )
+        })?;
     let updated_configuration = central_lapi_configuration(&configuration, "127.0.0.1:8080");
     if updated_configuration != configuration {
         fs::write(CROWDSEC_CONFIG_PATH, updated_configuration)
             .await
-            .map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, "Unable to restore CrowdSec local Local API configuration"))?;
+            .map_err(|_| {
+                FwcError::crowdsec(
+                    LAPI_UNREACHABLE,
+                    "Unable to restore CrowdSec local Local API configuration",
+                )
+            })?;
     }
     remove_machine_credentials().await?;
     CrowdSecCommand::cscli(&["machines", "add", "--auto"])?
@@ -180,14 +189,42 @@ pub async fn remove_machine(name: &str) -> Result<CrowdSecMachineRemoveResponse>
 pub async fn install_remote_machine(
     machine_name: &str,
     lapi_url: &str,
+    continue_without_lapi_connectivity: bool,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecRemoteMachineInstallResponse> {
     validate_machine_name(machine_name)?;
     let lapi_url = remote_lapi_url(lapi_url)?;
 
     emit_progress(progress, "Checking central CrowdSec Local API connectivity");
-    ensure_remote_lapi_reachable(&lapi_url).await?;
-    emit_success(progress, "Central CrowdSec Local API is reachable");
+    let connectivity_error_code = match ensure_remote_lapi_reachable(&lapi_url).await {
+        Ok(()) => {
+            emit_success(progress, "Central CrowdSec Local API is reachable");
+            None
+        }
+        Err(error) => {
+            let Some(error_code) = remote_lapi_connectivity_error_code(&error) else {
+                return Err(error);
+            };
+            if !continue_without_lapi_connectivity {
+                let message = "Central CrowdSec Local API is unavailable. Review and deploy the firewall policy, then continue to install the Machine with registration pending";
+                emit_warning(progress, message);
+                return Ok(CrowdSecRemoteMachineInstallResponse {
+                    machine_name: machine_name.to_string(),
+                    lapi_url: lapi_url.to_string(),
+                    state: CrowdSecMachineState::Pending,
+                    installation_state:
+                        CrowdSecRemoteMachineInstallState::ConnectivityConfirmationRequired,
+                    connectivity_error_code: Some(error_code.to_string()),
+                    message: message.to_string(),
+                });
+            }
+            emit_warning(
+                progress,
+                "Central CrowdSec Local API is unavailable; continuing with Machine registration pending",
+            );
+            Some(error_code)
+        }
+    };
 
     emit_progress(
         progress,
@@ -229,12 +266,25 @@ pub async fn install_remote_machine(
         "CrowdSec service is stopped pending central validation",
     );
     configure_remote_machine().await?;
+    remove_machine_credentials().await?;
+
+    if let Some(error_code) = connectivity_error_code {
+        let message = "CrowdSec Machine is configured with registration pending. Review and deploy the firewall policy before retrying registration";
+        emit_warning(progress, message);
+        return Ok(CrowdSecRemoteMachineInstallResponse {
+            machine_name: machine_name.to_string(),
+            lapi_url: lapi_url.to_string(),
+            state: CrowdSecMachineState::Pending,
+            installation_state: CrowdSecRemoteMachineInstallState::PendingConnectivity,
+            connectivity_error_code: Some(error_code.to_string()),
+            message: message.to_string(),
+        });
+    }
 
     emit_progress(
         progress,
         "Registering CrowdSec machine with the central Local API",
     );
-    remove_machine_credentials().await?;
     CrowdSecCommand::cscli(&[
         "lapi",
         "register",
@@ -255,6 +305,8 @@ pub async fn install_remote_machine(
         machine_name: machine_name.to_string(),
         lapi_url: lapi_url.to_string(),
         state: CrowdSecMachineState::Pending,
+        installation_state: CrowdSecRemoteMachineInstallState::PendingValidation,
+        connectivity_error_code: None,
         message: "CrowdSec machine is registered and awaits central validation".to_string(),
     })
 }
@@ -331,12 +383,21 @@ pub async fn reauthenticate_remote_machine(
     ensure_remote_lapi_reachable(&lapi_url).await?;
     emit_success(progress, "Central CrowdSec Local API is reachable");
 
-    emit_progress(progress, "Stopping CrowdSec machine service before reauthentication");
+    emit_progress(
+        progress,
+        "Stopping CrowdSec machine service before reauthentication",
+    );
     disable_crowdsec_service().await?;
-    emit_success(progress, "CrowdSec machine service is stopped before reauthentication");
+    emit_success(
+        progress,
+        "CrowdSec machine service is stopped before reauthentication",
+    );
     configure_remote_machine().await?;
 
-    emit_progress(progress, "Registering CrowdSec machine with the central Local API");
+    emit_progress(
+        progress,
+        "Registering CrowdSec machine with the central Local API",
+    );
     remove_machine_credentials().await?;
     CrowdSecCommand::cscli(&[
         "lapi",
@@ -349,12 +410,17 @@ pub async fn reauthenticate_remote_machine(
     .execute()
     .await?;
     restrict_machine_credentials_permissions().await?;
-    emit_success(progress, "CrowdSec machine is registered and pending central validation");
+    emit_success(
+        progress,
+        "CrowdSec machine is registered and pending central validation",
+    );
 
     Ok(CrowdSecRemoteMachineInstallResponse {
         machine_name: machine_name.to_string(),
         lapi_url: lapi_url.to_string(),
         state: CrowdSecMachineState::Pending,
+        installation_state: CrowdSecRemoteMachineInstallState::PendingValidation,
+        connectivity_error_code: None,
         message: "CrowdSec machine is registered and awaits central validation".to_string(),
     })
 }
@@ -367,9 +433,15 @@ pub async fn resume_remote_machine(
     validate_machine_name(machine_name)?;
     require_crowdsec_installed().await?;
 
-    emit_progress(progress, "Checking central validation of the CrowdSec machine");
+    emit_progress(
+        progress,
+        "Checking central validation of the CrowdSec machine",
+    );
     ensure_remote_machine_is_validated().await?;
-    emit_success(progress, "CrowdSec machine is validated by the central Local API");
+    emit_success(
+        progress,
+        "CrowdSec machine is validated by the central Local API",
+    );
 
     emit_progress(progress, "Starting CrowdSec machine service");
     enable_crowdsec_service().await?;
@@ -693,6 +765,23 @@ fn remote_lapi_connection_error(kind: ErrorKind) -> FwcError {
     }
 }
 
+fn remote_lapi_connectivity_error_code(error: &FwcError) -> Option<&'static str> {
+    match error {
+        FwcError::CrowdSec { code, .. }
+            if matches!(
+                *code,
+                LAPI_HOST_UNRESOLVABLE
+                    | LAPI_CONNECTION_REFUSED
+                    | LAPI_CONNECTION_TIMEOUT
+                    | LAPI_CONNECTION_FAILED
+            ) =>
+        {
+            Some(*code)
+        }
+        _ => None,
+    }
+}
+
 fn invalid_remote_lapi_error() -> FwcError {
     FwcError::crowdsec(
         LAPI_INVALID,
@@ -709,6 +798,12 @@ fn emit_progress(progress: Option<&CrowdSecProgress>, message: &str) {
 fn emit_success(progress: Option<&CrowdSecProgress>, message: &str) {
     if let Some(progress) = progress {
         progress.typed_message(CrowdSecProgressMessageType::Success, message);
+    }
+}
+
+fn emit_warning(progress: Option<&CrowdSecProgress>, message: &str) {
+    if let Some(progress) = progress {
+        progress.typed_message(CrowdSecProgressMessageType::Warning, message);
     }
 }
 
@@ -946,9 +1041,9 @@ mod tests {
 
     use super::{
         central_lapi_configuration, machine_from_json, machine_reauthentication_required_message,
-        machines_from_json, remote_lapi_connection_error, remote_lapi_socket_address,
-        remote_lapi_url, remote_machine_configuration, validate_listen_uri,
-        validate_machine_name,
+        machines_from_json, remote_lapi_connection_error, remote_lapi_connectivity_error_code,
+        remote_lapi_socket_address, remote_lapi_url, remote_machine_configuration,
+        validate_listen_uri, validate_machine_name,
     };
     use crate::{
         crowdsec::{
@@ -1024,6 +1119,20 @@ mod tests {
             crowdsec_error_code(remote_lapi_connection_error(ErrorKind::ConnectionReset)),
             LAPI_CONNECTION_FAILED,
         );
+    }
+
+    #[test]
+    fn identifies_deferred_machine_connectivity_errors() {
+        let refused = remote_lapi_connection_error(ErrorKind::ConnectionRefused);
+        assert_eq!(
+            remote_lapi_connectivity_error_code(&refused),
+            Some(LAPI_CONNECTION_REFUSED),
+        );
+        assert!(remote_lapi_connectivity_error_code(&FwcError::crowdsec(
+            crate::crowdsec::errors::MACHINE_INVALID,
+            "Invalid CrowdSec machine name",
+        ))
+        .is_none());
     }
 
     #[test]
