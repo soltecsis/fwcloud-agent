@@ -250,6 +250,23 @@ pub(crate) async fn verify_source(
     Ok(())
 }
 
+pub(crate) async fn verify_pending_machine_source(expected: &TransitionTarget) -> Result<()> {
+    if expected.mode != TransitionMode::Machine || expected.local_remediation {
+        return Err(conflict());
+    }
+    let configuration = fs::read_to_string(CONFIG).await.map_err(|_| conflict())?;
+    if !configuration
+        .lines()
+        .any(|line| line.trim() == "enable: false")
+    {
+        return Err(conflict());
+    }
+    match fs::read_to_string(CREDENTIALS).await {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        _ => Err(conflict()),
+    }
+}
+
 async fn restore(backup: &Backup) -> Result<()> {
     let _ = service("disable --now", BOUNCER).await;
     let _ = service("disable --now", ENGINE).await;
@@ -510,6 +527,7 @@ mod tests {
             target,
             authority_changed: true,
             backend: None,
+            machine_connectivity_pending: false,
             ws_id: None,
         };
         assert!(is_supported(&request));
@@ -530,6 +548,7 @@ mod tests {
             },
             authority_changed: true,
             backend: None,
+            machine_connectivity_pending: false,
             ws_id: None,
         };
         assert!(is_supported(&without_remediation));

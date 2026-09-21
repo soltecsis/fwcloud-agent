@@ -141,11 +141,22 @@ pub async fn prepare(
     } else {
         None
     };
-    remote::verify_source(&request.expected, source_backend).await?;
-    progress.typed_message(
-        CrowdSecProgressMessageType::Warning,
-        "Active CrowdSec decisions are not migrated to the restored local Local API",
-    );
+    if request.machine_connectivity_pending {
+        remote::verify_pending_machine_source(&request.expected).await?;
+    } else {
+        remote::verify_source(&request.expected, source_backend).await?;
+    }
+    if request.machine_connectivity_pending {
+        progress.typed_message(
+            CrowdSecProgressMessageType::Info,
+            "Restoring a pending CrowdSec Machine as a standalone Local API",
+        );
+    } else {
+        progress.typed_message(
+            CrowdSecProgressMessageType::Warning,
+            "Active CrowdSec decisions are not migrated to the restored local Local API",
+        );
+    }
     std::fs::create_dir_all(directory(data)).map_err(|_| failed())?;
     std::fs::set_permissions(directory(data), std::fs::Permissions::from_mode(0o700))
         .map_err(|_| failed())?;
@@ -157,13 +168,18 @@ pub async fn prepare(
         target: request.target.clone(),
         backend: request.backend,
         changed: true,
-        central_machine_cleanup_required: true,
-        central_bouncer_cleanup_required: request.expected.local_remediation,
+        central_machine_cleanup_required: !request.machine_connectivity_pending,
+        central_bouncer_cleanup_required: !request.machine_connectivity_pending
+            && request.expected.local_remediation,
     };
     save(data, &state)?;
     progress.typed_message(
         CrowdSecProgressMessageType::Success,
-        "CrowdSec standalone restoration is prepared; remove central Machine and Bouncer registrations before activation",
+        if request.machine_connectivity_pending {
+            "CrowdSec standalone restoration is prepared"
+        } else {
+            "CrowdSec standalone restoration is prepared; remove central Machine and Bouncer registrations before activation"
+        },
     );
     Ok(state)
 }
@@ -271,6 +287,7 @@ mod tests {
             },
             authority_changed: true,
             backend: Some(CrowdSecFirewallBackend::Iptables),
+            machine_connectivity_pending: false,
             ws_id: None,
         };
         assert!(supported(&request));

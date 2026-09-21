@@ -64,6 +64,8 @@ pub struct TransitionPrepareRequest {
     pub target: TransitionTarget,
     pub authority_changed: bool,
     pub backend: Option<CrowdSecFirewallBackend>,
+    #[serde(default)]
+    pub machine_connectivity_pending: bool,
     pub ws_id: Option<Uuid>,
 }
 
@@ -180,6 +182,15 @@ pub fn validate(request: &TransitionPrepareRequest) -> Result<()> {
             "Standalone cannot change to a remote Local API authority",
         ));
     }
+    if request.machine_connectivity_pending
+        && (request.expected.mode != TransitionMode::Machine
+            || request.target.mode != TransitionMode::Standalone
+            || request.expected.local_remediation)
+    {
+        return Err(invalid(
+            "Pending Machine connectivity is only valid when restoring a Machine without local remediation",
+        ));
+    }
     if !request.authority_changed && request.expected.machine_name != request.target.machine_name {
         return Err(invalid(
             "Changing only the Local API address must preserve the Machine name",
@@ -294,5 +305,22 @@ mod tests {
         }))
         .unwrap();
         assert!(validate(&request).is_ok());
+    }
+
+    #[test]
+    fn accepts_pending_machine_connectivity_when_restoring_standalone() {
+        let request: TransitionPrepareRequest = serde_json::from_value(serde_json::json!({
+            "transition_id": Uuid::new_v4(), "confirm": true,
+            "expected": {"mode":"machine", "local_remediation":false,
+                "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
+            "target": {"mode":"standalone", "local_remediation":true},
+            "authority_changed": true,
+            "backend": "iptables",
+            "machine_connectivity_pending": true
+        }))
+        .unwrap();
+
+        assert!(validate(&request).is_ok());
+        assert!(request.machine_connectivity_pending);
     }
 }
