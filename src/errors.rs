@@ -165,11 +165,6 @@ impl ResponseError for FwcError {
             FwcError::ApiKeyNotValid | FwcError::ApiKeyNotFound | &FwcError::NotAllowedIP => {
                 StatusCode::FORBIDDEN
             }
-            FwcError::CrowdSec { code, .. }
-                if *code == crate::crowdsec::errors::LAPI_PREFLIGHT_TOKEN_INVALID =>
-            {
-                StatusCode::FORBIDDEN
-            }
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

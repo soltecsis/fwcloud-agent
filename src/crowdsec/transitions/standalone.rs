@@ -87,16 +87,22 @@ fn save(data: &str, state: &StandaloneTransition) -> Result<()> {
         std::fs::rename(&temporary, &path)?;
         Ok(())
     })();
-    if result.is_err() { let _ = std::fs::remove_file(temporary); }
+    if result.is_err() {
+        let _ = std::fs::remove_file(temporary);
+    }
     result.map_err(|_: FwcError| failed())
 }
 
 pub async fn load(data: &str, id: Uuid) -> Result<StandaloneTransition> {
     let state: StandaloneTransition = serde_json::from_slice(
-        &fs::read(state_path(data, id)).await.map_err(|_| conflict())?,
+        &fs::read(state_path(data, id))
+            .await
+            .map_err(|_| conflict())?,
     )
     .map_err(|_| recovery())?;
-    if state.kind != TransitionKind::Standalone { return Err(conflict()); }
+    if state.kind != TransitionKind::Standalone {
+        return Err(conflict());
+    }
     Ok(state)
 }
 
@@ -112,10 +118,15 @@ pub async fn prepare(
     progress: &CrowdSecProgress,
 ) -> Result<StandaloneTransition> {
     validate(request)?;
-    if !supported(request) { return Err(unsupported()); }
+    if !supported(request) {
+        return Err(unsupported());
+    }
     if state_path(data, request.transition_id).exists() {
         let state = load(data, request.transition_id).await?;
-        if state.expected != request.expected || state.target != request.target || state.backend != request.backend {
+        if state.expected != request.expected
+            || state.target != request.target
+            || state.backend != request.backend
+        {
             return Err(conflict());
         }
         return Ok(state);
@@ -123,18 +134,32 @@ pub async fn prepare(
     address::ensure_idle(data).await?;
     let source_backend = if request.expected.local_remediation {
         let backend = bouncers::configured_backend().await?.ok_or_else(conflict)?;
-        if Some(backend) != request.backend { return Err(conflict()); }
+        if Some(backend) != request.backend {
+            return Err(conflict());
+        }
         Some(backend)
     } else {
         None
     };
-    remote::verify_source(&request.expected, source_backend).await?;
-    progress.typed_message(
-        CrowdSecProgressMessageType::Warning,
-        "Active CrowdSec decisions are not migrated to the restored local Local API",
-    );
+    if request.machine_connectivity_pending {
+        remote::verify_pending_machine_source(&request.expected).await?;
+    } else {
+        remote::verify_source(&request.expected, source_backend).await?;
+    }
+    if request.machine_connectivity_pending {
+        progress.typed_message(
+            CrowdSecProgressMessageType::Info,
+            "Restoring a pending CrowdSec Machine as a standalone Local API",
+        );
+    } else {
+        progress.typed_message(
+            CrowdSecProgressMessageType::Warning,
+            "Active CrowdSec decisions are not migrated to the restored local Local API",
+        );
+    }
     std::fs::create_dir_all(directory(data)).map_err(|_| failed())?;
-    std::fs::set_permissions(directory(data), std::fs::Permissions::from_mode(0o700)).map_err(|_| failed())?;
+    std::fs::set_permissions(directory(data), std::fs::Permissions::from_mode(0o700))
+        .map_err(|_| failed())?;
     let state = StandaloneTransition {
         kind: TransitionKind::Standalone,
         transition_id: request.transition_id,
@@ -143,13 +168,18 @@ pub async fn prepare(
         target: request.target.clone(),
         backend: request.backend,
         changed: true,
-        central_machine_cleanup_required: true,
-        central_bouncer_cleanup_required: request.expected.local_remediation,
+        central_machine_cleanup_required: !request.machine_connectivity_pending,
+        central_bouncer_cleanup_required: !request.machine_connectivity_pending
+            && request.expected.local_remediation,
     };
     save(data, &state)?;
     progress.typed_message(
         CrowdSecProgressMessageType::Success,
-        "CrowdSec standalone restoration is prepared; remove central Machine and Bouncer registrations before activation",
+        if request.machine_connectivity_pending {
+            "CrowdSec standalone restoration is prepared"
+        } else {
+            "CrowdSec standalone restoration is prepared; remove central Machine and Bouncer registrations before activation"
+        },
     );
     Ok(state)
 }
@@ -159,15 +189,25 @@ pub async fn activate(
     request: &TransitionActivateRequest,
     progress: &CrowdSecProgress,
 ) -> Result<StandaloneTransition> {
-    if request.bouncer_api_key.is_some() { return Err(conflict()); }
+    if request.bouncer_api_key.is_some() {
+        return Err(conflict());
+    }
     let mut state = load(data, request.transition_id).await?;
-    if matches!(state.phase, TransitionPhase::ActivePendingFinalize | TransitionPhase::Completed) {
+    if matches!(
+        state.phase,
+        TransitionPhase::ActivePendingFinalize | TransitionPhase::Completed
+    ) {
         return Ok(state);
     }
-    if state.phase != TransitionPhase::Prepared { return Err(conflict()); }
+    if state.phase != TransitionPhase::Prepared {
+        return Err(conflict());
+    }
     state.phase = TransitionPhase::Activating;
     save(data, &state)?;
-    progress.typed_message(CrowdSecProgressMessageType::Info, "Restoring CrowdSec local Local API credentials");
+    progress.typed_message(
+        CrowdSecProgressMessageType::Info,
+        "Restoring CrowdSec local Local API credentials",
+    );
     let result: Result<()> = async {
         if state.expected.local_remediation {
             bouncers::disable_local_remediation_with_progress(Some(progress)).await?;
@@ -176,9 +216,11 @@ pub async fn activate(
         bouncers::install_with_backend_and_progress(
             state.backend.ok_or_else(conflict)?,
             Some(progress),
-        ).await?;
+        )
+        .await?;
         Ok(())
-    }.await;
+    }
+    .await;
     if let Err(error) = result {
         state.phase = TransitionPhase::RecoveryRequired;
         save(data, &state)?;
@@ -186,13 +228,21 @@ pub async fn activate(
     }
     state.phase = TransitionPhase::ActivePendingFinalize;
     save(data, &state)?;
-    progress.typed_message(CrowdSecProgressMessageType::Success, "CrowdSec standalone Local API and local remediation are active");
+    progress.typed_message(
+        CrowdSecProgressMessageType::Success,
+        "CrowdSec standalone Local API and local remediation are active",
+    );
     Ok(state)
 }
 
 pub async fn finalize(data: &str, id: Uuid) -> Result<StandaloneTransition> {
     let mut state = load(data, id).await?;
-    if !matches!(state.phase, TransitionPhase::ActivePendingFinalize | TransitionPhase::Completed) { return Err(conflict()); }
+    if !matches!(
+        state.phase,
+        TransitionPhase::ActivePendingFinalize | TransitionPhase::Completed
+    ) {
+        return Err(conflict());
+    }
     state.phase = TransitionPhase::Completed;
     save(data, &state)?;
     Ok(state)
@@ -203,8 +253,12 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<StandaloneTransition> {
 /// former Machine is unsafe without API coordination and remains explicit.
 pub async fn recover(data: &str, id: Uuid) -> Result<StandaloneTransition> {
     let mut state = load(data, id).await?;
-    if state.phase == TransitionPhase::RolledBack { return Ok(state); }
-    if state.phase != TransitionPhase::Prepared { return Err(recovery()); }
+    if state.phase == TransitionPhase::RolledBack {
+        return Ok(state);
+    }
+    if state.phase != TransitionPhase::Prepared {
+        return Err(recovery());
+    }
     state.phase = TransitionPhase::RolledBack;
     save(data, &state)?;
     Ok(state)
@@ -217,18 +271,24 @@ mod tests {
     #[test]
     fn accepts_only_machine_to_standalone_authority_changes() {
         let request = TransitionPrepareRequest {
-            transition_id: Uuid::new_v4(), confirm: true,
+            transition_id: Uuid::new_v4(),
+            confirm: true,
             expected: TransitionTarget {
-                mode: TransitionMode::Machine, local_remediation: false,
+                mode: TransitionMode::Machine,
+                local_remediation: false,
                 machine_name: Some("fwcloud-node".into()),
                 lapi_url: Some("http://192.0.2.10:8080".into()),
             },
             target: TransitionTarget {
-                mode: TransitionMode::Standalone, local_remediation: true,
-                machine_name: None, lapi_url: None,
+                mode: TransitionMode::Standalone,
+                local_remediation: true,
+                machine_name: None,
+                lapi_url: None,
             },
-            authority_changed: true, backend: Some(CrowdSecFirewallBackend::Iptables),
-            preflight: None, ws_id: None,
+            authority_changed: true,
+            backend: Some(CrowdSecFirewallBackend::Iptables),
+            machine_connectivity_pending: false,
+            ws_id: None,
         };
         assert!(supported(&request));
     }
@@ -261,8 +321,13 @@ mod tests {
             central_bouncer_cleanup_required: false,
         };
         save(data, &state).unwrap();
-        assert!(!std::fs::read_to_string(state_path(data, id)).unwrap().contains("password"));
-        assert_eq!(recover(data, id).await.unwrap().phase, TransitionPhase::RolledBack);
+        assert!(!std::fs::read_to_string(state_path(data, id))
+            .unwrap()
+            .contains("password"));
+        assert_eq!(
+            recover(data, id).await.unwrap().phase,
+            TransitionPhase::RolledBack
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

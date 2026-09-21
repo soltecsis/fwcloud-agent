@@ -35,8 +35,7 @@ use crate::{
             CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
             CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
             CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
-            CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecLapiPreflightRequest,
-            CrowdSecLapiPreflightTokenRequest, CrowdSecRemoteMachineActivationRequest,
+            CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecRemoteMachineActivationRequest,
             CrowdSecRemoteMachineReauthenticationRequest, CrowdSecRemoteMachineResumeRequest,
             CrowdSecUninstallRequest,
         },
@@ -56,7 +55,10 @@ async fn preflight_crowdsec_transition(
     match crate::crowdsec::transitions::preflight(&request, &progress).await {
         Ok(response) => Ok(HttpResponse::Ok().json(response)),
         Err(error) => {
-            progress.typed_message(CrowdSecProgressMessageType::Error, "CrowdSec transition preflight failed");
+            progress.typed_message(
+                CrowdSecProgressMessageType::Error,
+                "CrowdSec transition validation failed",
+            );
             Err(error)
         }
     }
@@ -75,23 +77,27 @@ async fn prepare_crowdsec_transition(
         && request.expected.local_remediation != request.target.local_remediation
     {
         Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::remediation::prepare(cfg.data_dir, &request, &progress).await?,
+            crate::crowdsec::transitions::remediation::prepare(cfg.data_dir, &request, &progress)
+                .await?,
         ))
     } else if request.authority_changed
         && request.target.mode == crate::crowdsec::transitions::TransitionMode::Machine
     {
         Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::remote::prepare(cfg.data_dir, &request, &progress).await?,
+            crate::crowdsec::transitions::remote::prepare(cfg.data_dir, &request, &progress)
+                .await?,
         ))
     } else if request.authority_changed
         && request.target.mode == crate::crowdsec::transitions::TransitionMode::Standalone
     {
         Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::standalone::prepare(cfg.data_dir, &request, &progress).await?,
+            crate::crowdsec::transitions::standalone::prepare(cfg.data_dir, &request, &progress)
+                .await?,
         ))
     } else {
         Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::address::prepare(cfg.data_dir, &request, &progress).await?,
+            crate::crowdsec::transitions::address::prepare(cfg.data_dir, &request, &progress)
+                .await?,
         ))
     }
 }
@@ -105,84 +111,118 @@ async fn activate_crowdsec_transition(
     let _guard = cfg.mutex.crowdsec.lock().await;
     if request.transition_id.is_nil() {
         return Err(crate::errors::FwcError::crowdsec(
-            crate::crowdsec::errors::TRANSITION_INVALID, "A transition identifier is required",
+            crate::crowdsec::errors::TRANSITION_INVALID,
+            "A transition identifier is required",
         ));
     }
     match crate::crowdsec::transitions::kind(cfg.data_dir, request.transition_id).await? {
         crate::crowdsec::transitions::TransitionKind::Address => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::address::activate(cfg.data_dir, &request, &progress).await?,
+            crate::crowdsec::transitions::address::activate(cfg.data_dir, &request, &progress)
+                .await?,
         )),
         crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::remote::activate(cfg.data_dir, &request, &progress).await?,
+            crate::crowdsec::transitions::remote::activate(cfg.data_dir, &request, &progress)
+                .await?,
         )),
         crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::remediation::activate(cfg.data_dir, &request, &progress).await?,
+            crate::crowdsec::transitions::remediation::activate(cfg.data_dir, &request, &progress)
+                .await?,
         )),
         crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::standalone::activate(cfg.data_dir, &request, &progress).await?,
+            crate::crowdsec::transitions::standalone::activate(cfg.data_dir, &request, &progress)
+                .await?,
         )),
     }
 }
 
 #[get("/crowdsec/transitions/{id}")]
-async fn crowdsec_transition(cfg: web::Data<Arc<Config>>, id: web::Path<uuid::Uuid>) -> Result<HttpResponse> {
+async fn crowdsec_transition(
+    cfg: web::Data<Arc<Config>>,
+    id: web::Path<uuid::Uuid>,
+) -> Result<HttpResponse> {
     let _guard = cfg.mutex.crowdsec.lock().await;
     match crate::crowdsec::transitions::kind(cfg.data_dir, *id).await? {
-        crate::crowdsec::transitions::TransitionKind::Address => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::address::load(cfg.data_dir, *id).await?,
-        )),
-        crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::remote::load(cfg.data_dir, *id).await?,
-        )),
-        crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::remediation::load(cfg.data_dir, *id).await?,
-        )),
-        crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::standalone::load(cfg.data_dir, *id).await?,
-        )),
+        crate::crowdsec::transitions::TransitionKind::Address => Ok(HttpResponse::Ok()
+            .json(crate::crowdsec::transitions::address::load(cfg.data_dir, *id).await?)),
+        crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok()
+            .json(crate::crowdsec::transitions::remote::load(cfg.data_dir, *id).await?)),
+        crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok()
+            .json(crate::crowdsec::transitions::remediation::load(cfg.data_dir, *id).await?)),
+        crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok()
+            .json(crate::crowdsec::transitions::standalone::load(cfg.data_dir, *id).await?)),
     }
 }
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct TransitionConfirmation { transition_id: uuid::Uuid, confirm: bool }
+struct TransitionConfirmation {
+    transition_id: uuid::Uuid,
+    confirm: bool,
+}
 
 #[post("/crowdsec/transitions/recover")]
-async fn recover_crowdsec_transition(cfg: web::Data<Arc<Config>>, request: web::Json<TransitionConfirmation>) -> Result<HttpResponse> {
+async fn recover_crowdsec_transition(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<TransitionConfirmation>,
+) -> Result<HttpResponse> {
     let _guard = cfg.mutex.crowdsec.lock().await;
-    if !request.confirm { return Err(crate::errors::FwcError::crowdsec(crate::crowdsec::errors::TRANSITION_INVALID, "Explicit confirmation is required")); }
+    if !request.confirm {
+        return Err(crate::errors::FwcError::crowdsec(
+            crate::crowdsec::errors::TRANSITION_INVALID,
+            "Explicit confirmation is required",
+        ));
+    }
     match crate::crowdsec::transitions::kind(cfg.data_dir, request.transition_id).await? {
         crate::crowdsec::transitions::TransitionKind::Address => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::address::recover(cfg.data_dir, request.transition_id).await?,
+            crate::crowdsec::transitions::address::recover(cfg.data_dir, request.transition_id)
+                .await?,
         )),
         crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::remote::recover(cfg.data_dir, request.transition_id).await?,
+            crate::crowdsec::transitions::remote::recover(cfg.data_dir, request.transition_id)
+                .await?,
         )),
         crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::remediation::recover(cfg.data_dir, request.transition_id).await?,
+            crate::crowdsec::transitions::remediation::recover(cfg.data_dir, request.transition_id)
+                .await?,
         )),
         crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::standalone::recover(cfg.data_dir, request.transition_id).await?,
+            crate::crowdsec::transitions::standalone::recover(cfg.data_dir, request.transition_id)
+                .await?,
         )),
     }
 }
 
 #[post("/crowdsec/transitions/finalize")]
-async fn finalize_crowdsec_transition(cfg: web::Data<Arc<Config>>, request: web::Json<TransitionConfirmation>) -> Result<HttpResponse> {
+async fn finalize_crowdsec_transition(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<TransitionConfirmation>,
+) -> Result<HttpResponse> {
     let _guard = cfg.mutex.crowdsec.lock().await;
-    if !request.confirm { return Err(crate::errors::FwcError::crowdsec(crate::crowdsec::errors::TRANSITION_INVALID, "Explicit confirmation is required")); }
+    if !request.confirm {
+        return Err(crate::errors::FwcError::crowdsec(
+            crate::crowdsec::errors::TRANSITION_INVALID,
+            "Explicit confirmation is required",
+        ));
+    }
     match crate::crowdsec::transitions::kind(cfg.data_dir, request.transition_id).await? {
         crate::crowdsec::transitions::TransitionKind::Address => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::address::finalize(cfg.data_dir, request.transition_id).await?,
+            crate::crowdsec::transitions::address::finalize(cfg.data_dir, request.transition_id)
+                .await?,
         )),
         crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::remote::finalize(cfg.data_dir, request.transition_id).await?,
+            crate::crowdsec::transitions::remote::finalize(cfg.data_dir, request.transition_id)
+                .await?,
         )),
         crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::remediation::finalize(cfg.data_dir, request.transition_id).await?,
+            crate::crowdsec::transitions::remediation::finalize(
+                cfg.data_dir,
+                request.transition_id,
+            )
+            .await?,
         )),
         crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::standalone::finalize(cfg.data_dir, request.transition_id).await?,
+            crate::crowdsec::transitions::standalone::finalize(cfg.data_dir, request.transition_id)
+                .await?,
         )),
     }
 }
@@ -453,59 +493,6 @@ async fn configure_crowdsec_central_lapi(
     Ok(HttpResponse::Ok().json(response))
 }
 
-#[post("/crowdsec/lapi/preflight-tokens")]
-async fn issue_crowdsec_lapi_preflight_token(
-    cfg: web::Data<Arc<Config>>,
-    request: web::Json<CrowdSecLapiPreflightTokenRequest>,
-) -> Result<HttpResponse> {
-    let response = {
-        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
-        let mutex = Arc::clone(&cfg.mutex.crowdsec);
-        let _mutex_data = mutex.lock().await;
-        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
-        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
-
-        lapi::ensure_central_ready().await?;
-        let token_result = lapi::issue_preflight_token(cfg.data_dir, &request.machine_name);
-
-        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
-        token_result?
-    };
-
-    Ok(HttpResponse::Ok().json(response))
-}
-
-#[post("/crowdsec/lapi/ping")]
-async fn crowdsec_lapi_ping() -> HttpResponse {
-    HttpResponse::NoContent().finish()
-}
-
-#[post("/crowdsec/lapi/preflight")]
-async fn preflight_crowdsec_lapi(
-    cfg: web::Data<Arc<Config>>,
-    request: web::Json<CrowdSecLapiPreflightRequest>,
-) -> Result<HttpResponse> {
-    {
-        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
-        let mutex = Arc::clone(&cfg.mutex.crowdsec);
-        let _mutex_data = mutex.lock().await;
-        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
-        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
-
-        let preflight_result = lapi::preflight_remote_machine(
-            &request.central_agent_url,
-            &request.central_agent_tls_fingerprint,
-            &request.token,
-        )
-        .await;
-
-        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
-        preflight_result?;
-    }
-
-    Ok(HttpResponse::NoContent().finish())
-}
-
 #[get("/crowdsec/lapi/machines")]
 async fn crowdsec_lapi_machines(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
     let response = {
@@ -592,9 +579,6 @@ async fn reauthenticate_crowdsec_remote_machine(
         lapi::reauthenticate_remote_machine(
             &request.machine_name,
             &request.lapi_url,
-            &request.central_agent_url,
-            &request.central_agent_tls_fingerprint,
-            &request.preflight_token,
             Some(&progress),
         )
         .await?
@@ -717,15 +701,7 @@ async fn install_crowdsec(
                 let install_result = lapi::install_remote_machine(
                     required_machine_install_value(&request.machine_name, "machine_name")?,
                     required_machine_install_value(&request.lapi_url, "lapi_url")?,
-                    required_machine_install_value(
-                        &request.central_agent_url,
-                        "central_agent_url",
-                    )?,
-                    required_machine_install_value(
-                        &request.central_agent_tls_fingerprint,
-                        "central_agent_tls_fingerprint",
-                    )?,
-                    required_machine_install_value(&request.preflight_token, "preflight_token")?,
+                    request.continue_without_lapi_connectivity,
                     Some(&progress),
                 )
                 .await;
@@ -756,11 +732,6 @@ fn required_machine_install_value<'a>(value: &'a Option<String>, field: &str) ->
                 match field {
                     "machine_name" => "CrowdSec machine name is required",
                     "lapi_url" => "CrowdSec Local API URL is required",
-                    "central_agent_url" => "Central CrowdSec agent URL is required",
-                    "central_agent_tls_fingerprint" => {
-                        "Central CrowdSec agent TLS fingerprint is required"
-                    }
-                    "preflight_token" => "CrowdSec Local API preflight token is required",
                     _ => "Invalid CrowdSec machine installation request",
                 },
             )

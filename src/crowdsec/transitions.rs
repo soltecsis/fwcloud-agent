@@ -35,8 +35,8 @@ use super::{
 use crate::errors::{FwcError, Result};
 
 pub mod address;
-pub mod remote;
 pub mod remediation;
+pub mod remote;
 pub mod standalone;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -55,15 +55,6 @@ pub struct TransitionTarget {
     pub lapi_url: Option<String>,
 }
 
-// Deliberately not Debug or Serialize: this structure contains a one-time secret.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TransitionPreflight {
-    pub central_agent_url: String,
-    pub central_agent_tls_fingerprint: String,
-    pub preflight_token: String,
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransitionPrepareRequest {
@@ -73,7 +64,8 @@ pub struct TransitionPrepareRequest {
     pub target: TransitionTarget,
     pub authority_changed: bool,
     pub backend: Option<CrowdSecFirewallBackend>,
-    pub preflight: Option<TransitionPreflight>,
+    #[serde(default)]
+    pub machine_connectivity_pending: bool,
     pub ws_id: Option<Uuid>,
 }
 
@@ -112,18 +104,13 @@ pub async fn kind(data_directory: &str, transition_id: Uuid) -> Result<Transitio
     let path = Path::new(data_directory)
         .join("crowdsec/transitions")
         .join(format!("{transition_id}.json"));
-    let state: serde_json::Value = serde_json::from_slice(
-        &fs::read(path)
-            .await
-            .map_err(|_| FwcError::crowdsec(TRANSITION_UNSUPPORTED, "CrowdSec transition is not found"))?,
-    )
+    let state: serde_json::Value = serde_json::from_slice(&fs::read(path).await.map_err(|_| {
+        FwcError::crowdsec(TRANSITION_UNSUPPORTED, "CrowdSec transition is not found")
+    })?)
     .map_err(|_| FwcError::crowdsec(TRANSITION_INVALID, "CrowdSec transition state is invalid"))?;
-    serde_json::from_value(
-        state
-            .get("kind")
-            .cloned()
-            .ok_or_else(|| FwcError::crowdsec(TRANSITION_INVALID, "CrowdSec transition state is invalid"))?,
-    )
+    serde_json::from_value(state.get("kind").cloned().ok_or_else(|| {
+        FwcError::crowdsec(TRANSITION_INVALID, "CrowdSec transition state is invalid")
+    })?)
     .map_err(|_| FwcError::crowdsec(TRANSITION_INVALID, "CrowdSec transition state is invalid"))
 }
 
@@ -182,11 +169,6 @@ pub fn validate(request: &TransitionPrepareRequest) -> Result<()> {
             "A firewall backend is required only for local remediation",
         ));
     }
-    if (request.target.mode == TransitionMode::Machine) != request.preflight.is_some() {
-        return Err(invalid(
-            "Remote Machine transitions require central agent preflight data",
-        ));
-    }
     if request.expected.mode != request.target.mode && !request.authority_changed {
         return Err(invalid(
             "Changing between standalone and Machine changes the Local API authority",
@@ -200,6 +182,15 @@ pub fn validate(request: &TransitionPrepareRequest) -> Result<()> {
             "Standalone cannot change to a remote Local API authority",
         ));
     }
+    if request.machine_connectivity_pending
+        && (request.expected.mode != TransitionMode::Machine
+            || request.target.mode != TransitionMode::Standalone
+            || request.expected.local_remediation)
+    {
+        return Err(invalid(
+            "Pending Machine connectivity is only valid when restoring a Machine without local remediation",
+        ));
+    }
     if !request.authority_changed && request.expected.machine_name != request.target.machine_name {
         return Err(invalid(
             "Changing only the Local API address must preserve the Machine name",
@@ -208,8 +199,9 @@ pub fn validate(request: &TransitionPrepareRequest) -> Result<()> {
     Ok(())
 }
 
-/// Checks connectivity only. It does not reserve a transition or establish its
-/// effective source role; prepare must recheck before changing configuration.
+/// Validates transition prerequisites without reserving a transition or
+/// establishing its effective source role; prepare rechecks before changing
+/// configuration.
 pub async fn preflight(
     request: &TransitionPrepareRequest,
     progress: &CrowdSecProgress,
@@ -221,17 +213,7 @@ pub async fn preflight(
             "CrowdSec is not installed",
         ));
     }
-    if let Some(remote) = &request.preflight {
-        progress.typed_message(
-            CrowdSecProgressMessageType::Info,
-            "Checking central CrowdSec agent connectivity",
-        );
-        lapi::preflight_remote_machine(
-            &remote.central_agent_url,
-            &remote.central_agent_tls_fingerprint,
-            &remote.preflight_token,
-        )
-        .await?;
+    if request.target.mode == TransitionMode::Machine {
         progress.typed_message(
             CrowdSecProgressMessageType::Info,
             "Checking central CrowdSec Local API connectivity",
@@ -247,13 +229,13 @@ pub async fn preflight(
     }
     progress.typed_message(
         CrowdSecProgressMessageType::Success,
-        "CrowdSec transition preflight completed; configuration is unchanged",
+        "CrowdSec transition requirements validated; configuration is unchanged",
     );
     Ok(TransitionPreflightResponse {
         transition_id: request.transition_id,
         phase: TransitionPhase::Checking,
-        connectivity_checked: request.preflight.is_some(),
-        message: "Preflight completed; transition has not been prepared",
+        connectivity_checked: request.target.mode == TransitionMode::Machine,
+        message: "Transition requirements validated; configuration has not been prepared",
     })
 }
 
@@ -274,9 +256,7 @@ mod tests {
             "expected": {"mode":"standalone", "local_remediation":true},
             "target": {"mode":"machine", "local_remediation":false,
                 "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
-            "authority_changed":true,
-            "preflight": {"central_agent_url":"https://192.0.2.1:33033",
-                "central_agent_tls_fingerprint":"a".repeat(64), "preflight_token":"secret"}
+            "authority_changed":true
         }))
         .unwrap()
     }
@@ -293,13 +273,24 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_preflight_and_backend() {
+    fn rejects_missing_backend_for_local_remediation() {
         let mut value = request();
         value.target.local_remediation = true;
         assert!(validate(&value).is_err());
-        value.target.local_remediation = false;
-        value.preflight = None;
-        assert!(validate(&value).is_err());
+    }
+
+    #[test]
+    fn rejects_legacy_agent_preflight_data() {
+        let request = serde_json::from_value::<TransitionPrepareRequest>(serde_json::json!({
+            "transition_id": Uuid::new_v4(), "confirm": true,
+            "expected": {"mode":"standalone", "local_remediation":false},
+            "target": {"mode":"machine", "local_remediation":false,
+                "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
+            "authority_changed": true,
+            "preflight": {"preflight_token":"obsolete"}
+        }));
+
+        assert!(request.is_err());
     }
 
     #[test]
@@ -310,11 +301,26 @@ mod tests {
                 "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
             "target": {"mode":"machine", "local_remediation":false,
                 "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
-            "authority_changed": false,
-            "preflight": {"central_agent_url":"https://192.0.2.1:33033",
-                "central_agent_tls_fingerprint":"a".repeat(64), "preflight_token":"secret"}
+            "authority_changed": false
         }))
         .unwrap();
         assert!(validate(&request).is_ok());
+    }
+
+    #[test]
+    fn accepts_pending_machine_connectivity_when_restoring_standalone() {
+        let request: TransitionPrepareRequest = serde_json::from_value(serde_json::json!({
+            "transition_id": Uuid::new_v4(), "confirm": true,
+            "expected": {"mode":"machine", "local_remediation":false,
+                "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
+            "target": {"mode":"standalone", "local_remediation":true},
+            "authority_changed": true,
+            "backend": "iptables",
+            "machine_connectivity_pending": true
+        }))
+        .unwrap();
+
+        assert!(validate(&request).is_ok());
+        assert!(request.machine_connectivity_pending);
     }
 }

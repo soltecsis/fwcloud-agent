@@ -980,11 +980,17 @@ pub async fn uninstall_with_progress(
 pub async fn disable_local_remediation_with_progress(
     progress: Option<&CrowdSecProgress>,
 ) -> Result<()> {
-    let backend = configured_backend()
-        .await?
-        .ok_or_else(|| FwcError::crowdsec(BOUNCER_CONFLICT, "FWCloud CrowdSec Firewall Bouncer is not configured"))?;
+    let backend = configured_backend().await?.ok_or_else(|| {
+        FwcError::crowdsec(
+            BOUNCER_CONFLICT,
+            "FWCloud CrowdSec Firewall Bouncer is not configured",
+        )
+    })?;
 
-    emit_progress(progress, "Stopping local CrowdSec Firewall Bouncer remediation");
+    emit_progress(
+        progress,
+        "Stopping local CrowdSec Firewall Bouncer remediation",
+    );
     disable_systemd_service(FIREWALL_BOUNCER_SERVICE).await?;
     remove_bouncer_package_transition_drop_in().await?;
     remove_bouncer_configuration().await?;
@@ -1367,7 +1373,10 @@ pub(crate) fn configuration_is_fwcloud_managed(configuration: &str) -> bool {
         .any(|line| line.trim() == FWCLOUD_BOUNCER_CONFIGURATION_MARKER)
 }
 
-pub(crate) fn configuration_is_set_only(configuration: &str, backend: CrowdSecFirewallBackend) -> bool {
+pub(crate) fn configuration_is_set_only(
+    configuration: &str,
+    backend: CrowdSecFirewallBackend,
+) -> bool {
     let expected = match backend {
         CrowdSecFirewallBackend::Iptables => vec![
             ("mode", "ipset"),

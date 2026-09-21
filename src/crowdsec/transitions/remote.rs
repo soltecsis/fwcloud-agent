@@ -67,7 +67,10 @@ struct Backup {
 }
 
 fn failed() -> FwcError {
-    FwcError::crowdsec(TRANSITION_FAILED, "CrowdSec Local API authority transition failed")
+    FwcError::crowdsec(
+        TRANSITION_FAILED,
+        "CrowdSec Local API authority transition failed",
+    )
 }
 fn conflict() -> FwcError {
     FwcError::crowdsec(
@@ -119,7 +122,9 @@ fn save(data: &str, state: &RemoteTransition) -> Result<()> {
 }
 
 pub async fn load(data: &str, id: Uuid) -> Result<RemoteTransition> {
-    let bytes = fs::read(state_path(data, id)).await.map_err(|_| conflict())?;
+    let bytes = fs::read(state_path(data, id))
+        .await
+        .map_err(|_| conflict())?;
     let state: RemoteTransition = serde_json::from_slice(&bytes).map_err(|_| recovery())?;
     if state.kind != TransitionKind::Remote {
         return Err(conflict());
@@ -140,13 +145,19 @@ async fn service(action: &str, name: &str) -> Result<()> {
     .await
     .map_err(|_| failed())?
     .map_err(|_| failed())?;
-    if output.status.success() { Ok(()) } else { Err(failed()) }
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(failed())
+    }
 }
 
 async fn running(name: &str) -> Result<bool> {
     let output = timeout(
         Duration::from_secs(15),
-        Command::new("/usr/bin/systemctl").args(["is-active", name]).output(),
+        Command::new("/usr/bin/systemctl")
+            .args(["is-active", name])
+            .output(),
     )
     .await
     .map_err(|_| failed())?
@@ -187,7 +198,12 @@ pub(crate) fn root_scalar(contents: &str, key: &str) -> Result<String> {
     if values.next().is_some() {
         return Err(conflict());
     }
-    let value = raw.split(" #").next().unwrap_or(raw).trim_matches(['\'', '"']).trim();
+    let value = raw
+        .split(" #")
+        .next()
+        .unwrap_or(raw)
+        .trim_matches(['\'', '"'])
+        .trim();
     if value.is_empty() || value.chars().any(char::is_whitespace) {
         return Err(conflict());
     }
@@ -201,13 +217,19 @@ pub(crate) async fn verify_source(
     let configuration = fs::read_to_string(CONFIG).await.map_err(|_| conflict())?;
     match expected.mode {
         TransitionMode::Standalone => {
-            if !configuration.lines().any(|line| line.trim() == "enable: true") {
+            if !configuration
+                .lines()
+                .any(|line| line.trim() == "enable: true")
+            {
                 return Err(conflict());
             }
         }
         TransitionMode::Machine => {
-            let credentials = fs::read_to_string(CREDENTIALS).await.map_err(|_| conflict())?;
-            if root_scalar(&credentials, "login")? != expected.machine_name.as_deref().ok_or_else(conflict)?
+            let credentials = fs::read_to_string(CREDENTIALS)
+                .await
+                .map_err(|_| conflict())?;
+            if root_scalar(&credentials, "login")?
+                != expected.machine_name.as_deref().ok_or_else(conflict)?
                 || lapi::remote_lapi_url(&root_scalar(&credentials, "url")?)?
                     != lapi::remote_lapi_url(expected.lapi_url.as_deref().ok_or_else(conflict)?)?
             {
@@ -216,7 +238,9 @@ pub(crate) async fn verify_source(
         }
     }
     if expected.local_remediation {
-        let configuration = fs::read_to_string(bouncers::BOUNCER_CONFIG_PATH).await.map_err(|_| conflict())?;
+        let configuration = fs::read_to_string(bouncers::BOUNCER_CONFIG_PATH)
+            .await
+            .map_err(|_| conflict())?;
         if !bouncers::configuration_is_fwcloud_managed(&configuration)
             || !bouncers::configuration_is_set_only(&configuration, backend.ok_or_else(conflict)?)
         {
@@ -224,6 +248,23 @@ pub(crate) async fn verify_source(
         }
     }
     Ok(())
+}
+
+pub(crate) async fn verify_pending_machine_source(expected: &TransitionTarget) -> Result<()> {
+    if expected.mode != TransitionMode::Machine || expected.local_remediation {
+        return Err(conflict());
+    }
+    let configuration = fs::read_to_string(CONFIG).await.map_err(|_| conflict())?;
+    if !configuration
+        .lines()
+        .any(|line| line.trim() == "enable: false")
+    {
+        return Err(conflict());
+    }
+    match fs::read_to_string(CREDENTIALS).await {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        _ => Err(conflict()),
+    }
 }
 
 async fn restore(backup: &Backup) -> Result<()> {
@@ -259,8 +300,7 @@ async fn restore(backup: &Backup) -> Result<()> {
 }
 
 fn is_supported(request: &TransitionPrepareRequest) -> bool {
-    request.authority_changed
-        && request.target.mode == TransitionMode::Machine
+    request.authority_changed && request.target.mode == TransitionMode::Machine
 }
 
 pub async fn prepare(
@@ -274,7 +314,10 @@ pub async fn prepare(
     }
     if state_path(data, request.transition_id).exists() {
         let state = load(data, request.transition_id).await?;
-        if state.expected != request.expected || state.target != request.target || state.backend != request.backend {
+        if state.expected != request.expected
+            || state.target != request.target
+            || state.backend != request.backend
+        {
             return Err(conflict());
         }
         return Ok(state);
@@ -293,7 +336,8 @@ pub async fn prepare(
     );
     let backup = backup().await?;
     std::fs::create_dir_all(directory(data)).map_err(|_| failed())?;
-    std::fs::set_permissions(directory(data), std::fs::Permissions::from_mode(0o700)).map_err(|_| failed())?;
+    std::fs::set_permissions(directory(data), std::fs::Permissions::from_mode(0o700))
+        .map_err(|_| failed())?;
     let mut state = RemoteTransition {
         kind: TransitionKind::Remote,
         transition_id: request.transition_id,
@@ -303,9 +347,15 @@ pub async fn prepare(
         backend: request.backend,
         changed: true,
     };
-    atomic_write(&backup_path(data, state.transition_id), &serde_json::to_vec(&backup).map_err(|_| failed())?)?;
+    atomic_write(
+        &backup_path(data, state.transition_id),
+        &serde_json::to_vec(&backup).map_err(|_| failed())?,
+    )?;
     save(data, &state)?;
-    progress.typed_message(CrowdSecProgressMessageType::Info, "Stopping CrowdSec services before remote Machine registration");
+    progress.typed_message(
+        CrowdSecProgressMessageType::Info,
+        "Stopping CrowdSec services before remote Machine registration",
+    );
     let mut registered = false;
     let result: Result<()> = async {
         service("disable --now", BOUNCER).await?;
@@ -315,15 +365,22 @@ pub async fn prepare(
         }
         lapi::configure_remote_machine().await?;
         lapi::remove_machine_credentials().await?;
-        let lapi_url = lapi::remote_lapi_url(state.target.lapi_url.as_deref().ok_or_else(conflict)?)?;
+        let lapi_url =
+            lapi::remote_lapi_url(state.target.lapi_url.as_deref().ok_or_else(conflict)?)?;
         CrowdSecCommand::cscli(&[
-            "lapi", "register", "--machine",
+            "lapi",
+            "register",
+            "--machine",
             state.target.machine_name.as_deref().ok_or_else(conflict)?,
-            "--url", lapi_url.as_str(),
-        ])?.execute().await?;
+            "--url",
+            lapi_url.as_str(),
+        ])?
+        .execute()
+        .await?;
         registered = true;
         lapi::restrict_machine_credentials_permissions().await
-    }.await;
+    }
+    .await;
     if let Err(error) = result {
         if registered {
             progress.typed_message(
@@ -333,7 +390,10 @@ pub async fn prepare(
             state.phase = TransitionPhase::RecoveryRequired;
             save(data, &state)?;
         } else if restore(&backup).await.is_ok() {
-            progress.typed_message(CrowdSecProgressMessageType::Error, "CrowdSec Machine registration failed; restoring the previous role");
+            progress.typed_message(
+                CrowdSecProgressMessageType::Error,
+                "CrowdSec Machine registration failed; restoring the previous role",
+            );
             state.phase = TransitionPhase::RolledBack;
             save(data, &state)?;
             let _ = fs::remove_file(backup_path(data, state.transition_id)).await;
@@ -345,16 +405,28 @@ pub async fn prepare(
     }
     state.phase = TransitionPhase::AwaitingValidation;
     save(data, &state)?;
-    progress.typed_message(CrowdSecProgressMessageType::Success, "CrowdSec Machine is registered and awaits central Local API validation");
+    progress.typed_message(
+        CrowdSecProgressMessageType::Success,
+        "CrowdSec Machine is registered and awaits central Local API validation",
+    );
     Ok(state)
 }
 
-pub async fn activate(data: &str, request: &TransitionActivateRequest, progress: &CrowdSecProgress) -> Result<RemoteTransition> {
+pub async fn activate(
+    data: &str,
+    request: &TransitionActivateRequest,
+    progress: &CrowdSecProgress,
+) -> Result<RemoteTransition> {
     let mut state = load(data, request.transition_id).await?;
-    if matches!(state.phase, TransitionPhase::ActivePendingFinalize | TransitionPhase::Completed) {
+    if matches!(
+        state.phase,
+        TransitionPhase::ActivePendingFinalize | TransitionPhase::Completed
+    ) {
         return Ok(state);
     }
-    if state.phase != TransitionPhase::AwaitingValidation { return Err(conflict()); }
+    if state.phase != TransitionPhase::AwaitingValidation {
+        return Err(conflict());
+    }
     state.phase = TransitionPhase::Activating;
     save(data, &state)?;
     let name = state.target.machine_name.as_deref().ok_or_else(conflict)?;
@@ -365,7 +437,8 @@ pub async fn activate(data: &str, request: &TransitionActivateRequest, progress:
         backend,
         request.bouncer_api_key.as_deref(),
         Some(progress),
-    ).await;
+    )
+    .await;
     if let Err(error) = result {
         state.phase = TransitionPhase::AwaitingValidation;
         save(data, &state)?;
@@ -373,17 +446,32 @@ pub async fn activate(data: &str, request: &TransitionActivateRequest, progress:
     }
     state.phase = TransitionPhase::ActivePendingFinalize;
     save(data, &state)?;
-    progress.typed_message(CrowdSecProgressMessageType::Success, "CrowdSec Machine transition is active and awaits topology finalization");
+    progress.typed_message(
+        CrowdSecProgressMessageType::Success,
+        "CrowdSec Machine transition is active and awaits topology finalization",
+    );
     Ok(state)
 }
 
 pub async fn recover(data: &str, id: Uuid) -> Result<RemoteTransition> {
     let mut state = load(data, id).await?;
-    if state.phase == TransitionPhase::RolledBack { return Ok(state); }
-    if !matches!(state.phase, TransitionPhase::Preparing | TransitionPhase::AwaitingValidation | TransitionPhase::RecoveryRequired) {
+    if state.phase == TransitionPhase::RolledBack {
+        return Ok(state);
+    }
+    if !matches!(
+        state.phase,
+        TransitionPhase::Preparing
+            | TransitionPhase::AwaitingValidation
+            | TransitionPhase::RecoveryRequired
+    ) {
         return Err(conflict());
     }
-    let backup: Backup = serde_json::from_slice(&fs::read(backup_path(data, id)).await.map_err(|_| recovery())?).map_err(|_| recovery())?;
+    let backup: Backup = serde_json::from_slice(
+        &fs::read(backup_path(data, id))
+            .await
+            .map_err(|_| recovery())?,
+    )
+    .map_err(|_| recovery())?;
     if restore(&backup).await.is_err() {
         state.phase = TransitionPhase::RecoveryRequired;
         save(data, &state)?;
@@ -391,13 +479,20 @@ pub async fn recover(data: &str, id: Uuid) -> Result<RemoteTransition> {
     }
     state.phase = TransitionPhase::RolledBack;
     save(data, &state)?;
-    fs::remove_file(backup_path(data, id)).await.map_err(|_| failed())?;
+    fs::remove_file(backup_path(data, id))
+        .await
+        .map_err(|_| failed())?;
     Ok(state)
 }
 
 pub async fn finalize(data: &str, id: Uuid) -> Result<RemoteTransition> {
     let mut state = load(data, id).await?;
-    if !matches!(state.phase, TransitionPhase::ActivePendingFinalize | TransitionPhase::Completed) { return Err(conflict()); }
+    if !matches!(
+        state.phase,
+        TransitionPhase::ActivePendingFinalize | TransitionPhase::Completed
+    ) {
+        return Err(conflict());
+    }
     match fs::remove_file(backup_path(data, id)).await {
         Ok(()) => (),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
@@ -432,7 +527,7 @@ mod tests {
             target,
             authority_changed: true,
             backend: None,
-            preflight: None,
+            machine_connectivity_pending: false,
             ws_id: None,
         };
         assert!(is_supported(&request));
@@ -453,7 +548,7 @@ mod tests {
             },
             authority_changed: true,
             backend: None,
-            preflight: None,
+            machine_connectivity_pending: false,
             ws_id: None,
         };
         assert!(is_supported(&without_remediation));
