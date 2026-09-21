@@ -26,8 +26,8 @@ use crate::{
         command::CrowdSecCommand,
         errors::CONSOLE_INVALID_ENROLLMENT,
         models::{
-            CrowdSecCapiState, CrowdSecCapiStatus, CrowdSecConsoleState,
-            CrowdSecConsoleStatusResponse,
+            CrowdSecCapiState, CrowdSecCapiStatus, CrowdSecConsoleEnrollmentState,
+            CrowdSecConsoleState, CrowdSecConsoleStatusResponse,
         },
     },
     errors::{FwcError, Result},
@@ -137,12 +137,14 @@ fn capi_status(status: CrowdSecCapiStatus) -> CrowdSecConsoleStatusResponse {
     CrowdSecConsoleStatusResponse {
         message: capi_status_message(&state, status.retry_after_minutes).to_string(),
         state,
+        enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
     }
 }
 
 fn pending_approval_status() -> CrowdSecConsoleStatusResponse {
     CrowdSecConsoleStatusResponse {
         state: CrowdSecConsoleState::PendingApproval,
+        enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
         message: "Enrollment request submitted. Accept the Security Engine in CrowdSec Console to complete enrollment.".to_string(),
     }
 }
@@ -294,6 +296,7 @@ mod tests {
         let response = CrowdSecConsoleEnrollResponse {
             status: CrowdSecConsoleStatusResponse {
                 state: CrowdSecConsoleState::PendingApproval,
+                enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
                 message: "CrowdSec Console enrollment is pending approval".to_string(),
             },
         };

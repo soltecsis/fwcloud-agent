@@ -400,6 +400,7 @@ pub struct CrowdSecStatusResponse {
     pub ipset_installed: bool,
     pub lapi: CrowdSecHealthStatus,
     pub community_blocklist: CrowdSecHealthStatus,
+    pub community_blocklist_enrollment: CrowdSecConsoleEnrollmentState,
     pub firewall_bouncer: CrowdSecFirewallBouncerStatus,
     pub active_decisions: CrowdSecStatusCount,
     pub installed_collections: CrowdSecStatusCount,
@@ -480,9 +481,18 @@ pub enum CrowdSecConsoleState {
     Error,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecConsoleEnrollmentState {
+    #[default]
+    Unknown,
+    Enrolled,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CrowdSecConsoleStatusResponse {
     pub state: CrowdSecConsoleState,
+    pub enrollment_state: CrowdSecConsoleEnrollmentState,
     pub message: String,
 }
 
