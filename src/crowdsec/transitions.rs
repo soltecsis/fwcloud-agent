@@ -188,8 +188,9 @@ pub fn validate(request: &TransitionPrepareRequest) -> Result<()> {
     Ok(())
 }
 
-/// Checks connectivity only. It does not reserve a transition or establish its
-/// effective source role; prepare must recheck before changing configuration.
+/// Validates transition prerequisites without reserving a transition or
+/// establishing its effective source role; prepare rechecks before changing
+/// configuration.
 pub async fn preflight(
     request: &TransitionPrepareRequest,
     progress: &CrowdSecProgress,
@@ -217,13 +218,13 @@ pub async fn preflight(
     }
     progress.typed_message(
         CrowdSecProgressMessageType::Success,
-        "CrowdSec transition preflight completed; configuration is unchanged",
+        "CrowdSec transition requirements validated; configuration is unchanged",
     );
     Ok(TransitionPreflightResponse {
         transition_id: request.transition_id,
         phase: TransitionPhase::Checking,
         connectivity_checked: request.target.mode == TransitionMode::Machine,
-        message: "Preflight completed; transition has not been prepared",
+        message: "Transition requirements validated; configuration has not been prepared",
     })
 }
 

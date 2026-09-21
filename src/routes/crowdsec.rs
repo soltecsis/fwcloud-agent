@@ -57,7 +57,7 @@ async fn preflight_crowdsec_transition(
         Err(error) => {
             progress.typed_message(
                 CrowdSecProgressMessageType::Error,
-                "CrowdSec transition preflight failed",
+                "CrowdSec transition validation failed",
             );
             Err(error)
         }
