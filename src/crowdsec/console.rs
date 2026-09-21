@@ -157,10 +157,7 @@ fn capi_status_message(state: &CrowdSecConsoleState, retry_after_minutes: Option
         CrowdSecConsoleState::PendingApproval => {
             unreachable!("CAPI status cannot determine enrollment approval")
         }
-        CrowdSecConsoleState::Connected => {
-            "CrowdSec Central API is reachable; CrowdSec Console approval cannot be checked locally"
-                .to_string()
-        }
+        CrowdSecConsoleState::Connected => "CrowdSec Central API is reachable".to_string(),
         CrowdSecConsoleState::RateLimited => match retry_after_minutes {
             Some(minutes) => format!(
                 "CrowdSec Central API requests are temporarily blocked. Retry in {minutes} minutes."
@@ -286,6 +283,21 @@ mod tests {
 
         assert_eq!(status.state, CrowdSecConsoleState::RateLimited);
         assert!(status.message.contains("Retry in 61 minutes"));
+    }
+
+    #[test]
+    fn preserves_the_explicit_console_enrollment_state() {
+        let status = capi_status(CrowdSecCapiStatus {
+            state: CrowdSecCapiState::Connected,
+            retry_after_minutes: None,
+            enrollment_state: CrowdSecConsoleEnrollmentState::Enrolled,
+        });
+
+        assert_eq!(
+            status.enrollment_state,
+            CrowdSecConsoleEnrollmentState::Enrolled
+        );
+        assert_eq!(status.message, "CrowdSec Central API is reachable");
     }
 
     #[test]
