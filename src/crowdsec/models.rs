@@ -356,6 +356,7 @@ pub enum CrowdSecCapiState {
 pub struct CrowdSecCapiStatus {
     pub state: CrowdSecCapiState,
     pub retry_after_minutes: Option<u64>,
+    pub enrollment_state: CrowdSecConsoleEnrollmentState,
 }
 
 #[derive(Debug, Serialize)]

@@ -458,10 +458,10 @@ mod tests {
             IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
         },
         models::{
-            CrowdSecConsoleState, CrowdSecConsoleStatusResponse, CrowdSecFirewallBackend,
-            CrowdSecFirewallBouncerStatus, CrowdSecHealthState, CrowdSecHealthStatus,
-            CrowdSecPackageStatus, CrowdSecServiceStatus, CrowdSecStatusCount,
-            CrowdSecStatusResponse,
+            CrowdSecConsoleEnrollmentState, CrowdSecConsoleState, CrowdSecConsoleStatusResponse,
+            CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus, CrowdSecHealthState,
+            CrowdSecHealthStatus, CrowdSecPackageStatus, CrowdSecServiceStatus,
+            CrowdSecStatusCount, CrowdSecStatusResponse,
         },
     };
 

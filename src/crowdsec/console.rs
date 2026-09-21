@@ -137,7 +137,7 @@ fn capi_status(status: CrowdSecCapiStatus) -> CrowdSecConsoleStatusResponse {
     CrowdSecConsoleStatusResponse {
         message: capi_status_message(&state, status.retry_after_minutes).to_string(),
         state,
-        enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
+        enrollment_state: status.enrollment_state,
     }
 }
 
@@ -184,7 +184,8 @@ mod tests {
             errors::CONSOLE_INVALID_ENROLLMENT,
             models::{
                 CrowdSecCapiState, CrowdSecCapiStatus, CrowdSecConsoleEnrollResponse,
-                CrowdSecConsoleState, CrowdSecConsoleStatusResponse,
+                CrowdSecConsoleEnrollmentState, CrowdSecConsoleState,
+                CrowdSecConsoleStatusResponse,
             },
         },
         errors::FwcError,
@@ -250,6 +251,7 @@ mod tests {
             capi_status(CrowdSecCapiStatus {
                 state: CrowdSecCapiState::NotConfigured,
                 retry_after_minutes: None,
+                enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
             })
             .state,
             CrowdSecConsoleState::NotConfigured
@@ -258,6 +260,7 @@ mod tests {
             capi_status(CrowdSecCapiStatus {
                 state: CrowdSecCapiState::Connected,
                 retry_after_minutes: None,
+                enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
             })
             .state,
             CrowdSecConsoleState::Connected
@@ -266,6 +269,7 @@ mod tests {
             capi_status(CrowdSecCapiStatus {
                 state: CrowdSecCapiState::Error,
                 retry_after_minutes: None,
+                enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
             })
             .state,
             CrowdSecConsoleState::Error
@@ -277,6 +281,7 @@ mod tests {
         let status = capi_status(CrowdSecCapiStatus {
             state: CrowdSecCapiState::TemporarilyBlocked,
             retry_after_minutes: Some(61),
+            enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
         });
 
         assert_eq!(status.state, CrowdSecConsoleState::RateLimited);

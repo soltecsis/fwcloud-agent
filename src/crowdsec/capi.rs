@@ -34,13 +34,14 @@ use crate::{
     crowdsec::{
         command::CrowdSecCommand,
         errors::COMMAND_FAILED,
-        models::{CrowdSecCapiState, CrowdSecCapiStatus},
+        models::{CrowdSecCapiState, CrowdSecCapiStatus, CrowdSecConsoleEnrollmentState},
     },
     errors::{FwcError, Result},
 };
 
 pub const CAPI_COOLDOWN_DURATION: Duration = Duration::from_secs(61 * 60);
 const CAPI_COOLDOWN_STATE_PATH: &str = "./data/crowdsec/capi-cooldown.json";
+const CAPI_ENROLLED_MESSAGE: &str = "your instance is enrolled in the console";
 
 #[derive(Deserialize, Serialize)]
 struct CapiCooldownState {
@@ -125,6 +126,7 @@ pub fn status_from_command_output(
     CrowdSecCapiStatus {
         state,
         retry_after_minutes: None,
+        enrollment_state: enrollment_state_from_diagnostics(&diagnostics),
     }
 }
 
@@ -215,6 +217,15 @@ fn cooldown_status(remaining_seconds: u64) -> CrowdSecCapiStatus {
     CrowdSecCapiStatus {
         state: CrowdSecCapiState::TemporarilyBlocked,
         retry_after_minutes: Some((remaining_seconds + 59) / 60),
+        enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
+    }
+}
+
+fn enrollment_state_from_diagnostics(diagnostics: &str) -> CrowdSecConsoleEnrollmentState {
+    if diagnostics.contains(CAPI_ENROLLED_MESSAGE) {
+        CrowdSecConsoleEnrollmentState::Enrolled
+    } else {
+        CrowdSecConsoleEnrollmentState::Unknown
     }
 }
 
@@ -243,7 +254,9 @@ mod tests {
         active_cooldown_at, cooldown_status, remove_cooldown, status_from_command_output,
         status_with_active_cooldown, write_cooldown,
     };
-    use crate::crowdsec::models::{CrowdSecCapiState, CrowdSecCapiStatus};
+    use crate::crowdsec::models::{
+        CrowdSecCapiState, CrowdSecCapiStatus, CrowdSecConsoleEnrollmentState,
+    };
     use std::sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -275,6 +288,34 @@ mod tests {
         let status = status_from_command_output(false, "", "no credentials found");
 
         assert_eq!(status.state, CrowdSecCapiState::NotConfigured);
+    }
+
+    #[test]
+    fn recognizes_an_explicit_console_enrollment_indication() {
+        let status = status_from_command_output(
+            true,
+            "You can successfully interact with Central API (CAPI)\nYour instance is enrolled in the console",
+            "",
+        );
+
+        assert_eq!(
+            status.enrollment_state,
+            CrowdSecConsoleEnrollmentState::Enrolled
+        );
+    }
+
+    #[test]
+    fn keeps_enrollment_unknown_without_an_explicit_indication() {
+        let status = status_from_command_output(
+            true,
+            "You can successfully interact with Central API (CAPI)",
+            "",
+        );
+
+        assert_eq!(
+            status.enrollment_state,
+            CrowdSecConsoleEnrollmentState::Unknown
+        );
     }
 
     #[test]
@@ -322,6 +363,7 @@ mod tests {
                 Ok(CrowdSecCapiStatus {
                     state: CrowdSecCapiState::Connected,
                     retry_after_minutes: None,
+                    enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
                 })
             }
         })
