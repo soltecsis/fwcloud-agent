@@ -94,10 +94,10 @@ pub async fn configure_central(listen_uri: &str) -> Result<CrowdSecCentralLapiCo
     })
 }
 
-/// Restores an installed remote Machine as a standalone CrowdSec node. Remote
+/// Restores an installed remote Machine as a LAPI CrowdSec node. Remote
 /// credentials must never be reused against the local API: a new local client
 /// credential is generated before the engine is started.
-pub(crate) async fn restore_standalone_lapi() -> Result<()> {
+pub(crate) async fn restore_lapi() -> Result<()> {
     require_crowdsec_installed().await?;
     disable_crowdsec_service().await?;
     let configuration = fs::read_to_string(CROWDSEC_CONFIG_PATH)

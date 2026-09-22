@@ -46,7 +46,7 @@ pub struct CrowdSecOperationRequest {
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecInstallMode {
     #[default]
-    Standalone,
+    Lapi,
     Machine,
 }
 
@@ -685,7 +685,7 @@ mod tests {
         let request = serde_json::from_str::<CrowdSecInstallRequest>(r#"{}"#).unwrap();
 
         assert_eq!(request.backend, CrowdSecFirewallBackend::Iptables);
-        assert_eq!(request.mode, CrowdSecInstallMode::Standalone);
+        assert_eq!(request.mode, CrowdSecInstallMode::Lapi);
     }
 
     #[test]

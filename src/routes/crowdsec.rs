@@ -88,10 +88,10 @@ async fn prepare_crowdsec_transition(
                 .await?,
         ))
     } else if request.authority_changed
-        && request.target.mode == crate::crowdsec::transitions::TransitionMode::Standalone
+        && request.target.mode == crate::crowdsec::transitions::TransitionMode::Lapi
     {
         Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::standalone::prepare(cfg.data_dir, &request, &progress)
+            crate::crowdsec::transitions::local_lapi::prepare(cfg.data_dir, &request, &progress)
                 .await?,
         ))
     } else {
@@ -128,8 +128,8 @@ async fn activate_crowdsec_transition(
             crate::crowdsec::transitions::remediation::activate(cfg.data_dir, &request, &progress)
                 .await?,
         )),
-        crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::standalone::activate(cfg.data_dir, &request, &progress)
+        crate::crowdsec::transitions::TransitionKind::Lapi => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::local_lapi::activate(cfg.data_dir, &request, &progress)
                 .await?,
         )),
     }
@@ -148,8 +148,8 @@ async fn crowdsec_transition(
             .json(crate::crowdsec::transitions::remote::load(cfg.data_dir, *id).await?)),
         crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok()
             .json(crate::crowdsec::transitions::remediation::load(cfg.data_dir, *id).await?)),
-        crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok()
-            .json(crate::crowdsec::transitions::standalone::load(cfg.data_dir, *id).await?)),
+        crate::crowdsec::transitions::TransitionKind::Lapi => Ok(HttpResponse::Ok()
+            .json(crate::crowdsec::transitions::local_lapi::load(cfg.data_dir, *id).await?)),
     }
 }
 
@@ -185,8 +185,8 @@ async fn recover_crowdsec_transition(
             crate::crowdsec::transitions::remediation::recover(cfg.data_dir, request.transition_id)
                 .await?,
         )),
-        crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::standalone::recover(cfg.data_dir, request.transition_id)
+        crate::crowdsec::transitions::TransitionKind::Lapi => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::local_lapi::recover(cfg.data_dir, request.transition_id)
                 .await?,
         )),
     }
@@ -220,8 +220,8 @@ async fn finalize_crowdsec_transition(
             )
             .await?,
         )),
-        crate::crowdsec::transitions::TransitionKind::Standalone => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::standalone::finalize(cfg.data_dir, request.transition_id)
+        crate::crowdsec::transitions::TransitionKind::Lapi => Ok(HttpResponse::Ok().json(
+            crate::crowdsec::transitions::local_lapi::finalize(cfg.data_dir, request.transition_id)
                 .await?,
         )),
     }
@@ -685,7 +685,7 @@ async fn install_crowdsec(
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let response = match request.mode {
-            CrowdSecInstallMode::Standalone => {
+            CrowdSecInstallMode::Lapi => {
                 let install_result =
                     install::install_with_backend_and_progress(request.backend, Some(&progress))
                         .await;
