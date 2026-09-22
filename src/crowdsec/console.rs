@@ -26,8 +26,8 @@ use crate::{
         command::CrowdSecCommand,
         errors::CONSOLE_INVALID_ENROLLMENT,
         models::{
-            CrowdSecCapiState, CrowdSecCapiStatus, CrowdSecConsoleState,
-            CrowdSecConsoleStatusResponse,
+            CrowdSecCapiState, CrowdSecCapiStatus, CrowdSecConsoleEnrollmentState,
+            CrowdSecConsoleState, CrowdSecConsoleStatusResponse,
         },
     },
     errors::{FwcError, Result},
@@ -137,12 +137,14 @@ fn capi_status(status: CrowdSecCapiStatus) -> CrowdSecConsoleStatusResponse {
     CrowdSecConsoleStatusResponse {
         message: capi_status_message(&state, status.retry_after_minutes).to_string(),
         state,
+        enrollment_state: status.enrollment_state,
     }
 }
 
 fn pending_approval_status() -> CrowdSecConsoleStatusResponse {
     CrowdSecConsoleStatusResponse {
         state: CrowdSecConsoleState::PendingApproval,
+        enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
         message: "Enrollment request submitted. Accept the Security Engine in CrowdSec Console to complete enrollment.".to_string(),
     }
 }
@@ -155,10 +157,7 @@ fn capi_status_message(state: &CrowdSecConsoleState, retry_after_minutes: Option
         CrowdSecConsoleState::PendingApproval => {
             unreachable!("CAPI status cannot determine enrollment approval")
         }
-        CrowdSecConsoleState::Connected => {
-            "CrowdSec Central API is reachable; CrowdSec Console approval cannot be checked locally"
-                .to_string()
-        }
+        CrowdSecConsoleState::Connected => "CrowdSec Central API is reachable".to_string(),
         CrowdSecConsoleState::RateLimited => match retry_after_minutes {
             Some(minutes) => format!(
                 "CrowdSec Central API requests are temporarily blocked. Retry in {minutes} minutes."
@@ -182,7 +181,8 @@ mod tests {
             errors::CONSOLE_INVALID_ENROLLMENT,
             models::{
                 CrowdSecCapiState, CrowdSecCapiStatus, CrowdSecConsoleEnrollResponse,
-                CrowdSecConsoleState, CrowdSecConsoleStatusResponse,
+                CrowdSecConsoleEnrollmentState, CrowdSecConsoleState,
+                CrowdSecConsoleStatusResponse,
             },
         },
         errors::FwcError,
@@ -248,6 +248,7 @@ mod tests {
             capi_status(CrowdSecCapiStatus {
                 state: CrowdSecCapiState::NotConfigured,
                 retry_after_minutes: None,
+                enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
             })
             .state,
             CrowdSecConsoleState::NotConfigured
@@ -256,6 +257,7 @@ mod tests {
             capi_status(CrowdSecCapiStatus {
                 state: CrowdSecCapiState::Connected,
                 retry_after_minutes: None,
+                enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
             })
             .state,
             CrowdSecConsoleState::Connected
@@ -264,6 +266,7 @@ mod tests {
             capi_status(CrowdSecCapiStatus {
                 state: CrowdSecCapiState::Error,
                 retry_after_minutes: None,
+                enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
             })
             .state,
             CrowdSecConsoleState::Error
@@ -275,10 +278,26 @@ mod tests {
         let status = capi_status(CrowdSecCapiStatus {
             state: CrowdSecCapiState::TemporarilyBlocked,
             retry_after_minutes: Some(61),
+            enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
         });
 
         assert_eq!(status.state, CrowdSecConsoleState::RateLimited);
         assert!(status.message.contains("Retry in 61 minutes"));
+    }
+
+    #[test]
+    fn preserves_the_explicit_console_enrollment_state() {
+        let status = capi_status(CrowdSecCapiStatus {
+            state: CrowdSecCapiState::Connected,
+            retry_after_minutes: None,
+            enrollment_state: CrowdSecConsoleEnrollmentState::Enrolled,
+        });
+
+        assert_eq!(
+            status.enrollment_state,
+            CrowdSecConsoleEnrollmentState::Enrolled
+        );
+        assert_eq!(status.message, "CrowdSec Central API is reachable");
     }
 
     #[test]
@@ -294,6 +313,7 @@ mod tests {
         let response = CrowdSecConsoleEnrollResponse {
             status: CrowdSecConsoleStatusResponse {
                 state: CrowdSecConsoleState::PendingApproval,
+                enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
                 message: "CrowdSec Console enrollment is pending approval".to_string(),
             },
         };

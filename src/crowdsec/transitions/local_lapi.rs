@@ -38,7 +38,7 @@ use tokio::fs;
 use uuid::Uuid;
 
 #[derive(Deserialize, Serialize)]
-pub struct StandaloneTransition {
+pub struct LapiTransition {
     pub kind: TransitionKind,
     pub transition_id: Uuid,
     pub phase: TransitionPhase,
@@ -53,16 +53,16 @@ pub struct StandaloneTransition {
 fn conflict() -> FwcError {
     FwcError::crowdsec(
         TRANSITION_CONFLICT,
-        "CrowdSec standalone transition conflicts with current configuration or transition state",
+        "CrowdSec LAPI transition conflicts with current configuration or transition state",
     )
 }
 fn failed() -> FwcError {
-    FwcError::crowdsec(TRANSITION_FAILED, "CrowdSec standalone transition failed")
+    FwcError::crowdsec(TRANSITION_FAILED, "CrowdSec LAPI transition failed")
 }
 fn recovery() -> FwcError {
     FwcError::crowdsec(
         TRANSITION_RECOVERY_REQUIRED,
-        "CrowdSec standalone transition requires manual recovery",
+        "CrowdSec LAPI transition requires manual recovery",
     )
 }
 fn directory(data: &str) -> PathBuf {
@@ -72,7 +72,7 @@ fn state_path(data: &str, id: Uuid) -> PathBuf {
     directory(data).join(format!("{id}.json"))
 }
 
-fn save(data: &str, state: &StandaloneTransition) -> Result<()> {
+fn save(data: &str, state: &LapiTransition) -> Result<()> {
     let path = state_path(data, state.transition_id);
     let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
     let contents = serde_json::to_vec(state).map_err(|_| failed())?;
@@ -93,14 +93,14 @@ fn save(data: &str, state: &StandaloneTransition) -> Result<()> {
     result.map_err(|_: FwcError| failed())
 }
 
-pub async fn load(data: &str, id: Uuid) -> Result<StandaloneTransition> {
-    let state: StandaloneTransition = serde_json::from_slice(
+pub async fn load(data: &str, id: Uuid) -> Result<LapiTransition> {
+    let state: LapiTransition = serde_json::from_slice(
         &fs::read(state_path(data, id))
             .await
             .map_err(|_| conflict())?,
     )
     .map_err(|_| recovery())?;
-    if state.kind != TransitionKind::Standalone {
+    if state.kind != TransitionKind::Lapi {
         return Err(conflict());
     }
     Ok(state)
@@ -109,14 +109,14 @@ pub async fn load(data: &str, id: Uuid) -> Result<StandaloneTransition> {
 fn supported(request: &TransitionPrepareRequest) -> bool {
     request.authority_changed
         && request.expected.mode == TransitionMode::Machine
-        && request.target.mode == TransitionMode::Standalone
+        && request.target.mode == TransitionMode::Lapi
 }
 
 pub async fn prepare(
     data: &str,
     request: &TransitionPrepareRequest,
     progress: &CrowdSecProgress,
-) -> Result<StandaloneTransition> {
+) -> Result<LapiTransition> {
     validate(request)?;
     if !supported(request) {
         return Err(unsupported());
@@ -149,7 +149,7 @@ pub async fn prepare(
     if request.machine_connectivity_pending {
         progress.typed_message(
             CrowdSecProgressMessageType::Info,
-            "Restoring a pending CrowdSec Machine as a standalone Local API",
+            "Restoring a pending CrowdSec Machine as a LAPI",
         );
     } else {
         progress.typed_message(
@@ -160,8 +160,8 @@ pub async fn prepare(
     std::fs::create_dir_all(directory(data)).map_err(|_| failed())?;
     std::fs::set_permissions(directory(data), std::fs::Permissions::from_mode(0o700))
         .map_err(|_| failed())?;
-    let state = StandaloneTransition {
-        kind: TransitionKind::Standalone,
+    let state = LapiTransition {
+        kind: TransitionKind::Lapi,
         transition_id: request.transition_id,
         phase: TransitionPhase::Prepared,
         expected: request.expected.clone(),
@@ -176,9 +176,9 @@ pub async fn prepare(
     progress.typed_message(
         CrowdSecProgressMessageType::Success,
         if request.machine_connectivity_pending {
-            "CrowdSec standalone restoration is prepared"
+            "CrowdSec LAPI restoration is prepared"
         } else {
-            "CrowdSec standalone restoration is prepared; remove central Machine and Bouncer registrations before activation"
+            "CrowdSec LAPI restoration is prepared; remove central Machine and Bouncer registrations before activation"
         },
     );
     Ok(state)
@@ -188,7 +188,7 @@ pub async fn activate(
     data: &str,
     request: &TransitionActivateRequest,
     progress: &CrowdSecProgress,
-) -> Result<StandaloneTransition> {
+) -> Result<LapiTransition> {
     if request.bouncer_api_key.is_some() {
         return Err(conflict());
     }
@@ -212,7 +212,7 @@ pub async fn activate(
         if state.expected.local_remediation {
             bouncers::disable_local_remediation_with_progress(Some(progress)).await?;
         }
-        lapi::restore_standalone_lapi().await?;
+        lapi::restore_lapi().await?;
         bouncers::install_with_backend_and_progress(
             state.backend.ok_or_else(conflict)?,
             Some(progress),
@@ -230,12 +230,12 @@ pub async fn activate(
     save(data, &state)?;
     progress.typed_message(
         CrowdSecProgressMessageType::Success,
-        "CrowdSec standalone Local API and local remediation are active",
+        "CrowdSec LAPI and local remediation are active",
     );
     Ok(state)
 }
 
-pub async fn finalize(data: &str, id: Uuid) -> Result<StandaloneTransition> {
+pub async fn finalize(data: &str, id: Uuid) -> Result<LapiTransition> {
     let mut state = load(data, id).await?;
     if !matches!(
         state.phase,
@@ -251,7 +251,7 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<StandaloneTransition> {
 /// Before activation no files or services have changed, so a prepared plan can
 /// be cancelled. After central registrations have been removed, restoring the
 /// former Machine is unsafe without API coordination and remains explicit.
-pub async fn recover(data: &str, id: Uuid) -> Result<StandaloneTransition> {
+pub async fn recover(data: &str, id: Uuid) -> Result<LapiTransition> {
     let mut state = load(data, id).await?;
     if state.phase == TransitionPhase::RolledBack {
         return Ok(state);
@@ -269,7 +269,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accepts_only_machine_to_standalone_authority_changes() {
+    fn accepts_only_machine_to_lapi_authority_changes() {
         let request = TransitionPrepareRequest {
             transition_id: Uuid::new_v4(),
             confirm: true,
@@ -280,7 +280,7 @@ mod tests {
                 lapi_url: Some("http://192.0.2.10:8080".into()),
             },
             target: TransitionTarget {
-                mode: TransitionMode::Standalone,
+                mode: TransitionMode::Lapi,
                 local_remediation: true,
                 machine_name: None,
                 lapi_url: None,
@@ -295,12 +295,12 @@ mod tests {
 
     #[tokio::test]
     async fn cancels_a_prepared_plan_without_storing_machine_credentials() {
-        let root = std::env::temp_dir().join(format!("fwcloud-standalone-test-{}", Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("fwcloud-lapi-test-{}", Uuid::new_v4()));
         let data = root.to_str().unwrap();
         std::fs::create_dir_all(directory(data)).unwrap();
         let id = Uuid::new_v4();
-        let state = StandaloneTransition {
-            kind: TransitionKind::Standalone,
+        let state = LapiTransition {
+            kind: TransitionKind::Lapi,
             transition_id: id,
             phase: TransitionPhase::Prepared,
             expected: TransitionTarget {
@@ -310,7 +310,7 @@ mod tests {
                 lapi_url: Some("http://192.0.2.10:8080".into()),
             },
             target: TransitionTarget {
-                mode: TransitionMode::Standalone,
+                mode: TransitionMode::Lapi,
                 local_remediation: true,
                 machine_name: None,
                 lapi_url: None,

@@ -216,7 +216,7 @@ pub(crate) async fn verify_source(
 ) -> Result<()> {
     let configuration = fs::read_to_string(CONFIG).await.map_err(|_| conflict())?;
     match expected.mode {
-        TransitionMode::Standalone => {
+        TransitionMode::Lapi => {
             if !configuration
                 .lines()
                 .any(|line| line.trim() == "enable: true")
@@ -519,7 +519,7 @@ mod tests {
             transition_id: Uuid::new_v4(),
             confirm: true,
             expected: TransitionTarget {
-                mode: TransitionMode::Standalone,
+                mode: TransitionMode::Lapi,
                 local_remediation: false,
                 machine_name: None,
                 lapi_url: None,
@@ -535,7 +535,7 @@ mod tests {
             transition_id: Uuid::new_v4(),
             confirm: true,
             expected: TransitionTarget {
-                mode: TransitionMode::Standalone,
+                mode: TransitionMode::Lapi,
                 local_remediation: true,
                 machine_name: None,
                 lapi_url: None,

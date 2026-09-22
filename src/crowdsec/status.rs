@@ -33,10 +33,11 @@ use crate::{
         errors::{FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT},
         lapi,
         models::{
-            CrowdSecConsoleState, CrowdSecConsoleStatusResponse, CrowdSecDecisionsQuery,
-            CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus, CrowdSecHealthState,
-            CrowdSecHealthStatus, CrowdSecPackageStatus, CrowdSecServiceStatus,
-            CrowdSecStatusCount, CrowdSecStatusResponse, CrowdSecStatusWarning,
+            CrowdSecConsoleEnrollmentState, CrowdSecConsoleState, CrowdSecConsoleStatusResponse,
+            CrowdSecDecisionsQuery, CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus,
+            CrowdSecHealthState, CrowdSecHealthStatus, CrowdSecPackageStatus,
+            CrowdSecServiceStatus, CrowdSecStatusCount, CrowdSecStatusResponse,
+            CrowdSecStatusWarning,
         },
         packages,
     },
@@ -84,7 +85,8 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
     };
     let (crowdsec_running, service_status_error) = crowdsec_service_status(&packages).await;
     let lapi_status = local_api_status().await;
-    let community_blocklist_status = community_blocklist_status().await;
+    let (community_blocklist_status, community_blocklist_enrollment) =
+        community_blocklist_status().await;
     let active_decisions = active_decision_count().await;
     let installed_collections = installed_collection_count().await;
     let warnings = status_warnings(
@@ -112,6 +114,7 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
         ipset_installed: packages.ipset_installed,
         lapi: lapi_status,
         community_blocklist: community_blocklist_status,
+        community_blocklist_enrollment,
         firewall_bouncer: CrowdSecFirewallBouncerStatus {
             installed: packages.firewall_bouncer_installed(bouncer_backend),
             backend: bouncer_backend,
@@ -302,10 +305,16 @@ async fn local_api_status() -> CrowdSecHealthStatus {
     }
 }
 
-async fn community_blocklist_status() -> CrowdSecHealthStatus {
+async fn community_blocklist_status() -> (CrowdSecHealthStatus, CrowdSecConsoleEnrollmentState) {
     match console::status().await {
-        Ok(status) => health_status_from_console(status),
-        Err(_) => health_error_status("Unable to determine Community Blocklist status"),
+        Ok(status) => {
+            let enrollment_state = status.enrollment_state;
+            (health_status_from_console(status), enrollment_state)
+        }
+        Err(_) => (
+            health_error_status("Unable to determine Community Blocklist status"),
+            CrowdSecConsoleEnrollmentState::Unknown,
+        ),
     }
 }
 
@@ -449,10 +458,10 @@ mod tests {
             IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
         },
         models::{
-            CrowdSecConsoleState, CrowdSecConsoleStatusResponse, CrowdSecFirewallBackend,
-            CrowdSecFirewallBouncerStatus, CrowdSecHealthState, CrowdSecHealthStatus,
-            CrowdSecPackageStatus, CrowdSecServiceStatus, CrowdSecStatusCount,
-            CrowdSecStatusResponse,
+            CrowdSecConsoleEnrollmentState, CrowdSecConsoleState, CrowdSecConsoleStatusResponse,
+            CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus, CrowdSecHealthState,
+            CrowdSecHealthStatus, CrowdSecPackageStatus, CrowdSecServiceStatus,
+            CrowdSecStatusCount, CrowdSecStatusResponse,
         },
     };
 
@@ -505,6 +514,7 @@ mod tests {
     fn exposes_a_temporary_capi_block_as_a_health_warning() {
         let health = health_status_from_console(CrowdSecConsoleStatusResponse {
             state: CrowdSecConsoleState::RateLimited,
+            enrollment_state: CrowdSecConsoleEnrollmentState::Unknown,
             message: "CrowdSec Central API requests are temporarily blocked. Retry in 61 minutes."
                 .to_string(),
         });
@@ -600,6 +610,7 @@ mod tests {
             ipset_installed: true,
             lapi: ready_health(),
             community_blocklist: ready_health(),
+            community_blocklist_enrollment: CrowdSecConsoleEnrollmentState::Unknown,
             firewall_bouncer: CrowdSecFirewallBouncerStatus {
                 installed: true,
                 backend: CrowdSecFirewallBackend::Iptables,
@@ -611,6 +622,7 @@ mod tests {
         };
 
         let serialized = serde_json::to_string(&response).unwrap();
+        assert!(serialized.contains("\"community_blocklist_enrollment\":\"unknown\""));
         assert!(!serialized.contains("api_key"));
         assert!(!serialized.contains("enrollment_key"));
     }

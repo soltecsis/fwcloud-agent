@@ -35,14 +35,14 @@ use super::{
 use crate::errors::{FwcError, Result};
 
 pub mod address;
+pub mod local_lapi;
 pub mod remediation;
 pub mod remote;
-pub mod standalone;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransitionMode {
-    Standalone,
+    Lapi,
     Machine,
 }
 
@@ -97,7 +97,7 @@ pub enum TransitionKind {
     Address,
     Remote,
     Remediation,
-    Standalone,
+    Lapi,
 }
 
 pub async fn kind(data_directory: &str, transition_id: Uuid) -> Result<TransitionKind> {
@@ -128,13 +128,13 @@ fn invalid(message: &'static str) -> FwcError {
 
 fn validate_target(target: &TransitionTarget) -> Result<()> {
     match target.mode {
-        TransitionMode::Standalone => {
+        TransitionMode::Lapi => {
             if !target.local_remediation
                 || target.machine_name.is_some()
                 || target.lapi_url.is_some()
             {
                 return Err(invalid(
-                    "Standalone requires local remediation and no remote Machine fields",
+                    "LAPI requires local remediation and no remote Machine fields",
                 ));
             }
         }
@@ -171,20 +171,20 @@ pub fn validate(request: &TransitionPrepareRequest) -> Result<()> {
     }
     if request.expected.mode != request.target.mode && !request.authority_changed {
         return Err(invalid(
-            "Changing between standalone and Machine changes the Local API authority",
+            "Changing between LAPI and Machine changes the Local API authority",
         ));
     }
-    if request.expected.mode == TransitionMode::Standalone
-        && request.target.mode == TransitionMode::Standalone
+    if request.expected.mode == TransitionMode::Lapi
+        && request.target.mode == TransitionMode::Lapi
         && request.authority_changed
     {
         return Err(invalid(
-            "Standalone cannot change to a remote Local API authority",
+            "LAPI cannot change to a remote Local API authority",
         ));
     }
     if request.machine_connectivity_pending
         && (request.expected.mode != TransitionMode::Machine
-            || request.target.mode != TransitionMode::Standalone
+            || request.target.mode != TransitionMode::Lapi
             || request.expected.local_remediation)
     {
         return Err(invalid(
@@ -253,7 +253,7 @@ mod tests {
     fn request() -> TransitionPrepareRequest {
         serde_json::from_value(serde_json::json!({
             "transition_id": Uuid::new_v4(), "confirm": true,
-            "expected": {"mode":"standalone", "local_remediation":true},
+            "expected": {"mode":"lapi", "local_remediation":true},
             "target": {"mode":"machine", "local_remediation":false,
                 "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
             "authority_changed":true
@@ -283,7 +283,7 @@ mod tests {
     fn rejects_legacy_agent_preflight_data() {
         let request = serde_json::from_value::<TransitionPrepareRequest>(serde_json::json!({
             "transition_id": Uuid::new_v4(), "confirm": true,
-            "expected": {"mode":"standalone", "local_remediation":false},
+            "expected": {"mode":"lapi", "local_remediation":false},
             "target": {"mode":"machine", "local_remediation":false,
                 "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
             "authority_changed": true,
@@ -308,12 +308,12 @@ mod tests {
     }
 
     #[test]
-    fn accepts_pending_machine_connectivity_when_restoring_standalone() {
+    fn accepts_pending_machine_connectivity_when_restoring_lapi() {
         let request: TransitionPrepareRequest = serde_json::from_value(serde_json::json!({
             "transition_id": Uuid::new_v4(), "confirm": true,
             "expected": {"mode":"machine", "local_remediation":false,
                 "machine_name":"fwcloud-node", "lapi_url":"http://192.0.2.1:8080"},
-            "target": {"mode":"standalone", "local_remediation":true},
+            "target": {"mode":"lapi", "local_remediation":true},
             "authority_changed": true,
             "backend": "iptables",
             "machine_connectivity_pending": true
