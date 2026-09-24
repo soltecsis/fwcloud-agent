@@ -267,6 +267,29 @@ pub struct CrowdSecMachineRemoveResponse {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecMachineReplicationRequest {
+    pub name: String,
+    pub password: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecMachineReplicationAction {
+    CreatedAndValidated,
+    Validated,
+    AlreadyValidated,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecMachineReplicationResponse {
+    pub name: String,
+    pub state: CrowdSecMachineState,
+    pub action: CrowdSecMachineReplicationAction,
+    pub message: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CrowdSecRemoteMachineInstallResponse {
     pub machine_name: String,
@@ -624,10 +647,11 @@ mod tests {
     use super::{
         CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep, CrowdSecBouncerUninstallStep,
         CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecFirewallBackend,
-        CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecInstallStep, CrowdSecOperationRequest,
-        CrowdSecPackageStatus, CrowdSecRemoteMachineActivationRequest,
-        CrowdSecRemoteMachineInstallState, CrowdSecRemoteMachineReauthenticationRequest,
-        CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
+        CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecInstallStep,
+        CrowdSecMachineReplicationRequest, CrowdSecOperationRequest, CrowdSecPackageStatus,
+        CrowdSecRemoteMachineActivationRequest, CrowdSecRemoteMachineInstallState,
+        CrowdSecRemoteMachineReauthenticationRequest, CrowdSecStepResult, CrowdSecStepStatus,
+        CrowdSecUninstallResponse, CrowdSecUninstallStep,
     };
 
     #[test]
@@ -722,6 +746,18 @@ mod tests {
         );
 
         assert!(request.is_err());
+    }
+
+    #[test]
+    fn machine_replication_request_requires_name_and_password() {
+        assert!(serde_json::from_str::<CrowdSecMachineReplicationRequest>(
+            r#"{"name":"fwcloud-web-01","password":"machine-password"}"#,
+        )
+        .is_ok());
+        assert!(serde_json::from_str::<CrowdSecMachineReplicationRequest>(
+            r#"{"name":"fwcloud-web-01"}"#,
+        )
+        .is_err());
     }
 
     #[test]

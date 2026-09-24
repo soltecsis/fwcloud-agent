@@ -23,6 +23,8 @@
 use std::{
     io::{self, ErrorKind},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
+    os::unix::fs::OpenOptionsExt,
+    path::PathBuf,
     time::Duration,
 };
 
@@ -30,6 +32,7 @@ use log::debug;
 use serde_json::Value;
 use tokio::{fs, process::Command, task, time::timeout};
 use url::Url;
+use uuid::Uuid;
 
 use crate::{
     crowdsec::{
@@ -44,9 +47,11 @@ use crate::{
         models::{
             CrowdSecCentralLapiConfigureResponse, CrowdSecFirewallBackend,
             CrowdSecLapiReplicationReadinessResponse, CrowdSecMachine,
-            CrowdSecMachineRemoveResponse, CrowdSecMachineState, CrowdSecMachineValidationResponse,
-            CrowdSecMachinesResponse, CrowdSecRemoteMachineActivationResponse,
-            CrowdSecRemoteMachineInstallResponse, CrowdSecRemoteMachineInstallState,
+            CrowdSecMachineRemoveResponse, CrowdSecMachineReplicationAction,
+            CrowdSecMachineReplicationResponse, CrowdSecMachineState,
+            CrowdSecMachineValidationResponse, CrowdSecMachinesResponse,
+            CrowdSecRemoteMachineActivationResponse, CrowdSecRemoteMachineInstallResponse,
+            CrowdSecRemoteMachineInstallState,
         },
         packages,
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
@@ -154,6 +159,69 @@ pub async fn replication_readiness() -> Result<CrowdSecLapiReplicationReadinessR
     Ok(CrowdSecLapiReplicationReadinessResponse {
         ready: true,
         message: "CrowdSec Local API is ready for credential replication".to_string(),
+    })
+}
+
+pub async fn replicate_machine(
+    name: &str,
+    password: &str,
+) -> Result<CrowdSecMachineReplicationResponse> {
+    validate_machine_name(name)?;
+    validate_machine_password(password)?;
+    ensure_central_ready().await?;
+
+    if let Some(machine) = machines()
+        .await?
+        .machines
+        .into_iter()
+        .find(|machine| machine.name == name)
+    {
+        if machine.state == CrowdSecMachineState::Validated {
+            return Ok(CrowdSecMachineReplicationResponse {
+                name: machine.name,
+                state: CrowdSecMachineState::Validated,
+                action: CrowdSecMachineReplicationAction::AlreadyValidated,
+                message: "CrowdSec machine is already replicated and validated".to_string(),
+            });
+        }
+
+        let validated = validate_machine(name).await?;
+        return Ok(CrowdSecMachineReplicationResponse {
+            name: validated.name,
+            state: validated.state,
+            action: CrowdSecMachineReplicationAction::Validated,
+            message: "CrowdSec machine is replicated and validated".to_string(),
+        });
+    }
+
+    let credentials_file = temporary_replication_credentials_file()?;
+    let credentials_file_argument = credentials_file.to_str().ok_or_else(|| {
+        FwcError::crowdsec(
+            COMMAND_FAILED,
+            "Unable to create temporary CrowdSec machine credentials file",
+        )
+    })?;
+    let add_result = CrowdSecCommand::cscli(&[
+        "machines",
+        "add",
+        name,
+        "--password",
+        password,
+        "--file",
+        credentials_file_argument,
+    ])?
+    .execute()
+    .await;
+    let cleanup_result = remove_temporary_replication_credentials_file(&credentials_file).await;
+    add_result?;
+    cleanup_result?;
+
+    let validated = validate_machine(name).await?;
+    Ok(CrowdSecMachineReplicationResponse {
+        name: validated.name,
+        state: validated.state,
+        action: CrowdSecMachineReplicationAction::CreatedAndValidated,
+        message: "CrowdSec machine credentials are replicated and validated".to_string(),
     })
 }
 
@@ -815,6 +883,47 @@ fn emit_warning(progress: Option<&CrowdSecProgress>, message: &str) {
     if let Some(progress) = progress {
         progress.typed_message(CrowdSecProgressMessageType::Warning, message);
     }
+}
+
+fn temporary_replication_credentials_file() -> Result<PathBuf> {
+    let path = std::env::temp_dir().join(format!(
+        "fwcloud-crowdsec-machine-replication-{}.yaml",
+        Uuid::new_v4()
+    ));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|_| {
+            FwcError::crowdsec(
+                COMMAND_FAILED,
+                "Unable to create temporary CrowdSec machine credentials file",
+            )
+        })?;
+    Ok(path)
+}
+
+async fn remove_temporary_replication_credentials_file(path: &PathBuf) -> Result<()> {
+    match fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(FwcError::crowdsec(
+            COMMAND_FAILED,
+            "Unable to remove temporary CrowdSec machine credentials file",
+        )),
+    }
+}
+
+fn validate_machine_password(password: &str) -> Result<()> {
+    if password.is_empty() || password.len() > 256 || password.chars().any(char::is_control) {
+        return Err(FwcError::crowdsec(
+            MACHINE_INVALID,
+            "Invalid CrowdSec machine credentials",
+        ));
+    }
+
+    Ok(())
 }
 
 pub(crate) fn validate_machine_name(name: &str) -> Result<()> {
