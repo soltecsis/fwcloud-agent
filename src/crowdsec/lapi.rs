@@ -42,7 +42,8 @@ use crate::{
         },
         install,
         models::{
-            CrowdSecCentralLapiConfigureResponse, CrowdSecFirewallBackend, CrowdSecMachine,
+            CrowdSecCentralLapiConfigureResponse, CrowdSecFirewallBackend,
+            CrowdSecLapiReplicationReadinessResponse, CrowdSecMachine,
             CrowdSecMachineRemoveResponse, CrowdSecMachineState, CrowdSecMachineValidationResponse,
             CrowdSecMachinesResponse, CrowdSecRemoteMachineActivationResponse,
             CrowdSecRemoteMachineInstallResponse, CrowdSecRemoteMachineInstallState,
@@ -145,6 +146,15 @@ pub async fn machines() -> Result<CrowdSecMachinesResponse> {
 pub async fn ensure_central_ready() -> Result<()> {
     require_crowdsec_installed().await?;
     ensure_local_api_reachable().await
+}
+
+pub async fn replication_readiness() -> Result<CrowdSecLapiReplicationReadinessResponse> {
+    ensure_central_ready().await?;
+
+    Ok(CrowdSecLapiReplicationReadinessResponse {
+        ready: true,
+        message: "CrowdSec Local API is ready for credential replication".to_string(),
+    })
 }
 
 pub async fn validate_machine(name: &str) -> Result<CrowdSecMachineValidationResponse> {

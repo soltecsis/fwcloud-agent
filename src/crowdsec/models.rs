@@ -220,6 +220,12 @@ pub struct CrowdSecCentralLapiConfigureResponse {
     pub message: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct CrowdSecLapiReplicationReadinessResponse {
+    pub ready: bool,
+    pub message: String,
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrowdSecMachineState {
