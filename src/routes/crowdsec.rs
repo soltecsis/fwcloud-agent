@@ -31,14 +31,14 @@ use crate::{
         alerts, bouncers, collections, console, decisions, install, lapi,
         models::{
             CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerRegisterRequest,
-            CrowdSecBouncerUninstallRequest, CrowdSecCentralLapiConfigureRequest,
-            CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
-            CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
-            CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
-            CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecLapiReplicationReadinessResponse,
-            CrowdSecMachineReplicationRequest, CrowdSecRemoteMachineActivationRequest,
-            CrowdSecRemoteMachineReauthenticationRequest, CrowdSecRemoteMachineResumeRequest,
-            CrowdSecUninstallRequest,
+            CrowdSecBouncerReplicationRequest, CrowdSecBouncerUninstallRequest,
+            CrowdSecCentralLapiConfigureRequest, CrowdSecCollectionInstallRequest,
+            CrowdSecCollectionRemoveRequest, CrowdSecCollectionUpdateRequest,
+            CrowdSecCollectionsQuery, CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest,
+            CrowdSecDecisionsQuery, CrowdSecInstallMode, CrowdSecInstallRequest,
+            CrowdSecLapiReplicationReadinessResponse, CrowdSecMachineReplicationRequest,
+            CrowdSecRemoteMachineActivationRequest, CrowdSecRemoteMachineReauthenticationRequest,
+            CrowdSecRemoteMachineResumeRequest, CrowdSecUninstallRequest,
         },
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
         status, uninstall,
@@ -684,6 +684,27 @@ async fn register_crowdsec_bouncer(
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         register_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/lapi/bouncers/replicate")]
+async fn replicate_crowdsec_lapi_bouncer(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecBouncerReplicationRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let replication_result = bouncers::replicate(&request.name, &request.api_key).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        replication_result?
     };
 
     Ok(HttpResponse::Ok().json(response))

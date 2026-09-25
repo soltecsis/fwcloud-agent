@@ -210,6 +210,27 @@ pub struct CrowdSecBouncerRemoveResponse {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct CrowdSecBouncerReplicationRequest {
+    pub name: String,
+    pub api_key: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecBouncerReplicationAction {
+    Created,
+    Replaced,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecBouncerReplicationResponse {
+    pub name: String,
+    pub action: CrowdSecBouncerReplicationAction,
+    pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CrowdSecCentralLapiConfigureRequest {
     pub listen_uri: String,
 }
@@ -645,7 +666,8 @@ impl CrowdSecCapabilitiesResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep, CrowdSecBouncerUninstallStep,
+        CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep,
+        CrowdSecBouncerReplicationRequest, CrowdSecBouncerUninstallStep,
         CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecFirewallBackend,
         CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecInstallStep,
         CrowdSecMachineReplicationRequest, CrowdSecOperationRequest, CrowdSecPackageStatus,
@@ -684,6 +706,18 @@ mod tests {
         assert_eq!(response["data_retention"], "purge");
         assert_eq!(response["steps"][0]["step"], "packages");
         assert_eq!(response["steps"][0]["status"], "completed");
+    }
+
+    #[test]
+    fn bouncer_replication_request_requires_name_and_api_key() {
+        assert!(serde_json::from_str::<CrowdSecBouncerReplicationRequest>(
+            r#"{"name":"fwcloud-web-01","api_key":"bouncer-key"}"#,
+        )
+        .is_ok());
+        assert!(serde_json::from_str::<CrowdSecBouncerReplicationRequest>(
+            r#"{"name":"fwcloud-web-01"}"#,
+        )
+        .is_err());
     }
 
     #[test]

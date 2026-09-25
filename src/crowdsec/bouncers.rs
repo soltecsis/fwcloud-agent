@@ -31,7 +31,11 @@ use std::{
 use log::debug;
 use serde::Serialize;
 use serde_json::Value;
-use tokio::{fs, process::Command, time::timeout};
+use tokio::{
+    fs,
+    process::Command,
+    time::{sleep, timeout},
+};
 
 use crate::{
     crowdsec::{
@@ -40,9 +44,11 @@ use crate::{
             BOUNCER_CONFLICT, BOUNCER_INVALID, BOUNCER_NOT_FOUND, COMMAND_FAILED,
             FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT,
         },
+        lapi,
         models::{
             CrowdSecBouncer, CrowdSecBouncerInstallResponse, CrowdSecBouncerInstallStep,
             CrowdSecBouncerRegisterResponse, CrowdSecBouncerRemoveResponse,
+            CrowdSecBouncerReplicationAction, CrowdSecBouncerReplicationResponse,
             CrowdSecBouncerUninstallResponse, CrowdSecBouncerUninstallStep,
             CrowdSecBouncersResponse, CrowdSecFirewallBackend, CrowdSecStepResult,
             CrowdSecStepStatus,
@@ -348,6 +354,50 @@ pub async fn register(name: &str) -> Result<CrowdSecBouncerRegisterResponse> {
         .await?;
 
     bouncer_register_response(name, output.stdout())
+}
+
+pub async fn replicate(name: &str, api_key: &str) -> Result<CrowdSecBouncerReplicationResponse> {
+    validate_bouncer_name(name)?;
+    reject_fwcloud_bouncer(name, "The FWCloud bouncer name is reserved")?;
+    if !valid_api_key(api_key) {
+        return Err(FwcError::crowdsec(
+            BOUNCER_INVALID,
+            "Invalid CrowdSec bouncer API key",
+        ));
+    }
+    lapi::ensure_central_ready().await?;
+
+    let exists = list()
+        .await?
+        .bouncers
+        .iter()
+        .any(|bouncer| bouncer.name == name);
+    if exists {
+        debug!("Replacing CrowdSec bouncer: {}", name);
+        CrowdSecCommand::cscli(&["bouncers", "delete", name])?
+            .execute()
+            .await?;
+        sleep(Duration::from_secs(1)).await;
+    } else {
+        debug!("Replicating CrowdSec bouncer: {}", name);
+    }
+    CrowdSecCommand::cscli(&["bouncers", "add", name, "--key", api_key])?
+        .execute()
+        .await?;
+
+    Ok(CrowdSecBouncerReplicationResponse {
+        name: name.to_string(),
+        action: if exists {
+            CrowdSecBouncerReplicationAction::Replaced
+        } else {
+            CrowdSecBouncerReplicationAction::Created
+        },
+        message: if exists {
+            "CrowdSec bouncer credentials are replaced".to_string()
+        } else {
+            "CrowdSec bouncer credentials are replicated".to_string()
+        },
+    })
 }
 
 pub async fn remove(name: &str) -> Result<CrowdSecBouncerRemoveResponse> {
