@@ -667,13 +667,15 @@ impl CrowdSecCapabilitiesResponse {
 mod tests {
     use super::{
         CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep,
-        CrowdSecBouncerReplicationRequest, CrowdSecBouncerUninstallStep,
+        CrowdSecBouncerReplicationAction, CrowdSecBouncerReplicationRequest,
+        CrowdSecBouncerReplicationResponse, CrowdSecBouncerUninstallStep,
         CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecFirewallBackend,
         CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecInstallStep,
-        CrowdSecMachineReplicationRequest, CrowdSecOperationRequest, CrowdSecPackageStatus,
-        CrowdSecRemoteMachineActivationRequest, CrowdSecRemoteMachineInstallState,
-        CrowdSecRemoteMachineReauthenticationRequest, CrowdSecStepResult, CrowdSecStepStatus,
-        CrowdSecUninstallResponse, CrowdSecUninstallStep,
+        CrowdSecMachineReplicationAction, CrowdSecMachineReplicationRequest,
+        CrowdSecMachineReplicationResponse, CrowdSecMachineState, CrowdSecOperationRequest,
+        CrowdSecPackageStatus, CrowdSecRemoteMachineActivationRequest,
+        CrowdSecRemoteMachineInstallState, CrowdSecRemoteMachineReauthenticationRequest,
+        CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
     };
 
     #[test]
@@ -718,6 +720,27 @@ mod tests {
             r#"{"name":"fwcloud-web-01"}"#,
         )
         .is_err());
+    }
+
+    #[test]
+    fn replication_responses_do_not_serialize_credentials() {
+        let machine = serde_json::to_string(&CrowdSecMachineReplicationResponse {
+            name: "fwcloud-web-01".to_string(),
+            state: CrowdSecMachineState::Validated,
+            action: CrowdSecMachineReplicationAction::CreatedAndValidated,
+            message: "CrowdSec machine credentials are replicated and validated".to_string(),
+        })
+        .unwrap();
+        let bouncer = serde_json::to_string(&CrowdSecBouncerReplicationResponse {
+            name: "fwcloud-web-01".to_string(),
+            action: CrowdSecBouncerReplicationAction::Replaced,
+            message: "CrowdSec bouncer credentials are replaced".to_string(),
+        })
+        .unwrap();
+
+        assert!(!machine.contains("machine-password"));
+        assert!(!bouncer.contains("bouncer-api-key"));
+        assert!(bouncer.contains("\"action\":\"replaced\""));
     }
 
     #[test]

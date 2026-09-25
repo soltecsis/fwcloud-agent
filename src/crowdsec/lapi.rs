@@ -1162,7 +1162,7 @@ mod tests {
         central_lapi_configuration, machine_from_json, machine_reauthentication_required_message,
         machines_from_json, remote_lapi_connection_error, remote_lapi_connectivity_error_code,
         remote_lapi_socket_address, remote_lapi_url, remote_machine_configuration,
-        validate_listen_uri, validate_machine_name,
+        validate_listen_uri, validate_machine_name, validate_machine_password,
     };
     use crate::{
         crowdsec::{
@@ -1252,6 +1252,13 @@ mod tests {
             "Invalid CrowdSec machine name",
         ))
         .is_none());
+    }
+
+    #[test]
+    fn validates_machine_replication_passwords() {
+        assert!(validate_machine_password("machine-password").is_ok());
+        assert!(validate_machine_password("").is_err());
+        assert!(validate_machine_password("invalid\npassword").is_err());
     }
 
     #[test]
