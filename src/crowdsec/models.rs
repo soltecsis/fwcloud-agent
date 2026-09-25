@@ -288,6 +288,12 @@ pub struct CrowdSecMachineRemoveResponse {
     pub message: String,
 }
 
+#[derive(Serialize)]
+pub struct CrowdSecMachineCredentialsExportResponse {
+    pub login: String,
+    pub password: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecMachineReplicationRequest {

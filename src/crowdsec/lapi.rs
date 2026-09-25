@@ -47,14 +47,15 @@ use crate::{
         models::{
             CrowdSecCentralLapiConfigureResponse, CrowdSecFirewallBackend,
             CrowdSecLapiReplicationReadinessResponse, CrowdSecMachine,
-            CrowdSecMachineRemoveResponse, CrowdSecMachineReplicationAction,
-            CrowdSecMachineReplicationResponse, CrowdSecMachineState,
-            CrowdSecMachineValidationResponse, CrowdSecMachinesResponse,
+            CrowdSecMachineCredentialsExportResponse, CrowdSecMachineRemoveResponse,
+            CrowdSecMachineReplicationAction, CrowdSecMachineReplicationResponse,
+            CrowdSecMachineState, CrowdSecMachineValidationResponse, CrowdSecMachinesResponse,
             CrowdSecRemoteMachineActivationResponse, CrowdSecRemoteMachineInstallResponse,
             CrowdSecRemoteMachineInstallState,
         },
         packages,
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
+        transitions::remote,
     },
     errors::{FwcError, Result},
 };
@@ -160,6 +161,23 @@ pub async fn replication_readiness() -> Result<CrowdSecLapiReplicationReadinessR
         ready: true,
         message: "CrowdSec Local API is ready for credential replication".to_string(),
     })
+}
+
+pub async fn export_machine_credentials(
+    name: &str,
+) -> Result<CrowdSecMachineCredentialsExportResponse> {
+    validate_machine_name(name)?;
+    require_crowdsec_installed().await?;
+    let credentials = fs::read_to_string("/etc/crowdsec/local_api_credentials.yaml")
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                MACHINE_NOT_FOUND,
+                "CrowdSec machine credentials are not available",
+            )
+        })?;
+
+    machine_credentials_from_contents(name, &credentials)
 }
 
 pub async fn replicate_machine(
@@ -885,6 +903,40 @@ fn emit_warning(progress: Option<&CrowdSecProgress>, message: &str) {
     }
 }
 
+fn machine_credentials_from_contents(
+    name: &str,
+    contents: &str,
+) -> Result<CrowdSecMachineCredentialsExportResponse> {
+    let login = remote::root_scalar(contents, "login").map_err(|_| {
+        FwcError::crowdsec(
+            MACHINE_NOT_FOUND,
+            "CrowdSec machine credentials are not available",
+        )
+    })?;
+    if login != name {
+        return Err(FwcError::crowdsec(
+            MACHINE_NOT_FOUND,
+            "CrowdSec machine credentials do not match the requested machine",
+        ));
+    }
+    let password = remote::root_scalar(contents, "password").map_err(|_| {
+        FwcError::crowdsec(
+            MACHINE_NOT_FOUND,
+            "CrowdSec machine credentials are not available",
+        )
+    })?;
+    validate_machine_password(&password)?;
+    let lapi_url = remote::root_scalar(contents, "url").map_err(|_| {
+        FwcError::crowdsec(
+            MACHINE_NOT_FOUND,
+            "CrowdSec machine credentials are not available",
+        )
+    })?;
+    remote_lapi_url(&lapi_url)?;
+
+    Ok(CrowdSecMachineCredentialsExportResponse { login, password })
+}
+
 fn temporary_replication_credentials_file() -> Result<PathBuf> {
     let path = std::env::temp_dir().join(format!(
         "fwcloud-crowdsec-machine-replication-{}.yaml",
@@ -1159,8 +1211,9 @@ mod tests {
     use std::io::ErrorKind;
 
     use super::{
-        central_lapi_configuration, machine_from_json, machine_reauthentication_required_message,
-        machines_from_json, remote_lapi_connection_error, remote_lapi_connectivity_error_code,
+        central_lapi_configuration, machine_credentials_from_contents, machine_from_json,
+        machine_reauthentication_required_message, machines_from_json,
+        remote_lapi_connection_error, remote_lapi_connectivity_error_code,
         remote_lapi_socket_address, remote_lapi_url, remote_machine_configuration,
         validate_listen_uri, validate_machine_name, validate_machine_password,
     };
@@ -1252,6 +1305,23 @@ mod tests {
             "Invalid CrowdSec machine name",
         ))
         .is_none());
+    }
+
+    #[test]
+    fn exports_only_matching_machine_credentials() {
+        let credentials = machine_credentials_from_contents(
+            "fwcloud-web-01",
+            "url: http://192.0.2.10:8080\nlogin: fwcloud-web-01\npassword: machine-password\n",
+        )
+        .unwrap();
+
+        assert_eq!(credentials.login, "fwcloud-web-01");
+        assert_eq!(credentials.password, "machine-password");
+        assert!(machine_credentials_from_contents(
+            "fwcloud-web-02",
+            "url: http://192.0.2.10:8080\nlogin: fwcloud-web-01\npassword: machine-password\n",
+        )
+        .is_err());
     }
 
     #[test]

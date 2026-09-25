@@ -62,6 +62,7 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(crowdsec::configure_crowdsec_central_lapi)
             .service(crowdsec::crowdsec_lapi_replication_readiness)
             .service(crowdsec::crowdsec_lapi_machines)
+            .service(crowdsec::export_crowdsec_machine_credentials)
             .service(crowdsec::replicate_crowdsec_lapi_machine)
             .service(crowdsec::validate_crowdsec_lapi_machine)
             .service(crowdsec::activate_crowdsec_remote_machine)

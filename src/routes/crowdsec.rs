@@ -528,6 +528,27 @@ async fn crowdsec_lapi_machines(cfg: web::Data<Arc<Config>>) -> Result<HttpRespo
     Ok(HttpResponse::Ok().json(response))
 }
 
+#[post("/crowdsec/machines/{name}/credentials/export")]
+async fn export_crowdsec_machine_credentials(
+    cfg: web::Data<Arc<Config>>,
+    name: web::Path<String>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let credentials_result = lapi::export_machine_credentials(&name).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        credentials_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
 #[post("/crowdsec/lapi/machines/replicate")]
 async fn replicate_crowdsec_lapi_machine(
     cfg: web::Data<Arc<Config>>,
