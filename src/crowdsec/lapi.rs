@@ -78,6 +78,8 @@ pub async fn configure_central(listen_uri: &str) -> Result<CrowdSecCentralLapiCo
                 "Unable to read CrowdSec Local API configuration",
             )
         })?;
+    let previous_listen_uri =
+        central_lapi_listen_uri(&configuration).unwrap_or_else(|| "127.0.0.1:8080".to_string());
     let updated_configuration = central_lapi_configuration(&configuration, listen_uri);
 
     if updated_configuration != configuration {
@@ -97,6 +99,7 @@ pub async fn configure_central(listen_uri: &str) -> Result<CrowdSecCentralLapiCo
 
     Ok(CrowdSecCentralLapiConfigureResponse {
         listen_uri: listen_uri.to_string(),
+        previous_listen_uri,
         message: "CrowdSec Local API is configured for remote machines".to_string(),
     })
 }
@@ -1048,6 +1051,13 @@ fn value_as_string(value: &Value) -> Option<String> {
     }
 }
 
+fn central_lapi_listen_uri(configuration: &str) -> Option<String> {
+    configuration.lines().find_map(|line| {
+        let value = line.trim_start().strip_prefix("listen_uri:")?.trim();
+        (!value.is_empty()).then(|| value.trim_matches('"').to_string())
+    })
+}
+
 fn central_lapi_configuration(configuration: &str, listen_uri: &str) -> String {
     let mut lines = configuration
         .lines()
@@ -1211,8 +1221,8 @@ mod tests {
     use std::io::ErrorKind;
 
     use super::{
-        central_lapi_configuration, machine_credentials_from_contents, machine_from_json,
-        machine_reauthentication_required_message, machines_from_json,
+        central_lapi_configuration, central_lapi_listen_uri, machine_credentials_from_contents,
+        machine_from_json, machine_reauthentication_required_message, machines_from_json,
         remote_lapi_connection_error, remote_lapi_connectivity_error_code,
         remote_lapi_socket_address, remote_lapi_url, remote_machine_configuration,
         validate_listen_uri, validate_machine_name, validate_machine_password,
@@ -1235,6 +1245,16 @@ mod tests {
         assert!(updated.contains("    enable: true\n"));
         assert!(updated.contains("    listen_uri: 192.0.2.10:8080\n"));
         assert!(updated.contains("common:\n  log_media: stdout\n"));
+    }
+
+    #[test]
+    fn reads_the_existing_local_api_listener() {
+        let configuration = "api:\n  server:\n    enable: true\n    listen_uri: 192.0.2.10:8080\n";
+
+        assert_eq!(
+            central_lapi_listen_uri(configuration),
+            Some("192.0.2.10:8080".to_string())
+        );
     }
 
     #[test]

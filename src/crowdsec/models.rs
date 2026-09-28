@@ -238,6 +238,7 @@ pub struct CrowdSecCentralLapiConfigureRequest {
 #[derive(Debug, Serialize)]
 pub struct CrowdSecCentralLapiConfigureResponse {
     pub listen_uri: String,
+    pub previous_listen_uri: String,
     pub message: String,
 }
 
