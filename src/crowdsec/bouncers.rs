@@ -1780,7 +1780,7 @@ async fn remove_bouncer_registration() -> Result<bool> {
     Ok(true)
 }
 
-async fn local_api_is_enabled() -> Result<bool> {
+pub(crate) async fn local_api_is_enabled() -> Result<bool> {
     match fs::read_to_string(CROWDSEC_CONFIG_PATH).await {
         Ok(configuration) => Ok(local_api_enabled_in_configuration(&configuration)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),

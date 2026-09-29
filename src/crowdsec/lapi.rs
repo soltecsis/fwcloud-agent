@@ -325,15 +325,17 @@ pub async fn install_remote_machine(
         }
     };
 
-    emit_progress(
-        progress,
-        "Stopping existing CrowdSec service before machine configuration",
-    );
-    disable_crowdsec_service_if_present().await?;
-    emit_success(
-        progress,
-        "CrowdSec service is stopped before machine configuration",
-    );
+    if bouncers::local_api_is_enabled().await? {
+        emit_progress(
+            progress,
+            "Ensuring the existing CrowdSec Local API is running before Firewall Bouncer cleanup",
+        );
+        enable_crowdsec_service().await?;
+        emit_success(
+            progress,
+            "Existing CrowdSec Local API is running before Firewall Bouncer cleanup",
+        );
+    }
 
     emit_progress(
         progress,
@@ -343,6 +345,16 @@ pub async fn install_remote_machine(
     emit_success(
         progress,
         "Existing local CrowdSec Firewall Bouncer is removed before machine configuration",
+    );
+
+    emit_progress(
+        progress,
+        "Stopping existing CrowdSec service before machine configuration",
+    );
+    disable_crowdsec_service_if_present().await?;
+    emit_success(
+        progress,
+        "CrowdSec service is stopped before machine configuration",
     );
 
     emit_progress(progress, "Installing CrowdSec packages and dependencies");
