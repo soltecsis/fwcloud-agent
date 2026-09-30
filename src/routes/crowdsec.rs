@@ -537,7 +537,9 @@ async fn export_crowdsec_machine_credentials(
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
         let _mutex_data = mutex.lock().await;
-        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
+        // A remote-role transition registers the Machine before it can be replicated.
+        // Its generated credentials must therefore remain exportable while that
+        // transition waits for central LAPI validation.
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
         let credentials_result = lapi::export_machine_credentials(&name).await;
