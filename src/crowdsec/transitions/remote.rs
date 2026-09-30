@@ -189,6 +189,24 @@ async fn service(action: &str, name: &str) -> Result<()> {
     }
 }
 
+async fn disable_service_if_present(name: &str) -> Result<()> {
+    let output = timeout(
+        Duration::from_secs(15),
+        Command::new("/usr/bin/systemctl")
+            .args(["show", "--property=LoadState", "--value", name])
+            .output(),
+    )
+    .await
+    .map_err(|_| failed())?
+    .map_err(|_| failed())?;
+    if !output.status.success()
+        || String::from_utf8_lossy(&output.stdout).trim() == "not-found"
+    {
+        return Ok(());
+    }
+    service("disable --now", name).await
+}
+
 async fn running(name: &str) -> Result<bool> {
     let output = timeout(
         Duration::from_secs(15),
@@ -398,7 +416,7 @@ pub async fn prepare(
     let mut registered = false;
     let mut staged_credentials = None;
     let result: Result<()> = async {
-        service("disable --now", BOUNCER).await?;
+        disable_service_if_present(BOUNCER).await?;
         service("disable --now", ENGINE).await?;
         if request.expected.local_remediation && !state.target.local_remediation {
             bouncers::disable_local_remediation_with_progress(Some(progress)).await?;
