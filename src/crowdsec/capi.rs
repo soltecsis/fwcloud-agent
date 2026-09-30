@@ -115,10 +115,10 @@ pub fn status_from_command_output(
     let diagnostics = format!("{stdout}\n{stderr}").to_ascii_lowercase();
     let state = if succeeded {
         CrowdSecCapiState::Connected
-    } else if is_not_configured(&diagnostics) {
-        CrowdSecCapiState::NotConfigured
     } else if is_temporarily_blocked(&diagnostics) {
         CrowdSecCapiState::TemporarilyBlocked
+    } else if is_not_configured(&diagnostics) {
+        CrowdSecCapiState::NotConfigured
     } else {
         CrowdSecCapiState::Error
     };
@@ -134,7 +134,6 @@ pub fn is_not_configured(diagnostics: &str) -> bool {
     diagnostics.contains("not enrolled")
         || diagnostics.contains("not registered")
         || diagnostics.contains("no credentials")
-        || diagnostics.contains("online_api_credentials")
         || diagnostics.contains("credentials file")
 }
 
@@ -241,6 +240,11 @@ fn is_temporarily_blocked(diagnostics: &str) -> bool {
         || diagnostics.contains("http status 403")
         || diagnostics.contains("status code: 403")
         || diagnostics.contains("http 403")
+        || diagnostics.contains("http status 429")
+        || diagnostics.contains("status code: 429")
+        || diagnostics.contains("http 429")
+        || diagnostics.contains("too many requests")
+        || diagnostics.contains("rate limit")
 }
 
 fn output_uses_unsupported_json_option(diagnostics: &str) -> bool {
@@ -273,6 +277,17 @@ mod tests {
 
         assert_eq!(status.state, CrowdSecCapiState::TemporarilyBlocked);
         assert_eq!(status.retry_after_minutes, None);
+    }
+
+    #[test]
+    fn prioritizes_a_capi_block_over_a_loaded_credentials_path() {
+        let status = status_from_command_output(
+            false,
+            "Loaded credentials from /etc/crowdsec/online_api_credentials.yaml",
+            "Failed to authenticate to Central API (CAPI): HTTP status 403",
+        );
+
+        assert_eq!(status.state, CrowdSecCapiState::TemporarilyBlocked);
     }
 
     #[test]

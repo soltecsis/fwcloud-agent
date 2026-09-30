@@ -94,6 +94,43 @@ fn backup_path(data: &str, id: Uuid) -> PathBuf {
     directory(data).join(format!("{id}.backup"))
 }
 
+fn staged_credentials_path(id: Uuid) -> PathBuf {
+    Path::new(CREDENTIALS)
+        .with_file_name(format!(".fwcloud-crowdsec-transition-{id}.credentials"))
+}
+
+async fn stash_credentials(id: Uuid) -> Result<Option<PathBuf>> {
+    let path = staged_credentials_path(id);
+    match fs::rename(CREDENTIALS, &path).await {
+        Ok(()) => Ok(Some(path)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(failed()),
+    }
+}
+
+async fn restore_stashed_credentials(path: Option<&Path>) -> Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    match fs::remove_file(CREDENTIALS).await {
+        Ok(()) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(_) => return Err(failed()),
+    }
+    fs::rename(path, CREDENTIALS).await.map_err(|_| failed())
+}
+
+async fn discard_stashed_credentials(path: Option<&Path>) -> Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    match fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(failed()),
+    }
+}
+
 fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
     let temp = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
     let result = (|| {
@@ -150,6 +187,24 @@ async fn service(action: &str, name: &str) -> Result<()> {
     } else {
         Err(failed())
     }
+}
+
+async fn disable_service_if_present(name: &str) -> Result<()> {
+    let output = timeout(
+        Duration::from_secs(15),
+        Command::new("/usr/bin/systemctl")
+            .args(["show", "--property=LoadState", "--value", name])
+            .output(),
+    )
+    .await
+    .map_err(|_| failed())?
+    .map_err(|_| failed())?;
+    if !output.status.success()
+        || String::from_utf8_lossy(&output.stdout).trim() == "not-found"
+    {
+        return Ok(());
+    }
+    service("disable --now", name).await
 }
 
 async fn running(name: &str) -> Result<bool> {
@@ -270,7 +325,8 @@ pub(crate) async fn verify_pending_machine_source(expected: &TransitionTarget) -
 async fn restore(backup: &Backup) -> Result<()> {
     let _ = service("disable --now", BOUNCER).await;
     let _ = service("disable --now", ENGINE).await;
-    atomic_write(Path::new(CONFIG), backup.configuration.as_bytes())?;
+    // Restore the credential file before any other state. A failed role change
+    // must never leave the previous Machine credentials absent or truncated.
     match &backup.credentials {
         Some(credentials) => atomic_write(Path::new(CREDENTIALS), credentials.as_bytes())?,
         None => match fs::remove_file(CREDENTIALS).await {
@@ -279,6 +335,7 @@ async fn restore(backup: &Backup) -> Result<()> {
             Err(_) => return Err(failed()),
         },
     }
+    atomic_write(Path::new(CONFIG), backup.configuration.as_bytes())?;
     match &backup.bouncer {
         Some(configuration) => atomic_write(
             Path::new(bouncers::BOUNCER_CONFIG_PATH),
@@ -357,14 +414,19 @@ pub async fn prepare(
         "Stopping CrowdSec services before remote Machine registration",
     );
     let mut registered = false;
+    let mut staged_credentials = None;
     let result: Result<()> = async {
-        service("disable --now", BOUNCER).await?;
+        disable_service_if_present(BOUNCER).await?;
         service("disable --now", ENGINE).await?;
         if request.expected.local_remediation && !state.target.local_remediation {
             bouncers::disable_local_remediation_with_progress(Some(progress)).await?;
         }
         lapi::configure_remote_machine().await?;
-        lapi::remove_machine_credentials().await?;
+        // cscli lapi register writes its generated credentials to the configured
+        // path. Move the current file aside instead of deleting it so a failed
+        // registration can restore the source Machine without relying on a
+        // later, broader rollback.
+        staged_credentials = stash_credentials(state.transition_id).await?;
         let lapi_url =
             lapi::remote_lapi_url(state.target.lapi_url.as_deref().ok_or_else(conflict)?)?;
         CrowdSecCommand::cscli(&[
@@ -378,10 +440,16 @@ pub async fn prepare(
         .execute()
         .await?;
         registered = true;
+        discard_stashed_credentials(staged_credentials.as_deref()).await?;
         lapi::restrict_machine_credentials_permissions().await
     }
     .await;
     if let Err(error) = result {
+        let restored = !registered
+            && restore_stashed_credentials(staged_credentials.as_deref())
+                .await
+                .is_ok()
+            && restore(&backup).await.is_ok();
         if registered {
             progress.typed_message(
                 CrowdSecProgressMessageType::Error,
@@ -389,7 +457,7 @@ pub async fn prepare(
             );
             state.phase = TransitionPhase::RecoveryRequired;
             save(data, &state)?;
-        } else if restore(&backup).await.is_ok() {
+        } else if restored {
             progress.typed_message(
                 CrowdSecProgressMessageType::Error,
                 "CrowdSec Machine registration failed; restoring the previous role",
@@ -482,6 +550,8 @@ pub async fn recover(data: &str, id: Uuid) -> Result<RemoteTransition> {
     fs::remove_file(backup_path(data, id))
         .await
         .map_err(|_| failed())?;
+    let staged_credentials = staged_credentials_path(id);
+    let _ = discard_stashed_credentials(Some(&staged_credentials)).await;
     Ok(state)
 }
 
@@ -500,6 +570,8 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<RemoteTransition> {
     }
     state.phase = TransitionPhase::Completed;
     save(data, &state)?;
+    let staged_credentials = staged_credentials_path(id);
+    let _ = discard_stashed_credentials(Some(&staged_credentials)).await;
     Ok(state)
 }
 

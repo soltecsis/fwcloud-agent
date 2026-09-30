@@ -31,7 +31,11 @@ use std::{
 use log::debug;
 use serde::Serialize;
 use serde_json::Value;
-use tokio::{fs, process::Command, time::timeout};
+use tokio::{
+    fs,
+    process::Command,
+    time::{sleep, timeout},
+};
 
 use crate::{
     crowdsec::{
@@ -40,9 +44,11 @@ use crate::{
             BOUNCER_CONFLICT, BOUNCER_INVALID, BOUNCER_NOT_FOUND, COMMAND_FAILED,
             FIREWALL_INTEGRATION_INVALID, OPERATION_TIMEOUT,
         },
+        lapi,
         models::{
             CrowdSecBouncer, CrowdSecBouncerInstallResponse, CrowdSecBouncerInstallStep,
             CrowdSecBouncerRegisterResponse, CrowdSecBouncerRemoveResponse,
+            CrowdSecBouncerReplicationAction, CrowdSecBouncerReplicationResponse,
             CrowdSecBouncerUninstallResponse, CrowdSecBouncerUninstallStep,
             CrowdSecBouncersResponse, CrowdSecFirewallBackend, CrowdSecStepResult,
             CrowdSecStepStatus,
@@ -350,6 +356,50 @@ pub async fn register(name: &str) -> Result<CrowdSecBouncerRegisterResponse> {
     bouncer_register_response(name, output.stdout())
 }
 
+pub async fn replicate(name: &str, api_key: &str) -> Result<CrowdSecBouncerReplicationResponse> {
+    validate_bouncer_name(name)?;
+    reject_fwcloud_bouncer(name, "The FWCloud bouncer name is reserved")?;
+    if !valid_api_key(api_key) {
+        return Err(FwcError::crowdsec(
+            BOUNCER_INVALID,
+            "Invalid CrowdSec bouncer API key",
+        ));
+    }
+    lapi::ensure_central_ready().await?;
+
+    let exists = list()
+        .await?
+        .bouncers
+        .iter()
+        .any(|bouncer| bouncer.name == name);
+    if exists {
+        debug!("Replacing CrowdSec bouncer: {}", name);
+        CrowdSecCommand::cscli(&["bouncers", "delete", name])?
+            .execute()
+            .await?;
+        sleep(Duration::from_secs(1)).await;
+    } else {
+        debug!("Replicating CrowdSec bouncer: {}", name);
+    }
+    CrowdSecCommand::cscli(&["bouncers", "add", name, "--key", api_key])?
+        .execute()
+        .await?;
+
+    Ok(CrowdSecBouncerReplicationResponse {
+        name: name.to_string(),
+        action: if exists {
+            CrowdSecBouncerReplicationAction::Replaced
+        } else {
+            CrowdSecBouncerReplicationAction::Created
+        },
+        message: if exists {
+            "CrowdSec bouncer credentials are replaced".to_string()
+        } else {
+            "CrowdSec bouncer credentials are replicated".to_string()
+        },
+    })
+}
+
 pub async fn remove(name: &str) -> Result<CrowdSecBouncerRemoveResponse> {
     validate_bouncer_name(name)?;
 
@@ -489,7 +539,11 @@ async fn blacklist_nftables_status(
     })
 }
 
-pub async fn prepare_set_only_configuration() -> Result<String> {
+pub async fn prepare_set_only_configuration() -> Result<(String, String)> {
+    if let Some(configuration) = existing_bouncer_lapi_configuration().await? {
+        return Ok(configuration);
+    }
+
     let api_key = existing_bouncer_api_key()
         .await?
         .unwrap_or(generate_bouncer_api_key().await?);
@@ -502,7 +556,7 @@ pub async fn prepare_set_only_configuration() -> Result<String> {
                 "Unable to create CrowdSec Firewall Bouncer configuration directory",
             )
         })?;
-    Ok(api_key)
+    Ok(("http://127.0.0.1:8080/".to_string(), api_key))
 }
 
 pub async fn install() -> Result<CrowdSecBouncerInstallResponse> {
@@ -523,8 +577,8 @@ pub async fn install_with_backend_and_progress(
         progress,
         "Preserving FWCloud CrowdSec Firewall Bouncer credentials during backend transition",
     );
-    let api_key = prepare_set_only_configuration().await?;
-    install_with_lapi_configuration(backend, "http://127.0.0.1:8080/", &api_key, progress).await
+    let (lapi_url, api_key) = prepare_set_only_configuration().await?;
+    install_with_lapi_configuration(backend, &lapi_url, &api_key, progress).await
 }
 
 pub async fn install_with_remote_lapi_and_progress(
@@ -1726,7 +1780,7 @@ async fn remove_bouncer_registration() -> Result<bool> {
     Ok(true)
 }
 
-async fn local_api_is_enabled() -> Result<bool> {
+pub(crate) async fn local_api_is_enabled() -> Result<bool> {
     match fs::read_to_string(CROWDSEC_CONFIG_PATH).await {
         Ok(configuration) => Ok(local_api_enabled_in_configuration(&configuration)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -2278,6 +2332,22 @@ async fn write_if_changed(path: &str, contents: &str) -> Result<()> {
     }
 }
 
+async fn existing_bouncer_lapi_configuration() -> Result<Option<(String, String)>> {
+    match fs::read_to_string(BOUNCER_CONFIG_PATH).await {
+        Ok(configuration) if configuration_is_fwcloud_managed(&configuration) => Ok(Some((
+            bouncer_api_url_from_contents(&configuration)?,
+            bouncer_api_key_from_contents(&configuration)?
+                .expect("managed CrowdSec Firewall Bouncer configuration has an API key"),
+        ))),
+        Ok(_) => Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to read CrowdSec Firewall Bouncer configuration",
+        )),
+    }
+}
+
 async fn existing_bouncer_api_key() -> Result<Option<String>> {
     let legacy_key = bouncer_api_key_from_path(LEGACY_BOUNCER_CONFIG_OVERRIDE_PATH).await?;
     if legacy_key.is_some() {
@@ -2330,6 +2400,24 @@ fn bouncer_api_key_from_contents(configuration: &str) -> Result<Option<String>> 
                 "Existing CrowdSec Firewall Bouncer configuration has no valid API key",
             )
         })
+}
+
+fn bouncer_api_url_from_contents(configuration: &str) -> Result<String> {
+    let lapi_url = configuration
+        .lines()
+        .find_map(|line| {
+            line.split_once(':').and_then(|(key, value)| {
+                (key.trim() == "api_url").then(|| value.trim().trim_matches('"').to_string())
+            })
+        })
+        .ok_or_else(|| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Existing CrowdSec Firewall Bouncer configuration has no valid Local API URL",
+            )
+        })?;
+    lapi::remote_lapi_url(&lapi_url)?;
+    Ok(lapi_url)
 }
 
 async fn generate_bouncer_api_key() -> Result<String> {
@@ -2481,9 +2569,9 @@ mod tests {
     };
 
     use super::{
-        bouncer_reconciliation_action, bouncer_register_response, bouncers_from_json,
-        configuration_backend, configuration_is_fwcloud_managed, configuration_is_set_only,
-        emit_backend_startup_configuration_cleanup, emit_boolean_result,
+        bouncer_api_url_from_contents, bouncer_reconciliation_action, bouncer_register_response,
+        bouncers_from_json, configuration_backend, configuration_is_fwcloud_managed,
+        configuration_is_set_only, emit_backend_startup_configuration_cleanup, emit_boolean_result,
         emit_reconciliation_skipped, firewall_rules_contain_unmanaged_crowdsec, integration_status,
         legacy_bouncer_ipset_names, legacy_bouncer_jump_chains, local_api_enabled_in_configuration,
         nftables_blacklist_set_is_compatible, nftables_bouncer_service_action,
@@ -2543,6 +2631,21 @@ mod tests {
             BOUNCER_CONFIG_PATH,
             "/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml"
         );
+    }
+
+    #[test]
+    fn reads_the_lapi_url_from_managed_bouncer_configuration() {
+        let configuration = set_only_configuration_contents(
+            &CrowdSecBouncerSetOnlyConfig::default(),
+            "http://192.0.2.10:8080",
+            "secret",
+        );
+
+        assert_eq!(
+            bouncer_api_url_from_contents(&configuration).unwrap(),
+            "http://192.0.2.10:8080"
+        );
+        assert!(bouncer_api_url_from_contents("# Managed by FWCloud\napi_key: secret\n").is_err());
     }
 
     #[test]

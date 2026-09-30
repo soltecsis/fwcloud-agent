@@ -210,6 +210,27 @@ pub struct CrowdSecBouncerRemoveResponse {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct CrowdSecBouncerReplicationRequest {
+    pub name: String,
+    pub api_key: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecBouncerReplicationAction {
+    Created,
+    Replaced,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecBouncerReplicationResponse {
+    pub name: String,
+    pub action: CrowdSecBouncerReplicationAction,
+    pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CrowdSecCentralLapiConfigureRequest {
     pub listen_uri: String,
 }
@@ -217,6 +238,13 @@ pub struct CrowdSecCentralLapiConfigureRequest {
 #[derive(Debug, Serialize)]
 pub struct CrowdSecCentralLapiConfigureResponse {
     pub listen_uri: String,
+    pub previous_listen_uri: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecLapiReplicationReadinessResponse {
+    pub ready: bool,
     pub message: String,
 }
 
@@ -258,6 +286,35 @@ pub struct CrowdSecMachineValidationResponse {
 #[derive(Debug, Serialize)]
 pub struct CrowdSecMachineRemoveResponse {
     pub name: String,
+    pub message: String,
+}
+
+#[derive(Serialize)]
+pub struct CrowdSecMachineCredentialsExportResponse {
+    pub login: String,
+    pub password: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecMachineReplicationRequest {
+    pub name: String,
+    pub password: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecMachineReplicationAction {
+    CreatedAndValidated,
+    Validated,
+    AlreadyValidated,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecMachineReplicationResponse {
+    pub name: String,
+    pub state: CrowdSecMachineState,
+    pub action: CrowdSecMachineReplicationAction,
     pub message: String,
 }
 
@@ -616,9 +673,13 @@ impl CrowdSecCapabilitiesResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep, CrowdSecBouncerUninstallStep,
+        CrowdSecBouncerInstallRequest, CrowdSecBouncerInstallStep,
+        CrowdSecBouncerReplicationAction, CrowdSecBouncerReplicationRequest,
+        CrowdSecBouncerReplicationResponse, CrowdSecBouncerUninstallStep,
         CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecFirewallBackend,
-        CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecInstallStep, CrowdSecOperationRequest,
+        CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecInstallStep,
+        CrowdSecMachineReplicationAction, CrowdSecMachineReplicationRequest,
+        CrowdSecMachineReplicationResponse, CrowdSecMachineState, CrowdSecOperationRequest,
         CrowdSecPackageStatus, CrowdSecRemoteMachineActivationRequest,
         CrowdSecRemoteMachineInstallState, CrowdSecRemoteMachineReauthenticationRequest,
         CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
@@ -654,6 +715,39 @@ mod tests {
         assert_eq!(response["data_retention"], "purge");
         assert_eq!(response["steps"][0]["step"], "packages");
         assert_eq!(response["steps"][0]["status"], "completed");
+    }
+
+    #[test]
+    fn bouncer_replication_request_requires_name_and_api_key() {
+        assert!(serde_json::from_str::<CrowdSecBouncerReplicationRequest>(
+            r#"{"name":"fwcloud-web-01","api_key":"bouncer-key"}"#,
+        )
+        .is_ok());
+        assert!(serde_json::from_str::<CrowdSecBouncerReplicationRequest>(
+            r#"{"name":"fwcloud-web-01"}"#,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn replication_responses_do_not_serialize_credentials() {
+        let machine = serde_json::to_string(&CrowdSecMachineReplicationResponse {
+            name: "fwcloud-web-01".to_string(),
+            state: CrowdSecMachineState::Validated,
+            action: CrowdSecMachineReplicationAction::CreatedAndValidated,
+            message: "CrowdSec machine credentials are replicated and validated".to_string(),
+        })
+        .unwrap();
+        let bouncer = serde_json::to_string(&CrowdSecBouncerReplicationResponse {
+            name: "fwcloud-web-01".to_string(),
+            action: CrowdSecBouncerReplicationAction::Replaced,
+            message: "CrowdSec bouncer credentials are replaced".to_string(),
+        })
+        .unwrap();
+
+        assert!(!machine.contains("machine-password"));
+        assert!(!bouncer.contains("bouncer-api-key"));
+        assert!(bouncer.contains("\"action\":\"replaced\""));
     }
 
     #[test]
@@ -716,6 +810,18 @@ mod tests {
         );
 
         assert!(request.is_err());
+    }
+
+    #[test]
+    fn machine_replication_request_requires_name_and_password() {
+        assert!(serde_json::from_str::<CrowdSecMachineReplicationRequest>(
+            r#"{"name":"fwcloud-web-01","password":"machine-password"}"#,
+        )
+        .is_ok());
+        assert!(serde_json::from_str::<CrowdSecMachineReplicationRequest>(
+            r#"{"name":"fwcloud-web-01"}"#,
+        )
+        .is_err());
     }
 
     #[test]

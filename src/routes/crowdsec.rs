@@ -31,13 +31,14 @@ use crate::{
         alerts, bouncers, collections, console, decisions, install, lapi,
         models::{
             CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerRegisterRequest,
-            CrowdSecBouncerUninstallRequest, CrowdSecCentralLapiConfigureRequest,
-            CrowdSecCollectionInstallRequest, CrowdSecCollectionRemoveRequest,
-            CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
-            CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
-            CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecRemoteMachineActivationRequest,
-            CrowdSecRemoteMachineReauthenticationRequest, CrowdSecRemoteMachineResumeRequest,
-            CrowdSecUninstallRequest,
+            CrowdSecBouncerReplicationRequest, CrowdSecBouncerUninstallRequest,
+            CrowdSecCentralLapiConfigureRequest, CrowdSecCollectionInstallRequest,
+            CrowdSecCollectionRemoveRequest, CrowdSecCollectionUpdateRequest,
+            CrowdSecCollectionsQuery, CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest,
+            CrowdSecDecisionsQuery, CrowdSecInstallMode, CrowdSecInstallRequest,
+            CrowdSecLapiReplicationReadinessResponse, CrowdSecMachineReplicationRequest,
+            CrowdSecRemoteMachineActivationRequest, CrowdSecRemoteMachineReauthenticationRequest,
+            CrowdSecRemoteMachineResumeRequest, CrowdSecUninstallRequest,
         },
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
         status, uninstall,
@@ -493,6 +494,23 @@ async fn configure_crowdsec_central_lapi(
     Ok(HttpResponse::Ok().json(response))
 }
 
+#[get("/crowdsec/lapi/replication/readiness")]
+async fn crowdsec_lapi_replication_readiness(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+    let response: CrowdSecLapiReplicationReadinessResponse = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let readiness_result = lapi::replication_readiness().await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        readiness_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
 #[get("/crowdsec/lapi/machines")]
 async fn crowdsec_lapi_machines(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
     let response = {
@@ -505,6 +523,50 @@ async fn crowdsec_lapi_machines(cfg: web::Data<Arc<Config>>) -> Result<HttpRespo
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         machines_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/machines/{name}/credentials/export")]
+async fn export_crowdsec_machine_credentials(
+    cfg: web::Data<Arc<Config>>,
+    name: web::Path<String>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        // A remote-role transition registers the Machine before it can be replicated.
+        // Its generated credentials must therefore remain exportable while that
+        // transition waits for central LAPI validation.
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let credentials_result = lapi::export_machine_credentials(&name).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        credentials_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/lapi/machines/replicate")]
+async fn replicate_crowdsec_lapi_machine(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecMachineReplicationRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let replication_result = lapi::replicate_machine(&request.name, &request.password).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        replication_result?
     };
 
     Ok(HttpResponse::Ok().json(response))
@@ -645,6 +707,27 @@ async fn register_crowdsec_bouncer(
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         register_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/lapi/bouncers/replicate")]
+async fn replicate_crowdsec_lapi_bouncer(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecBouncerReplicationRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
+        let mutex = Arc::clone(&cfg.mutex.crowdsec);
+        let _mutex_data = mutex.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
+        debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
+
+        let replication_result = bouncers::replicate(&request.name, &request.api_key).await;
+
+        debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
+        replication_result?
     };
 
     Ok(HttpResponse::Ok().json(response))

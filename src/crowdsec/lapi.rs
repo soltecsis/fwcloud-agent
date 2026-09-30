@@ -23,6 +23,8 @@
 use std::{
     io::{self, ErrorKind},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
+    os::unix::fs::OpenOptionsExt,
+    path::PathBuf,
     time::Duration,
 };
 
@@ -30,6 +32,7 @@ use log::debug;
 use serde_json::Value;
 use tokio::{fs, process::Command, task, time::timeout};
 use url::Url;
+use uuid::Uuid;
 
 use crate::{
     crowdsec::{
@@ -42,13 +45,17 @@ use crate::{
         },
         install,
         models::{
-            CrowdSecCentralLapiConfigureResponse, CrowdSecFirewallBackend, CrowdSecMachine,
-            CrowdSecMachineRemoveResponse, CrowdSecMachineState, CrowdSecMachineValidationResponse,
-            CrowdSecMachinesResponse, CrowdSecRemoteMachineActivationResponse,
-            CrowdSecRemoteMachineInstallResponse, CrowdSecRemoteMachineInstallState,
+            CrowdSecCentralLapiConfigureResponse, CrowdSecFirewallBackend,
+            CrowdSecLapiReplicationReadinessResponse, CrowdSecMachine,
+            CrowdSecMachineCredentialsExportResponse, CrowdSecMachineRemoveResponse,
+            CrowdSecMachineReplicationAction, CrowdSecMachineReplicationResponse,
+            CrowdSecMachineState, CrowdSecMachineValidationResponse, CrowdSecMachinesResponse,
+            CrowdSecRemoteMachineActivationResponse, CrowdSecRemoteMachineInstallResponse,
+            CrowdSecRemoteMachineInstallState,
         },
         packages,
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
+        transitions::remote,
     },
     errors::{FwcError, Result},
 };
@@ -71,6 +78,8 @@ pub async fn configure_central(listen_uri: &str) -> Result<CrowdSecCentralLapiCo
                 "Unable to read CrowdSec Local API configuration",
             )
         })?;
+    let previous_listen_uri =
+        central_lapi_listen_uri(&configuration).unwrap_or_else(|| "127.0.0.1:8080".to_string());
     let updated_configuration = central_lapi_configuration(&configuration, listen_uri);
 
     if updated_configuration != configuration {
@@ -90,6 +99,7 @@ pub async fn configure_central(listen_uri: &str) -> Result<CrowdSecCentralLapiCo
 
     Ok(CrowdSecCentralLapiConfigureResponse {
         listen_uri: listen_uri.to_string(),
+        previous_listen_uri,
         message: "CrowdSec Local API is configured for remote machines".to_string(),
     })
 }
@@ -145,6 +155,95 @@ pub async fn machines() -> Result<CrowdSecMachinesResponse> {
 pub async fn ensure_central_ready() -> Result<()> {
     require_crowdsec_installed().await?;
     ensure_local_api_reachable().await
+}
+
+pub async fn replication_readiness() -> Result<CrowdSecLapiReplicationReadinessResponse> {
+    ensure_central_ready().await?;
+
+    Ok(CrowdSecLapiReplicationReadinessResponse {
+        ready: true,
+        message: "CrowdSec Local API is ready for credential replication".to_string(),
+    })
+}
+
+pub async fn export_machine_credentials(
+    name: &str,
+) -> Result<CrowdSecMachineCredentialsExportResponse> {
+    validate_machine_name(name)?;
+    require_crowdsec_installed().await?;
+    let credentials = fs::read_to_string("/etc/crowdsec/local_api_credentials.yaml")
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                MACHINE_NOT_FOUND,
+                "CrowdSec machine credentials are not available",
+            )
+        })?;
+
+    machine_credentials_from_contents(name, &credentials)
+}
+
+pub async fn replicate_machine(
+    name: &str,
+    password: &str,
+) -> Result<CrowdSecMachineReplicationResponse> {
+    validate_machine_name(name)?;
+    validate_machine_password(password)?;
+    ensure_central_ready().await?;
+
+    if let Some(machine) = machines()
+        .await?
+        .machines
+        .into_iter()
+        .find(|machine| machine.name == name)
+    {
+        if machine.state == CrowdSecMachineState::Validated {
+            return Ok(CrowdSecMachineReplicationResponse {
+                name: machine.name,
+                state: CrowdSecMachineState::Validated,
+                action: CrowdSecMachineReplicationAction::AlreadyValidated,
+                message: "CrowdSec machine is already replicated and validated".to_string(),
+            });
+        }
+
+        let validated = validate_machine(name).await?;
+        return Ok(CrowdSecMachineReplicationResponse {
+            name: validated.name,
+            state: validated.state,
+            action: CrowdSecMachineReplicationAction::Validated,
+            message: "CrowdSec machine is replicated and validated".to_string(),
+        });
+    }
+
+    let credentials_file = temporary_replication_credentials_file()?;
+    let credentials_file_argument = credentials_file.to_str().ok_or_else(|| {
+        FwcError::crowdsec(
+            COMMAND_FAILED,
+            "Unable to create temporary CrowdSec machine credentials file",
+        )
+    })?;
+    let add_result = CrowdSecCommand::cscli(&[
+        "machines",
+        "add",
+        name,
+        "--password",
+        password,
+        "--file",
+        credentials_file_argument,
+    ])?
+    .execute()
+    .await;
+    let cleanup_result = remove_temporary_replication_credentials_file(&credentials_file).await;
+    add_result?;
+    cleanup_result?;
+
+    let validated = validate_machine(name).await?;
+    Ok(CrowdSecMachineReplicationResponse {
+        name: validated.name,
+        state: validated.state,
+        action: CrowdSecMachineReplicationAction::CreatedAndValidated,
+        message: "CrowdSec machine credentials are replicated and validated".to_string(),
+    })
 }
 
 pub async fn validate_machine(name: &str) -> Result<CrowdSecMachineValidationResponse> {
@@ -226,15 +325,17 @@ pub async fn install_remote_machine(
         }
     };
 
-    emit_progress(
-        progress,
-        "Stopping existing CrowdSec service before machine configuration",
-    );
-    disable_crowdsec_service_if_present().await?;
-    emit_success(
-        progress,
-        "CrowdSec service is stopped before machine configuration",
-    );
+    if bouncers::local_api_is_enabled().await? {
+        emit_progress(
+            progress,
+            "Ensuring the existing CrowdSec Local API is running before Firewall Bouncer cleanup",
+        );
+        enable_crowdsec_service().await?;
+        emit_success(
+            progress,
+            "Existing CrowdSec Local API is running before Firewall Bouncer cleanup",
+        );
+    }
 
     emit_progress(
         progress,
@@ -244,6 +345,16 @@ pub async fn install_remote_machine(
     emit_success(
         progress,
         "Existing local CrowdSec Firewall Bouncer is removed before machine configuration",
+    );
+
+    emit_progress(
+        progress,
+        "Stopping existing CrowdSec service before machine configuration",
+    );
+    disable_crowdsec_service_if_present().await?;
+    emit_success(
+        progress,
+        "CrowdSec service is stopped before machine configuration",
     );
 
     emit_progress(progress, "Installing CrowdSec packages and dependencies");
@@ -807,6 +918,81 @@ fn emit_warning(progress: Option<&CrowdSecProgress>, message: &str) {
     }
 }
 
+fn machine_credentials_from_contents(
+    name: &str,
+    contents: &str,
+) -> Result<CrowdSecMachineCredentialsExportResponse> {
+    let login = remote::root_scalar(contents, "login").map_err(|_| {
+        FwcError::crowdsec(
+            MACHINE_NOT_FOUND,
+            "CrowdSec machine credentials are not available",
+        )
+    })?;
+    if login != name {
+        return Err(FwcError::crowdsec(
+            MACHINE_NOT_FOUND,
+            "CrowdSec machine credentials do not match the requested machine",
+        ));
+    }
+    let password = remote::root_scalar(contents, "password").map_err(|_| {
+        FwcError::crowdsec(
+            MACHINE_NOT_FOUND,
+            "CrowdSec machine credentials are not available",
+        )
+    })?;
+    validate_machine_password(&password)?;
+    let lapi_url = remote::root_scalar(contents, "url").map_err(|_| {
+        FwcError::crowdsec(
+            MACHINE_NOT_FOUND,
+            "CrowdSec machine credentials are not available",
+        )
+    })?;
+    remote_lapi_url(&lapi_url)?;
+
+    Ok(CrowdSecMachineCredentialsExportResponse { login, password })
+}
+
+fn temporary_replication_credentials_file() -> Result<PathBuf> {
+    let path = std::env::temp_dir().join(format!(
+        "fwcloud-crowdsec-machine-replication-{}.yaml",
+        Uuid::new_v4()
+    ));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|_| {
+            FwcError::crowdsec(
+                COMMAND_FAILED,
+                "Unable to create temporary CrowdSec machine credentials file",
+            )
+        })?;
+    Ok(path)
+}
+
+async fn remove_temporary_replication_credentials_file(path: &PathBuf) -> Result<()> {
+    match fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(FwcError::crowdsec(
+            COMMAND_FAILED,
+            "Unable to remove temporary CrowdSec machine credentials file",
+        )),
+    }
+}
+
+fn validate_machine_password(password: &str) -> Result<()> {
+    if password.is_empty() || password.len() > 256 || password.chars().any(char::is_control) {
+        return Err(FwcError::crowdsec(
+            MACHINE_INVALID,
+            "Invalid CrowdSec machine credentials",
+        ));
+    }
+
+    Ok(())
+}
+
 pub(crate) fn validate_machine_name(name: &str) -> Result<()> {
     if name.is_empty()
         || name.len() > 128
@@ -875,6 +1061,13 @@ fn value_as_string(value: &Value) -> Option<String> {
         Value::Number(value) => Some(value.to_string()),
         _ => None,
     }
+}
+
+fn central_lapi_listen_uri(configuration: &str) -> Option<String> {
+    configuration.lines().find_map(|line| {
+        let value = line.trim_start().strip_prefix("listen_uri:")?.trim();
+        (!value.is_empty()).then(|| value.trim_matches('"').to_string())
+    })
 }
 
 fn central_lapi_configuration(configuration: &str, listen_uri: &str) -> String {
@@ -1040,10 +1233,11 @@ mod tests {
     use std::io::ErrorKind;
 
     use super::{
-        central_lapi_configuration, machine_from_json, machine_reauthentication_required_message,
-        machines_from_json, remote_lapi_connection_error, remote_lapi_connectivity_error_code,
+        central_lapi_configuration, central_lapi_listen_uri, machine_credentials_from_contents,
+        machine_from_json, machine_reauthentication_required_message, machines_from_json,
+        remote_lapi_connection_error, remote_lapi_connectivity_error_code,
         remote_lapi_socket_address, remote_lapi_url, remote_machine_configuration,
-        validate_listen_uri, validate_machine_name,
+        validate_listen_uri, validate_machine_name, validate_machine_password,
     };
     use crate::{
         crowdsec::{
@@ -1063,6 +1257,16 @@ mod tests {
         assert!(updated.contains("    enable: true\n"));
         assert!(updated.contains("    listen_uri: 192.0.2.10:8080\n"));
         assert!(updated.contains("common:\n  log_media: stdout\n"));
+    }
+
+    #[test]
+    fn reads_the_existing_local_api_listener() {
+        let configuration = "api:\n  server:\n    enable: true\n    listen_uri: 192.0.2.10:8080\n";
+
+        assert_eq!(
+            central_lapi_listen_uri(configuration),
+            Some("192.0.2.10:8080".to_string())
+        );
     }
 
     #[test]
@@ -1133,6 +1337,30 @@ mod tests {
             "Invalid CrowdSec machine name",
         ))
         .is_none());
+    }
+
+    #[test]
+    fn exports_only_matching_machine_credentials() {
+        let credentials = machine_credentials_from_contents(
+            "fwcloud-web-01",
+            "url: http://192.0.2.10:8080\nlogin: fwcloud-web-01\npassword: machine-password\n",
+        )
+        .unwrap();
+
+        assert_eq!(credentials.login, "fwcloud-web-01");
+        assert_eq!(credentials.password, "machine-password");
+        assert!(machine_credentials_from_contents(
+            "fwcloud-web-02",
+            "url: http://192.0.2.10:8080\nlogin: fwcloud-web-01\npassword: machine-password\n",
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn validates_machine_replication_passwords() {
+        assert!(validate_machine_password("machine-password").is_ok());
+        assert!(validate_machine_password("").is_err());
+        assert!(validate_machine_password("invalid\npassword").is_err());
     }
 
     #[test]

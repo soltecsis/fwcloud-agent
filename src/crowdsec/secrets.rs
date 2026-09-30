@@ -47,7 +47,7 @@ fn redact_sensitive_line(line: &str) -> String {
         .replace(['_', '-'], "");
     if !matches!(
         normalized_key.as_str(),
-        "apikey" | "bouncerapikey" | "enrollmentkey"
+        "apikey" | "bouncerapikey" | "enrollmentkey" | "password" | "machinepassword"
     ) {
         return line.to_string();
     }
@@ -73,6 +73,14 @@ mod tests {
         assert_eq!(
             redact_sensitive_text("bouncer_api_key: remote-secret"),
             "bouncer_api_key: [REDACTED]"
+        );
+    }
+
+    #[test]
+    fn redacts_machine_passwords() {
+        assert_eq!(
+            redact_sensitive_text("password: machine-secret\nmachine_password=other-secret"),
+            "password: [REDACTED]\nmachine_password= [REDACTED]"
         );
     }
 }
