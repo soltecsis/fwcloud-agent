@@ -24,7 +24,7 @@ use std::{
     io::{self, ErrorKind},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     os::unix::fs::OpenOptionsExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -61,10 +61,81 @@ use crate::{
 };
 
 const CROWDSEC_CONFIG_PATH: &str = "/etc/crowdsec/config.yaml";
+const CROWDSEC_CONFIG_BACKUP_PATH: &str = "/etc/crowdsec/config.yaml.bak";
 const CROWDSEC_SERVICE: &str = "crowdsec.service";
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const REMOTE_LAPI_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn listener_backup_exists() -> bool {
+    Path::new(CROWDSEC_CONFIG_BACKUP_PATH).exists()
+}
+
+fn write_listener_backup(configuration: &str) -> Result<()> {
+    if listener_backup_exists() {
+        return Err(FwcError::crowdsec(
+            LAPI_UNREACHABLE,
+            "CrowdSec Local API configuration recovery is required",
+        ));
+    }
+
+    write_listener_configuration(
+        Path::new(CROWDSEC_CONFIG_BACKUP_PATH),
+        configuration.as_bytes(),
+        "Unable to create CrowdSec Local API configuration backup",
+    )
+}
+
+fn restore_listener_backup() -> Result<()> {
+    let configuration = std::fs::read(CROWDSEC_CONFIG_BACKUP_PATH).map_err(|_| {
+        FwcError::crowdsec(
+            LAPI_UNREACHABLE,
+            "CrowdSec Local API configuration backup is not available",
+        )
+    })?;
+
+    write_listener_configuration(
+        Path::new(CROWDSEC_CONFIG_PATH),
+        &configuration,
+        "Unable to restore CrowdSec Local API configuration backup",
+    )
+}
+
+fn remove_listener_backup() -> Result<()> {
+    match std::fs::remove_file(CROWDSEC_CONFIG_BACKUP_PATH) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(FwcError::crowdsec(
+            LAPI_UNREACHABLE,
+            "Unable to remove CrowdSec Local API configuration backup",
+        )),
+    }
+}
+
+fn write_listener_configuration(path: &Path, contents: &[u8], message: &str) -> Result<()> {
+    let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        std::io::Write::write_all(&mut file, contents)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        std::fs::File::open(path.parent().ok_or_else(|| {
+            std::io::Error::new(ErrorKind::NotFound, "CrowdSec configuration directory is missing")
+        })?)?
+        .sync_all()?;
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+
+    result.map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, message))
+}
 
 pub async fn configure_central(listen_uri: &str) -> Result<CrowdSecCentralLapiConfigureResponse> {
     validate_listen_uri(listen_uri)?;
