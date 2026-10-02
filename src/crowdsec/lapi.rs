@@ -138,7 +138,7 @@ fn remove_listener_backup_at(path: &Path) -> Result<()> {
     }
 }
 
-fn write_listener_configuration(path: &Path, contents: &[u8], message: &str) -> Result<()> {
+fn write_listener_configuration(path: &Path, contents: &[u8], message: &'static str) -> Result<()> {
     let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
     let result = (|| {
         let mut file = std::fs::OpenOptions::new()
@@ -163,7 +163,7 @@ fn write_listener_configuration(path: &Path, contents: &[u8], message: &str) -> 
         let _ = std::fs::remove_file(&temporary);
     }
 
-    result.map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, message))
+    result.map_err(|_: std::io::Error| FwcError::crowdsec(LAPI_UNREACHABLE, message))
 }
 
 async fn recover_listener_backup() -> Result<()> {
@@ -350,22 +350,25 @@ pub async fn replicate_machine(
     };
 
     let credentials_file = temporary_replication_credentials_file()?;
-    let credentials_file_argument = credentials_file.to_str().ok_or_else(|| {
-        FwcError::crowdsec(
-            COMMAND_FAILED,
-            "Unable to create temporary CrowdSec machine credentials file",
-        )
-    })?;
-    let add_result = CrowdSecCommand::cscli(&[
-        "machines",
-        "add",
-        name,
-        "--password",
-        password,
-        "--file",
-        credentials_file_argument,
-    ])?
-    .execute()
+    let add_result = async {
+        let credentials_file_argument = credentials_file.to_str().ok_or_else(|| {
+            FwcError::crowdsec(
+                COMMAND_FAILED,
+                "Unable to create temporary CrowdSec machine credentials file",
+            )
+        })?;
+        CrowdSecCommand::cscli(&[
+            "machines",
+            "add",
+            name,
+            "--password",
+            password,
+            "--file",
+            credentials_file_argument,
+        ])?
+        .execute()
+        .await
+    }
     .await;
     let cleanup_result = remove_temporary_replication_credentials_file(&credentials_file).await;
     add_result?;
@@ -1379,7 +1382,8 @@ mod tests {
         machine_from_json, machine_reauthentication_required_message, machines_from_json,
         remote_lapi_connection_error, remote_lapi_connectivity_error_code,
         remote_lapi_socket_address, remote_lapi_url, remote_machine_configuration,
-        remove_listener_backup_at, restore_listener_backup_at, validate_listen_uri,
+        remove_listener_backup_at, remove_temporary_replication_credentials_file,
+        restore_listener_backup_at, temporary_replication_credentials_file, validate_listen_uri,
         validate_machine_name, validate_machine_password, write_listener_backup_at,
     };
     use crate::{
@@ -1465,6 +1469,20 @@ mod tests {
         .is_err());
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn creates_and_removes_restricted_temporary_replication_credentials() {
+        let path = temporary_replication_credentials_file().unwrap();
+
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        remove_temporary_replication_credentials_file(&path)
+            .await
+            .unwrap();
+        assert!(!path.exists());
     }
 
     #[test]
