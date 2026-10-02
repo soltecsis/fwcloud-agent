@@ -30,7 +30,12 @@ use std::{
 
 use log::debug;
 use serde_json::Value;
-use tokio::{fs, process::Command, task, time::timeout};
+use tokio::{
+    fs,
+    process::Command,
+    task,
+    time::{sleep, timeout},
+};
 use url::Url;
 use uuid::Uuid;
 
@@ -67,6 +72,14 @@ const CROWDSEC_SERVICE: &str = "crowdsec.service";
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const REMOTE_LAPI_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const MACHINE_REPLICATION_DELETE_DELAY: Duration = Duration::from_secs(1);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CrowdSecMachineReplicationPlan {
+    Create,
+    Validate,
+    Replace,
+}
 
 fn listener_backup_exists() -> bool {
     listener_backup_exists_at(Path::new(CROWDSEC_CONFIG_BACKUP_PATH))
@@ -132,7 +145,7 @@ fn remove_listener_backup_at(path: &Path) -> Result<()> {
     }
 }
 
-fn write_listener_configuration(path: &Path, contents: &[u8], message: &str) -> Result<()> {
+fn write_listener_configuration(path: &Path, contents: &[u8], message: &'static str) -> Result<()> {
     let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
     let result = (|| {
         let mut file = std::fs::OpenOptions::new()
@@ -157,7 +170,7 @@ fn write_listener_configuration(path: &Path, contents: &[u8], message: &str) -> 
         let _ = std::fs::remove_file(&temporary);
     }
 
-    result.map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, message))
+    result.map_err(|_: std::io::Error| FwcError::crowdsec(LAPI_UNREACHABLE, message))
 }
 
 async fn recover_listener_backup() -> Result<()> {
@@ -317,59 +330,80 @@ pub async fn replicate_machine(
     validate_machine_password(password)?;
     ensure_central_ready().await?;
 
-    if let Some(machine) = machines()
+    let machine = machines()
         .await?
         .machines
         .into_iter()
-        .find(|machine| machine.name == name)
-    {
-        if machine.state == CrowdSecMachineState::Validated {
+        .find(|machine| machine.name == name);
+    let replacing = match machine_replication_plan(machine.as_ref()) {
+        CrowdSecMachineReplicationPlan::Replace => {
+            debug!("Replacing existing CrowdSec machine replica: {}", name);
+            CrowdSecCommand::cscli(&["machines", "delete", name])?
+                .execute()
+                .await?;
+            sleep(MACHINE_REPLICATION_DELETE_DELAY).await;
+            true
+        }
+        CrowdSecMachineReplicationPlan::Validate => {
+            let validated = validate_machine(name).await?;
             return Ok(CrowdSecMachineReplicationResponse {
-                name: machine.name,
-                state: CrowdSecMachineState::Validated,
-                action: CrowdSecMachineReplicationAction::AlreadyValidated,
-                message: "CrowdSec machine is already replicated and validated".to_string(),
+                name: validated.name,
+                state: validated.state,
+                action: CrowdSecMachineReplicationAction::Validated,
+                message: "CrowdSec machine is replicated and validated".to_string(),
             });
         }
-
-        let validated = validate_machine(name).await?;
-        return Ok(CrowdSecMachineReplicationResponse {
-            name: validated.name,
-            state: validated.state,
-            action: CrowdSecMachineReplicationAction::Validated,
-            message: "CrowdSec machine is replicated and validated".to_string(),
-        });
-    }
+        CrowdSecMachineReplicationPlan::Create => false,
+    };
 
     let credentials_file = temporary_replication_credentials_file()?;
-    let credentials_file_argument = credentials_file.to_str().ok_or_else(|| {
-        FwcError::crowdsec(
-            COMMAND_FAILED,
-            "Unable to create temporary CrowdSec machine credentials file",
-        )
-    })?;
-    let add_result = CrowdSecCommand::cscli(&[
-        "machines",
-        "add",
-        name,
-        "--password",
-        password,
-        "--file",
-        credentials_file_argument,
-    ])?
-    .execute()
+    let add_result = async {
+        let credentials_file_argument = credentials_file.to_str().ok_or_else(|| {
+            FwcError::crowdsec(
+                COMMAND_FAILED,
+                "Unable to create temporary CrowdSec machine credentials file",
+            )
+        })?;
+        CrowdSecCommand::cscli(&[
+            "machines",
+            "add",
+            name,
+            "--password",
+            password,
+            "--file",
+            credentials_file_argument,
+        ])?
+        .execute()
+        .await
+    }
     .await;
-    let cleanup_result = remove_temporary_replication_credentials_file(&credentials_file).await;
-    add_result?;
-    cleanup_result?;
+    finish_machine_replication_command(add_result, &credentials_file).await?;
 
     let validated = validate_machine(name).await?;
     Ok(CrowdSecMachineReplicationResponse {
         name: validated.name,
         state: validated.state,
-        action: CrowdSecMachineReplicationAction::CreatedAndValidated,
-        message: "CrowdSec machine credentials are replicated and validated".to_string(),
+        action: if replacing {
+            CrowdSecMachineReplicationAction::ReplacedAndValidated
+        } else {
+            CrowdSecMachineReplicationAction::CreatedAndValidated
+        },
+        message: if replacing {
+            "CrowdSec machine credentials are replaced and validated".to_string()
+        } else {
+            "CrowdSec machine credentials are replicated and validated".to_string()
+        },
     })
+}
+
+fn machine_replication_plan(machine: Option<&CrowdSecMachine>) -> CrowdSecMachineReplicationPlan {
+    match machine.map(|machine| &machine.state) {
+        None => CrowdSecMachineReplicationPlan::Create,
+        Some(CrowdSecMachineState::Validated) => CrowdSecMachineReplicationPlan::Replace,
+        Some(CrowdSecMachineState::Pending | CrowdSecMachineState::Unknown) => {
+            CrowdSecMachineReplicationPlan::Validate
+        }
+    }
 }
 
 pub async fn validate_machine(name: &str) -> Result<CrowdSecMachineValidationResponse> {
@@ -1097,7 +1131,14 @@ fn temporary_replication_credentials_file() -> Result<PathBuf> {
     Ok(path)
 }
 
-async fn remove_temporary_replication_credentials_file(path: &PathBuf) -> Result<()> {
+async fn finish_machine_replication_command<T>(result: Result<T>, path: &Path) -> Result<T> {
+    let cleanup_result = remove_temporary_replication_credentials_file(path).await;
+    let value = result?;
+    cleanup_result?;
+    Ok(value)
+}
+
+async fn remove_temporary_replication_credentials_file(path: &Path) -> Result<()> {
     match fs::remove_file(path).await {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -1359,17 +1400,23 @@ mod tests {
     use std::{io::ErrorKind, os::unix::fs::PermissionsExt};
 
     use super::{
-        central_lapi_configuration, central_lapi_listen_uri, machine_credentials_from_contents,
-        machine_from_json, machine_reauthentication_required_message, machines_from_json,
+        central_lapi_configuration, central_lapi_listen_uri, finish_machine_replication_command,
+        machine_credentials_from_contents, machine_from_json,
+        machine_reauthentication_required_message, machine_replication_plan, machines_from_json,
         remote_lapi_connection_error, remote_lapi_connectivity_error_code,
         remote_lapi_socket_address, remote_lapi_url, remote_machine_configuration,
-        remove_listener_backup_at, restore_listener_backup_at, validate_listen_uri,
+        remove_listener_backup_at, remove_temporary_replication_credentials_file,
+        restore_listener_backup_at, temporary_replication_credentials_file, validate_listen_uri,
         validate_machine_name, validate_machine_password, write_listener_backup_at,
+        CrowdSecMachineReplicationPlan,
     };
     use crate::{
         crowdsec::{
-            errors::{LAPI_CONNECTION_FAILED, LAPI_CONNECTION_REFUSED, LAPI_CONNECTION_TIMEOUT},
-            models::CrowdSecMachineState,
+            errors::{
+                COMMAND_FAILED, LAPI_CONNECTION_FAILED, LAPI_CONNECTION_REFUSED,
+                LAPI_CONNECTION_TIMEOUT,
+            },
+            models::{CrowdSecMachine, CrowdSecMachineState},
         },
         errors::FwcError,
     };
@@ -1449,6 +1496,62 @@ mod tests {
         .is_err());
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn creates_and_removes_restricted_temporary_replication_credentials() {
+        let path = temporary_replication_credentials_file().unwrap();
+
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        remove_temporary_replication_credentials_file(&path)
+            .await
+            .unwrap();
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn removes_temporary_replication_credentials_when_the_command_fails() {
+        let path = temporary_replication_credentials_file().unwrap();
+
+        assert!(finish_machine_replication_command::<()>(
+            Err(FwcError::crowdsec(
+                COMMAND_FAILED,
+                "CrowdSec command failed"
+            )),
+            &path,
+        )
+        .await
+        .is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn chooses_machine_replication_plans_from_the_current_machine_state() {
+        let machine = |state| CrowdSecMachine {
+            name: "fwcloud-machine-01".to_string(),
+            state,
+            last_heartbeat: None,
+        };
+
+        assert_eq!(
+            machine_replication_plan(None),
+            CrowdSecMachineReplicationPlan::Create
+        );
+        assert_eq!(
+            machine_replication_plan(Some(&machine(CrowdSecMachineState::Pending))),
+            CrowdSecMachineReplicationPlan::Validate
+        );
+        assert_eq!(
+            machine_replication_plan(Some(&machine(CrowdSecMachineState::Unknown))),
+            CrowdSecMachineReplicationPlan::Validate
+        );
+        assert_eq!(
+            machine_replication_plan(Some(&machine(CrowdSecMachineState::Validated))),
+            CrowdSecMachineReplicationPlan::Replace
+        );
     }
 
     #[test]

@@ -307,7 +307,7 @@ pub struct CrowdSecMachineReplicationRequest {
 pub enum CrowdSecMachineReplicationAction {
     CreatedAndValidated,
     Validated,
-    AlreadyValidated,
+    ReplacedAndValidated,
 }
 
 #[derive(Debug, Serialize)]
@@ -746,6 +746,10 @@ mod tests {
         .unwrap();
 
         assert!(!machine.contains("machine-password"));
+        assert_eq!(
+            serde_json::to_value(CrowdSecMachineReplicationAction::ReplacedAndValidated).unwrap(),
+            "replaced_and_validated"
+        );
         assert!(!bouncer.contains("bouncer-api-key"));
         assert!(bouncer.contains("\"action\":\"replaced\""));
     }
