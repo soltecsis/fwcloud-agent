@@ -124,7 +124,10 @@ fn write_listener_configuration(path: &Path, contents: &[u8], message: &str) -> 
         file.sync_all()?;
         std::fs::rename(&temporary, path)?;
         std::fs::File::open(path.parent().ok_or_else(|| {
-            std::io::Error::new(ErrorKind::NotFound, "CrowdSec configuration directory is missing")
+            std::io::Error::new(
+                ErrorKind::NotFound,
+                "CrowdSec configuration directory is missing",
+            )
         })?)?
         .sync_all()?;
         Ok(())
@@ -155,14 +158,12 @@ pub async fn configure_central(listen_uri: &str) -> Result<CrowdSecCentralLapiCo
 
     if updated_configuration != configuration {
         debug!("Configuring CrowdSec Local API listener: {}", listen_uri);
-        fs::write(CROWDSEC_CONFIG_PATH, updated_configuration)
-            .await
-            .map_err(|_| {
-                FwcError::crowdsec(
-                    LAPI_UNREACHABLE,
-                    "Unable to write CrowdSec Local API configuration",
-                )
-            })?;
+        write_listener_backup(&configuration)?;
+        write_listener_configuration(
+            Path::new(CROWDSEC_CONFIG_PATH),
+            updated_configuration.as_bytes(),
+            "Unable to write CrowdSec Local API configuration",
+        )?;
         restart_crowdsec_service().await?;
     }
 
