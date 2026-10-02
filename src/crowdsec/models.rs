@@ -307,7 +307,7 @@ pub struct CrowdSecMachineReplicationRequest {
 pub enum CrowdSecMachineReplicationAction {
     CreatedAndValidated,
     Validated,
-    AlreadyValidated,
+    ReplacedAndValidated,
 }
 
 #[derive(Debug, Serialize)]

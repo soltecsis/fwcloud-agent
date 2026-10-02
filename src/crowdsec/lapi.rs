@@ -30,7 +30,12 @@ use std::{
 
 use log::debug;
 use serde_json::Value;
-use tokio::{fs, process::Command, task, time::timeout};
+use tokio::{
+    fs,
+    process::Command,
+    task,
+    time::{sleep, timeout},
+};
 use url::Url;
 use uuid::Uuid;
 
@@ -67,6 +72,7 @@ const CROWDSEC_SERVICE: &str = "crowdsec.service";
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const REMOTE_LAPI_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const MACHINE_REPLICATION_DELETE_DELAY: Duration = Duration::from_secs(1);
 
 fn listener_backup_exists() -> bool {
     listener_backup_exists_at(Path::new(CROWDSEC_CONFIG_BACKUP_PATH))
@@ -317,29 +323,31 @@ pub async fn replicate_machine(
     validate_machine_password(password)?;
     ensure_central_ready().await?;
 
-    if let Some(machine) = machines()
+    let replacing = if let Some(machine) = machines()
         .await?
         .machines
         .into_iter()
         .find(|machine| machine.name == name)
     {
         if machine.state == CrowdSecMachineState::Validated {
+            debug!("Replacing existing CrowdSec machine replica: {}", name);
+            CrowdSecCommand::cscli(&["machines", "delete", name])?
+                .execute()
+                .await?;
+            sleep(MACHINE_REPLICATION_DELETE_DELAY).await;
+            true
+        } else {
+            let validated = validate_machine(name).await?;
             return Ok(CrowdSecMachineReplicationResponse {
-                name: machine.name,
-                state: CrowdSecMachineState::Validated,
-                action: CrowdSecMachineReplicationAction::AlreadyValidated,
-                message: "CrowdSec machine is already replicated and validated".to_string(),
+                name: validated.name,
+                state: validated.state,
+                action: CrowdSecMachineReplicationAction::Validated,
+                message: "CrowdSec machine is replicated and validated".to_string(),
             });
         }
-
-        let validated = validate_machine(name).await?;
-        return Ok(CrowdSecMachineReplicationResponse {
-            name: validated.name,
-            state: validated.state,
-            action: CrowdSecMachineReplicationAction::Validated,
-            message: "CrowdSec machine is replicated and validated".to_string(),
-        });
-    }
+    } else {
+        false
+    };
 
     let credentials_file = temporary_replication_credentials_file()?;
     let credentials_file_argument = credentials_file.to_str().ok_or_else(|| {
@@ -367,8 +375,16 @@ pub async fn replicate_machine(
     Ok(CrowdSecMachineReplicationResponse {
         name: validated.name,
         state: validated.state,
-        action: CrowdSecMachineReplicationAction::CreatedAndValidated,
-        message: "CrowdSec machine credentials are replicated and validated".to_string(),
+        action: if replacing {
+            CrowdSecMachineReplicationAction::ReplacedAndValidated
+        } else {
+            CrowdSecMachineReplicationAction::CreatedAndValidated
+        },
+        message: if replacing {
+            "CrowdSec machine credentials are replaced and validated".to_string()
+        } else {
+            "CrowdSec machine credentials are replicated and validated".to_string()
+        },
     })
 }
 
