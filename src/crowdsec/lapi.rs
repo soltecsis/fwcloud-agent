@@ -42,6 +42,7 @@ use crate::{
             COMMAND_FAILED, LAPI_CONNECTION_FAILED, LAPI_CONNECTION_REFUSED,
             LAPI_CONNECTION_TIMEOUT, LAPI_HOST_UNRESOLVABLE, LAPI_INVALID, LAPI_UNREACHABLE,
             MACHINE_INVALID, MACHINE_NOT_FOUND, MACHINE_REAUTHENTICATION_REQUIRED,
+            TRANSITION_RECOVERY_REQUIRED,
         },
         install,
         models::{
@@ -140,6 +141,26 @@ fn write_listener_configuration(path: &Path, contents: &[u8], message: &str) -> 
     result.map_err(|_| FwcError::crowdsec(LAPI_UNREACHABLE, message))
 }
 
+async fn recover_listener_backup() -> Result<()> {
+    restore_listener_backup()?;
+    restart_crowdsec_service().await?;
+    ensure_local_api_reachable().await?;
+    remove_listener_backup()
+}
+
+async fn listener_change_failure() -> FwcError {
+    match recover_listener_backup().await {
+        Ok(()) => FwcError::crowdsec(
+            LAPI_UNREACHABLE,
+            "CrowdSec Local API listener change failed and the previous configuration was restored",
+        ),
+        Err(_) => FwcError::crowdsec(
+            TRANSITION_RECOVERY_REQUIRED,
+            "CrowdSec Local API listener change failed and backup recovery is required",
+        ),
+    }
+}
+
 pub async fn configure_central(listen_uri: &str) -> Result<CrowdSecCentralLapiConfigureResponse> {
     validate_listen_uri(listen_uri)?;
     require_crowdsec_installed().await?;
@@ -164,10 +185,13 @@ pub async fn configure_central(listen_uri: &str) -> Result<CrowdSecCentralLapiCo
             updated_configuration.as_bytes(),
             "Unable to write CrowdSec Local API configuration",
         )?;
-        restart_crowdsec_service().await?;
+        if restart_crowdsec_service().await.is_err() || ensure_local_api_reachable().await.is_err()
+        {
+            return Err(listener_change_failure().await);
+        }
+    } else {
+        ensure_local_api_reachable().await?;
     }
-
-    ensure_local_api_reachable().await?;
 
     Ok(CrowdSecCentralLapiConfigureResponse {
         listen_uri: listen_uri.to_string(),
