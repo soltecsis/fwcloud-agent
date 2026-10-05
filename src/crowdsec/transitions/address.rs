@@ -38,6 +38,10 @@ struct Backup {
     bouncer: Option<String>,
     engine_running: bool,
     bouncer_running: bool,
+    #[serde(default)]
+    engine_service: Option<TransitionServiceState>,
+    #[serde(default)]
+    bouncer_service: Option<TransitionServiceState>,
 }
 
 fn failed() -> FwcError {
@@ -286,6 +290,8 @@ async fn inspect(
         } else {
             false
         },
+        engine_service: Some(service_state(ENGINE).await?),
+        bouncer_service: Some(service_state(BOUNCER).await?),
     })
 }
 
@@ -361,16 +367,38 @@ async fn restore(backup: &Backup) -> Result<()> {
             contents.as_bytes(),
         )?;
     }
-    if backup.engine_running {
-        CrowdSecCommand::cscli(&["lapi", "status"])?
-            .execute()
-            .await?;
-        service("start", ENGINE).await?;
+    match &backup.engine_service {
+        Some(state) => {
+            restore_service_state(ENGINE, state).await?;
+            if state.running {
+                CrowdSecCommand::cscli(&["lapi", "status"])?
+                    .execute()
+                    .await?;
+            }
+        }
+        None if backup.engine_running => {
+            service("start", ENGINE).await?;
+            CrowdSecCommand::cscli(&["lapi", "status"])?
+                .execute()
+                .await?;
+        }
+        None => (),
     }
-    if backup.bouncer_running {
-        service("start", BOUNCER).await?;
+    match &backup.bouncer_service {
+        Some(state) => restore_service_state(BOUNCER, state).await?,
+        None if backup.bouncer_running => service("start", BOUNCER).await?,
+        None => (),
     }
     Ok(())
+}
+
+fn recovery_supported(phase: &TransitionPhase) -> bool {
+    matches!(
+        phase,
+        TransitionPhase::Activating
+            | TransitionPhase::ActivePendingFinalize
+            | TransitionPhase::RecoveryRequired
+    )
 }
 
 pub async fn recover(data: &str, id: Uuid) -> Result<AddressTransition> {
@@ -378,12 +406,7 @@ pub async fn recover(data: &str, id: Uuid) -> Result<AddressTransition> {
     if state.phase == TransitionPhase::RolledBack {
         return Ok(state);
     }
-    if !matches!(
-        state.phase,
-        TransitionPhase::Activating
-            | TransitionPhase::ActivePendingFinalize
-            | TransitionPhase::RecoveryRequired
-    ) {
+    if !recovery_supported(&state.phase) {
         return Err(conflict());
     }
     let backup: Backup = serde_json::from_slice(
@@ -561,6 +584,8 @@ mod tests {
             bouncer: None,
             engine_running: true,
             bouncer_running: false,
+            engine_service: None,
+            bouncer_service: None,
         };
         atomic_write(
             &backup_path(data, id),
@@ -600,5 +625,63 @@ mod tests {
         assert!(replace_url("url: x\nurl: y\n", "url", "z").is_err());
         assert!(replace_url("login: node\n", "url", "z").is_err());
         assert!(same_url("http://192.0.2.1:8080", "http://192.0.2.1:8080/").unwrap());
+    }
+    #[test]
+    fn allows_rollback_after_address_activation_until_finalization() {
+        assert!(recovery_supported(&TransitionPhase::Activating));
+        assert!(recovery_supported(&TransitionPhase::ActivePendingFinalize));
+        assert!(recovery_supported(&TransitionPhase::RecoveryRequired));
+        assert!(!recovery_supported(&TransitionPhase::Prepared));
+        assert!(!recovery_supported(&TransitionPhase::Completed));
+        assert!(!recovery_supported(&TransitionPhase::RolledBack));
+    }
+
+    #[test]
+    fn supports_legacy_backups_without_service_enablement() {
+        let backup: Backup = serde_json::from_value(serde_json::json!({
+            "credentials": "password: secret",
+            "bouncer": null,
+            "engine_running": true,
+            "bouncer_running": false
+        }))
+        .unwrap();
+        assert!(backup.engine_service.is_none());
+        assert!(backup.bouncer_service.is_none());
+    }
+    #[tokio::test]
+    async fn requires_manual_recovery_when_the_activated_backup_is_missing() {
+        let root =
+            std::env::temp_dir().join(format!("fwcloud-address-rollback-test-{}", Uuid::new_v4()));
+        let data = root.to_str().unwrap();
+        std::fs::create_dir_all(directory(data)).unwrap();
+        let id = Uuid::new_v4();
+        let target = TransitionTarget {
+            mode: TransitionMode::Machine,
+            local_remediation: false,
+            machine_name: Some("fwcloud-node".into()),
+            lapi_url: Some("http://192.0.2.10:8080".into()),
+        };
+        save(
+            data,
+            &AddressTransition {
+                kind: TransitionKind::Address,
+                transition_id: id,
+                phase: TransitionPhase::ActivePendingFinalize,
+                expected: target.clone(),
+                target,
+                backend: None,
+                changed: true,
+            },
+        )
+        .unwrap();
+        let error = recover(data, id).await.err().unwrap();
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: TRANSITION_RECOVERY_REQUIRED,
+                ..
+            }
+        ));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

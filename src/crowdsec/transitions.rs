@@ -113,7 +113,10 @@ async fn service_exists(service: &str) -> Result<bool> {
     Ok(output.status.success() && String::from_utf8_lossy(&output.stdout).trim() != "not-found")
 }
 
-async fn set_service_state(service: &str, state: &TransitionServiceState) -> Result<()> {
+pub(crate) async fn restore_service_state(
+    service: &str,
+    state: &TransitionServiceState,
+) -> Result<()> {
     if !service_exists(service).await? {
         return if state.enabled || state.running {
             Err(backup_failed())
@@ -154,7 +157,7 @@ async fn set_service_state(service: &str, state: &TransitionServiceState) -> Res
     Ok(())
 }
 
-async fn service_state(service: &str) -> Result<TransitionServiceState> {
+pub(crate) async fn service_state(service: &str) -> Result<TransitionServiceState> {
     if !service_exists(service).await? {
         return Ok(TransitionServiceState {
             enabled: false,
@@ -297,8 +300,8 @@ pub(crate) async fn restore_backup(data_directory: &str, transition_id: Uuid) ->
             Err(_) => return Err(backup_failed()),
         },
     }
-    set_service_state(CROWDSEC_SERVICE, &backup.crowdsec_service).await?;
-    set_service_state(FIREWALL_BOUNCER_SERVICE, &backup.firewall_bouncer_service).await?;
+    restore_service_state(CROWDSEC_SERVICE, &backup.crowdsec_service).await?;
+    restore_service_state(FIREWALL_BOUNCER_SERVICE, &backup.firewall_bouncer_service).await?;
     Ok(())
 }
 

@@ -64,6 +64,10 @@ struct Backup {
     bouncer: Option<String>,
     engine_running: bool,
     bouncer_running: bool,
+    #[serde(default)]
+    engine_service: Option<TransitionServiceState>,
+    #[serde(default)]
+    bouncer_service: Option<TransitionServiceState>,
 }
 
 fn failed() -> FwcError {
@@ -242,6 +246,8 @@ async fn backup() -> Result<Backup> {
         bouncer,
         engine_running: running(ENGINE).await?,
         bouncer_running: running(BOUNCER).await?,
+        engine_service: Some(service_state(ENGINE).await?),
+        bouncer_service: Some(service_state(BOUNCER).await?),
     })
 }
 
@@ -347,11 +353,15 @@ async fn restore(backup: &Backup) -> Result<()> {
             Err(_) => return Err(failed()),
         },
     }
-    if backup.engine_running {
-        service("enable --now", ENGINE).await?;
+    match &backup.engine_service {
+        Some(state) => restore_service_state(ENGINE, state).await?,
+        None if backup.engine_running => service("enable --now", ENGINE).await?,
+        None => (),
     }
-    if backup.bouncer_running {
-        service("enable --now", BOUNCER).await?;
+    match &backup.bouncer_service {
+        Some(state) => restore_service_state(BOUNCER, state).await?,
+        None if backup.bouncer_running => service("enable --now", BOUNCER).await?,
+        None => (),
     }
     Ok(())
 }
@@ -521,18 +531,22 @@ pub async fn activate(
     Ok(state)
 }
 
+fn recovery_supported(phase: &TransitionPhase) -> bool {
+    matches!(
+        phase,
+        TransitionPhase::Preparing
+            | TransitionPhase::AwaitingValidation
+            | TransitionPhase::ActivePendingFinalize
+            | TransitionPhase::RecoveryRequired
+    )
+}
+
 pub async fn recover(data: &str, id: Uuid) -> Result<RemoteTransition> {
     let mut state = load(data, id).await?;
     if state.phase == TransitionPhase::RolledBack {
         return Ok(state);
     }
-    if !matches!(
-        state.phase,
-        TransitionPhase::Preparing
-            | TransitionPhase::AwaitingValidation
-            | TransitionPhase::ActivePendingFinalize
-            | TransitionPhase::RecoveryRequired
-    ) {
+    if !recovery_supported(&state.phase) {
         return Err(conflict());
     }
     let backup: Backup = serde_json::from_slice(
@@ -634,5 +648,76 @@ mod tests {
     fn rejects_ambiguous_credential_values() {
         assert!(root_scalar("url: one\nurl: two\n", "url").is_err());
         assert!(root_scalar("url: http://192.0.2.10:8080\n", "url").is_ok());
+    }
+    #[test]
+    fn allows_rollback_after_machine_activation_until_finalization() {
+        assert!(recovery_supported(&TransitionPhase::Preparing));
+        assert!(recovery_supported(&TransitionPhase::AwaitingValidation));
+        assert!(recovery_supported(&TransitionPhase::ActivePendingFinalize));
+        assert!(recovery_supported(&TransitionPhase::RecoveryRequired));
+        assert!(!recovery_supported(&TransitionPhase::Completed));
+        assert!(!recovery_supported(&TransitionPhase::RolledBack));
+    }
+
+    #[test]
+    fn persists_service_enablement_only_in_the_private_backup() {
+        let backup = Backup {
+            configuration: "api: {}".into(),
+            credentials: Some("password: secret".into()),
+            bouncer: Some("api_key: secret".into()),
+            engine_running: true,
+            bouncer_running: true,
+            engine_service: Some(TransitionServiceState {
+                enabled: true,
+                running: true,
+            }),
+            bouncer_service: Some(TransitionServiceState {
+                enabled: false,
+                running: true,
+            }),
+        };
+        let encoded = serde_json::to_value(backup).unwrap();
+        assert_eq!(encoded["engine_service"]["enabled"], true);
+        assert_eq!(encoded["bouncer_service"]["enabled"], false);
+    }
+    #[tokio::test]
+    async fn requires_manual_recovery_when_the_activated_backup_is_missing() {
+        let root =
+            std::env::temp_dir().join(format!("fwcloud-remote-rollback-test-{}", Uuid::new_v4()));
+        let data = root.to_str().unwrap();
+        std::fs::create_dir_all(directory(data)).unwrap();
+        let id = Uuid::new_v4();
+        save(
+            data,
+            &RemoteTransition {
+                kind: TransitionKind::Remote,
+                transition_id: id,
+                phase: TransitionPhase::ActivePendingFinalize,
+                expected: TransitionTarget {
+                    mode: TransitionMode::Lapi,
+                    local_remediation: true,
+                    machine_name: None,
+                    lapi_url: None,
+                },
+                target: TransitionTarget {
+                    mode: TransitionMode::Machine,
+                    local_remediation: false,
+                    machine_name: Some("fwcloud-node".into()),
+                    lapi_url: Some("http://192.0.2.10:8080".into()),
+                },
+                backend: None,
+                changed: true,
+            },
+        )
+        .unwrap();
+        let error = recover(data, id).await.err().unwrap();
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: TRANSITION_RECOVERY_REQUIRED,
+                ..
+            }
+        ));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

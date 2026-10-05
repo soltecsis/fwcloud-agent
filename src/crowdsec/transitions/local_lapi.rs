@@ -353,4 +353,50 @@ mod tests {
         );
         std::fs::remove_dir_all(root).unwrap();
     }
+    #[tokio::test]
+    async fn requires_manual_recovery_when_the_activated_backup_is_missing() {
+        let root =
+            std::env::temp_dir().join(format!("fwcloud-lapi-rollback-test-{}", Uuid::new_v4()));
+        let data = root.to_str().unwrap();
+        std::fs::create_dir_all(directory(data)).unwrap();
+        let id = Uuid::new_v4();
+        save(
+            data,
+            &LapiTransition {
+                kind: TransitionKind::Lapi,
+                transition_id: id,
+                phase: TransitionPhase::ActivePendingFinalize,
+                expected: TransitionTarget {
+                    mode: TransitionMode::Machine,
+                    local_remediation: false,
+                    machine_name: Some("fwcloud-node".into()),
+                    lapi_url: Some("http://192.0.2.10:8080".into()),
+                },
+                target: TransitionTarget {
+                    mode: TransitionMode::Lapi,
+                    local_remediation: true,
+                    machine_name: None,
+                    lapi_url: None,
+                },
+                backend: Some(CrowdSecFirewallBackend::Iptables),
+                changed: true,
+                central_machine_cleanup_required: true,
+                central_bouncer_cleanup_required: false,
+            },
+        )
+        .unwrap();
+        let error = recover(data, id).await.err().unwrap();
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: TRANSITION_RECOVERY_REQUIRED,
+                ..
+            }
+        ));
+        assert_eq!(
+            load(data, id).await.unwrap().phase,
+            TransitionPhase::RecoveryRequired
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
