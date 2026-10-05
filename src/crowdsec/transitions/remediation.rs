@@ -352,6 +352,10 @@ mod tests {
             recover(data, id).await.unwrap().phase,
             TransitionPhase::RolledBack
         );
+        assert_eq!(
+            recover(data, id).await.unwrap().phase,
+            TransitionPhase::RolledBack
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

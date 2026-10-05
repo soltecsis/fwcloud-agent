@@ -599,4 +599,18 @@ mod tests {
         assert!(validate(&request).is_ok());
         assert!(request.machine_connectivity_pending);
     }
+    #[test]
+    fn serializes_typed_recovery_outcomes_without_transition_state() {
+        let response = TransitionRecoveryResponse {
+            transition_id: Uuid::nil(),
+            outcome: TransitionRecoveryOutcome::Restored,
+        };
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({
+                "transition_id": "00000000-0000-0000-0000-000000000000",
+                "outcome": "restored"
+            })
+        );
+    }
 }
