@@ -78,7 +78,90 @@ fn backup_path(data_directory: &str, transition_id: Uuid) -> PathBuf {
         .join(format!("{transition_id}.rollback"))
 }
 
+fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
+    let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        std::fs::File::open(path.parent().ok_or_else(backup_failed)?)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result.map_err(|_: FwcError| backup_failed())
+}
+
+async fn systemctl(arguments: &[&str]) -> Result<std::process::Output> {
+    timeout(
+        Duration::from_secs(60),
+        Command::new("/usr/bin/systemctl").args(arguments).output(),
+    )
+    .await
+    .map_err(|_| backup_failed())?
+    .map_err(|_| backup_failed())
+}
+
+async fn service_exists(service: &str) -> Result<bool> {
+    let output = systemctl(&["show", "--property=LoadState", "--value", service]).await?;
+    Ok(output.status.success() && String::from_utf8_lossy(&output.stdout).trim() != "not-found")
+}
+
+async fn set_service_state(service: &str, state: &TransitionServiceState) -> Result<()> {
+    if !service_exists(service).await? {
+        return if state.enabled || state.running {
+            Err(backup_failed())
+        } else {
+            Ok(())
+        };
+    }
+
+    let output = systemctl(&["stop", service]).await?;
+    if !output.status.success() {
+        return Err(backup_failed());
+    }
+
+    let enabled = systemctl(&["is-enabled", service]).await?;
+    let enabled = String::from_utf8_lossy(&enabled.stdout).trim().to_string();
+    if state.enabled {
+        let output = systemctl(&["enable", service]).await?;
+        if !output.status.success() {
+            return Err(backup_failed());
+        }
+    } else if matches!(enabled.as_str(), "enabled" | "enabled-runtime") {
+        let output = systemctl(&["disable", service]).await?;
+        if !output.status.success() {
+            return Err(backup_failed());
+        }
+    }
+
+    if state.running {
+        let output = systemctl(&["start", service]).await?;
+        if !output.status.success() {
+            return Err(backup_failed());
+        }
+    }
+    let restored = service_state(service).await?;
+    if restored.enabled != state.enabled || restored.running != state.running {
+        return Err(backup_failed());
+    }
+    Ok(())
+}
+
 async fn service_state(service: &str) -> Result<TransitionServiceState> {
+    if !service_exists(service).await? {
+        return Ok(TransitionServiceState {
+            enabled: false,
+            running: false,
+        });
+    }
+
     let running = timeout(
         Duration::from_secs(15),
         Command::new("/usr/bin/systemctl")
@@ -173,6 +256,50 @@ pub(crate) async fn remove_backup(data_directory: &str, transition_id: Uuid) -> 
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(_) => Err(backup_failed()),
     }
+}
+
+pub(crate) async fn restore_backup(data_directory: &str, transition_id: Uuid) -> Result<()> {
+    let backup: TransitionBackup = serde_json::from_slice(
+        &fs::read(backup_path(data_directory, transition_id))
+            .await
+            .map_err(|_| backup_failed())?,
+    )
+    .map_err(|_| backup_failed())?;
+
+    for service in [CROWDSEC_SERVICE, FIREWALL_BOUNCER_SERVICE] {
+        if service_exists(service).await? {
+            let output = systemctl(&["stop", service]).await?;
+            if !output.status.success() {
+                return Err(backup_failed());
+            }
+        }
+    }
+    atomic_write(
+        Path::new(CROWDSEC_CONFIG_PATH),
+        backup.configuration.as_bytes(),
+    )?;
+    match backup.credentials {
+        Some(contents) => atomic_write(Path::new(CROWDSEC_CREDENTIALS_PATH), contents.as_bytes())?,
+        None => match fs::remove_file(CROWDSEC_CREDENTIALS_PATH).await {
+            Ok(()) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(_) => return Err(backup_failed()),
+        },
+    }
+    match backup.bouncer_configuration {
+        Some(contents) => atomic_write(
+            Path::new(bouncers::BOUNCER_CONFIG_PATH),
+            contents.as_bytes(),
+        )?,
+        None => match fs::remove_file(bouncers::BOUNCER_CONFIG_PATH).await {
+            Ok(()) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(_) => return Err(backup_failed()),
+        },
+    }
+    set_service_state(CROWDSEC_SERVICE, &backup.crowdsec_service).await?;
+    set_service_state(FIREWALL_BOUNCER_SERVICE, &backup.firewall_bouncer_service).await?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

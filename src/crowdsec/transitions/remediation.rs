@@ -264,19 +264,35 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<RemediationTransition> {
 }
 
 /// A prepared remediation transition has not changed local configuration and
-/// can be cancelled safely. Once removal has started, recreating the central
-/// Bouncer registration is an API-coordinated operation, so the agent keeps
-/// the failure visible instead of guessing a replacement key.
+/// can be cancelled safely. Activated or interrupted plans restore the local
+/// Bouncer configuration from the private backup; API compensates its central
+/// registration separately.
 pub async fn recover(data: &str, id: Uuid) -> Result<RemediationTransition> {
     let mut state = load(data, id).await?;
     if state.phase == TransitionPhase::RolledBack {
         return Ok(state);
     }
-    if state.phase != TransitionPhase::Prepared {
+    if state.phase == TransitionPhase::Prepared {
+        state.phase = TransitionPhase::RolledBack;
+        save(data, &state)?;
+        return Ok(state);
+    }
+    if !matches!(
+        state.phase,
+        TransitionPhase::Activating
+            | TransitionPhase::ActivePendingFinalize
+            | TransitionPhase::RecoveryRequired
+    ) {
+        return Err(recovery());
+    }
+    if restore_backup(data, id).await.is_err() {
+        state.phase = TransitionPhase::RecoveryRequired;
+        save(data, &state)?;
         return Err(recovery());
     }
     state.phase = TransitionPhase::RolledBack;
     save(data, &state)?;
+    remove_backup(data, id).await?;
     Ok(state)
 }
 
