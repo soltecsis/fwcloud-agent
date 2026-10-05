@@ -21,12 +21,18 @@
 */
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use tokio::fs;
+use std::{
+    io::Write,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    path::{Path, PathBuf},
+    time::Duration,
+};
+use tokio::{fs, process::Command, time::timeout};
 use uuid::Uuid;
 
 use super::{
-    errors::{NOT_INSTALLED, TRANSITION_INVALID, TRANSITION_UNSUPPORTED},
+    bouncers,
+    errors::{NOT_INSTALLED, TRANSITION_FAILED, TRANSITION_INVALID, TRANSITION_UNSUPPORTED},
     lapi,
     models::CrowdSecFirewallBackend,
     packages,
@@ -38,6 +44,136 @@ pub mod address;
 pub mod local_lapi;
 pub mod remediation;
 pub mod remote;
+
+const CROWDSEC_CONFIG_PATH: &str = "/etc/crowdsec/config.yaml";
+const CROWDSEC_CREDENTIALS_PATH: &str = "/etc/crowdsec/local_api_credentials.yaml";
+const CROWDSEC_SERVICE: &str = "crowdsec.service";
+const FIREWALL_BOUNCER_SERVICE: &str = "crowdsec-firewall-bouncer.service";
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct TransitionServiceState {
+    pub enabled: bool,
+    pub running: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct TransitionBackup {
+    pub configuration: String,
+    pub credentials: Option<String>,
+    pub bouncer_configuration: Option<String>,
+    pub crowdsec_service: TransitionServiceState,
+    pub firewall_bouncer_service: TransitionServiceState,
+}
+
+fn backup_failed() -> FwcError {
+    FwcError::crowdsec(
+        TRANSITION_FAILED,
+        "Unable to save CrowdSec transition rollback backup",
+    )
+}
+
+fn backup_path(data_directory: &str, transition_id: Uuid) -> PathBuf {
+    Path::new(data_directory)
+        .join("crowdsec/transitions")
+        .join(format!("{transition_id}.rollback"))
+}
+
+async fn service_state(service: &str) -> Result<TransitionServiceState> {
+    let running = timeout(
+        Duration::from_secs(15),
+        Command::new("/usr/bin/systemctl")
+            .args(["is-active", service])
+            .output(),
+    )
+    .await
+    .map_err(|_| backup_failed())?
+    .map_err(|_| backup_failed())?;
+    let running = match String::from_utf8_lossy(&running.stdout).trim() {
+        "active" => true,
+        "inactive" | "failed" | "unknown" => false,
+        _ => return Err(backup_failed()),
+    };
+
+    let enabled = timeout(
+        Duration::from_secs(15),
+        Command::new("/usr/bin/systemctl")
+            .args(["is-enabled", service])
+            .output(),
+    )
+    .await
+    .map_err(|_| backup_failed())?
+    .map_err(|_| backup_failed())?;
+    let enabled = match String::from_utf8_lossy(&enabled.stdout).trim() {
+        "enabled" | "enabled-runtime" => true,
+        "disabled" | "static" | "indirect" | "masked" | "not-found" => false,
+        _ => return Err(backup_failed()),
+    };
+
+    Ok(TransitionServiceState { enabled, running })
+}
+
+async fn optional_file(path: &str) -> Result<Option<String>> {
+    match fs::read_to_string(path).await {
+        Ok(contents) => Ok(Some(contents)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(backup_failed()),
+    }
+}
+
+pub(crate) async fn capture_backup() -> Result<TransitionBackup> {
+    let configuration = fs::read_to_string(CROWDSEC_CONFIG_PATH)
+        .await
+        .map_err(|_| backup_failed())?;
+
+    Ok(TransitionBackup {
+        configuration,
+        credentials: optional_file(CROWDSEC_CREDENTIALS_PATH).await?,
+        bouncer_configuration: optional_file(bouncers::BOUNCER_CONFIG_PATH).await?,
+        crowdsec_service: service_state(CROWDSEC_SERVICE).await?,
+        firewall_bouncer_service: service_state(FIREWALL_BOUNCER_SERVICE).await?,
+    })
+}
+
+pub(crate) fn save_backup(
+    data_directory: &str,
+    transition_id: Uuid,
+    backup: &TransitionBackup,
+) -> Result<()> {
+    let directory = Path::new(data_directory).join("crowdsec/transitions");
+    std::fs::create_dir_all(&directory).map_err(|_| backup_failed())?;
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
+        .map_err(|_| backup_failed())?;
+
+    let path = backup_path(data_directory, transition_id);
+    if path.exists() {
+        return Ok(());
+    }
+    let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        file.write_all(&serde_json::to_vec(backup).map_err(|_| backup_failed())?)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, &path)?;
+        std::fs::File::open(&directory)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result.map_err(|_: FwcError| backup_failed())
+}
+
+pub(crate) async fn remove_backup(data_directory: &str, transition_id: Uuid) -> Result<()> {
+    match fs::remove_file(backup_path(data_directory, transition_id)).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(backup_failed()),
+    }
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

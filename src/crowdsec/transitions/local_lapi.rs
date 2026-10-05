@@ -202,6 +202,8 @@ pub async fn activate(
     if state.phase != TransitionPhase::Prepared {
         return Err(conflict());
     }
+    let backup = capture_backup().await?;
+    save_backup(data, state.transition_id, &backup)?;
     state.phase = TransitionPhase::Activating;
     save(data, &state)?;
     progress.typed_message(
@@ -245,6 +247,7 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<LapiTransition> {
     }
     state.phase = TransitionPhase::Completed;
     save(data, &state)?;
+    remove_backup(data, id).await?;
     Ok(state)
 }
 

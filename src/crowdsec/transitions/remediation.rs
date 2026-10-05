@@ -202,6 +202,8 @@ pub async fn activate(
         return Err(conflict());
     }
     let lapi_url = verify_remote_url(&state.expected).await?;
+    let backup = capture_backup().await?;
+    save_backup(data, state.transition_id, &backup)?;
     state.phase = TransitionPhase::Activating;
     save(data, &state)?;
     let result = if state.target.local_remediation {
@@ -257,6 +259,7 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<RemediationTransition> {
     }
     state.phase = TransitionPhase::Completed;
     save(data, &state)?;
+    remove_backup(data, id).await?;
     Ok(state)
 }
 
