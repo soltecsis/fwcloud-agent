@@ -530,6 +530,7 @@ pub async fn recover(data: &str, id: Uuid) -> Result<RemoteTransition> {
         state.phase,
         TransitionPhase::Preparing
             | TransitionPhase::AwaitingValidation
+            | TransitionPhase::ActivePendingFinalize
             | TransitionPhase::RecoveryRequired
     ) {
         return Err(conflict());

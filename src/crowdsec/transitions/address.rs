@@ -380,7 +380,9 @@ pub async fn recover(data: &str, id: Uuid) -> Result<AddressTransition> {
     }
     if !matches!(
         state.phase,
-        TransitionPhase::Activating | TransitionPhase::RecoveryRequired
+        TransitionPhase::Activating
+            | TransitionPhase::ActivePendingFinalize
+            | TransitionPhase::RecoveryRequired
     ) {
         return Err(conflict());
     }

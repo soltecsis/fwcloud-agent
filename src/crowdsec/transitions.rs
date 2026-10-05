@@ -385,6 +385,19 @@ pub struct TransitionPreflightResponse {
     pub message: &'static str,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransitionRecoveryOutcome {
+    Restored,
+    AlreadyRestored,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TransitionRecoveryResponse {
+    pub transition_id: Uuid,
+    pub outcome: TransitionRecoveryOutcome,
+}
+
 fn invalid(message: &'static str) -> FwcError {
     FwcError::crowdsec(TRANSITION_INVALID, message)
 }
