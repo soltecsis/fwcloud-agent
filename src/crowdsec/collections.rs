@@ -60,17 +60,27 @@ pub async fn install(name: &str) -> Result<CrowdSecCollectionOperationResponse> 
     let collection = collection_by_name(name).await?;
 
     reject_tainted_collection(&collection)?;
+    if collection.state == CrowdSecCollectionState::Installed {
+        return Ok(CrowdSecCollectionOperationResponse {
+            operation: CrowdSecCollectionOperation::Install,
+            collection: Some(name.to_string()),
+            processed_collections: vec![],
+            skipped_collections: vec![name.to_string()],
+            service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
+            message: "CrowdSec collection is already installed".to_string(),
+        });
+    }
 
     execute_collection_command(&["collections", "install", name]).await?;
-    reload_crowdsec_service().await?;
+    let service_reload = collection_service_reload_state().await;
 
     Ok(CrowdSecCollectionOperationResponse {
         operation: CrowdSecCollectionOperation::Install,
         collection: Some(name.to_string()),
         processed_collections: vec![name.to_string()],
         skipped_collections: vec![],
-        service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
-        message: "CrowdSec collection is installed and CrowdSec service is reloaded".to_string(),
+        message: collection_operation_message("CrowdSec collection is installed", &service_reload),
+        service_reload,
     })
 }
 
@@ -80,23 +90,27 @@ pub async fn remove(name: &str) -> Result<CrowdSecCollectionOperationResponse> {
     let collection = collection_by_name(name).await?;
     reject_tainted_collection(&collection)?;
 
-    if collection.state != CrowdSecCollectionState::Installed {
-        return Err(FwcError::crowdsec(
-            COLLECTION_INVALID,
-            "CrowdSec collection is not installed",
-        ));
+    if collection.state == CrowdSecCollectionState::Available {
+        return Ok(CrowdSecCollectionOperationResponse {
+            operation: CrowdSecCollectionOperation::Remove,
+            collection: Some(name.to_string()),
+            processed_collections: vec![],
+            skipped_collections: vec![name.to_string()],
+            service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
+            message: "CrowdSec collection is already absent".to_string(),
+        });
     }
 
     execute_collection_command(&["collections", "remove", name]).await?;
-    reload_crowdsec_service().await?;
+    let service_reload = collection_service_reload_state().await;
 
     Ok(CrowdSecCollectionOperationResponse {
         operation: CrowdSecCollectionOperation::Remove,
         collection: Some(name.to_string()),
         processed_collections: vec![name.to_string()],
         skipped_collections: vec![],
-        service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
-        message: "CrowdSec collection is removed and CrowdSec service is reloaded".to_string(),
+        message: collection_operation_message("CrowdSec collection is removed", &service_reload),
+        service_reload,
     })
 }
 
@@ -122,7 +136,15 @@ pub async fn update() -> Result<CrowdSecCollectionOperationResponse> {
     }
 
     if !processed_collections.is_empty() {
-        reload_crowdsec_service().await?;
+        let service_reload = collection_service_reload_state().await;
+        return Ok(collection_operation_response(
+            CrowdSecCollectionOperation::Update,
+            None,
+            processed_collections,
+            skipped_collections,
+            service_reload,
+            "CrowdSec Hub index and installed collections are updated",
+        ));
     }
 
     Ok(CrowdSecCollectionOperationResponse {
@@ -133,6 +155,24 @@ pub async fn update() -> Result<CrowdSecCollectionOperationResponse> {
         service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
         message: "CrowdSec Hub index and installed collections are updated".to_string(),
     })
+}
+
+fn collection_operation_response(
+    operation: CrowdSecCollectionOperation,
+    collection: Option<String>,
+    processed_collections: Vec<String>,
+    skipped_collections: Vec<String>,
+    service_reload: CrowdSecCollectionServiceReloadState,
+    completed_mutation: &str,
+) -> CrowdSecCollectionOperationResponse {
+    CrowdSecCollectionOperationResponse {
+        operation,
+        collection,
+        processed_collections,
+        skipped_collections,
+        message: collection_operation_message(completed_mutation, &service_reload),
+        service_reload,
+    }
 }
 
 fn list_arguments(installed_only: bool) -> &'static [&'static str] {
@@ -243,6 +283,33 @@ async fn reload_crowdsec_service() -> Result<()> {
     }
 }
 
+async fn collection_service_reload_state() -> CrowdSecCollectionServiceReloadState {
+    collection_service_reload_state_from_result(reload_crowdsec_service().await)
+}
+
+fn collection_service_reload_state_from_result(
+    result: Result<()>,
+) -> CrowdSecCollectionServiceReloadState {
+    match result {
+        Ok(()) => CrowdSecCollectionServiceReloadState::Reloaded,
+        Err(_) => CrowdSecCollectionServiceReloadState::Failed,
+    }
+}
+
+fn collection_operation_message(
+    completed_mutation: &str,
+    service_reload: &CrowdSecCollectionServiceReloadState,
+) -> String {
+    match service_reload {
+        CrowdSecCollectionServiceReloadState::Reloaded => {
+            format!("{completed_mutation} and CrowdSec service is reloaded")
+        }
+        CrowdSecCollectionServiceReloadState::Failed => {
+            format!("{completed_mutation}, but CrowdSec service reload failed")
+        }
+    }
+}
+
 fn collections_from_json(value: &serde_json::Value) -> Vec<CrowdSecCollection> {
     let values = match value {
         serde_json::Value::Array(values) => values,
@@ -315,15 +382,15 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        collection_command_error, collection_from_json, list_arguments, validate_collection_name,
+        collection_command_error, collection_from_json, collection_operation_response,
+        collection_service_reload_state_from_result, list_arguments, validate_collection_name,
     };
     use crate::{
         crowdsec::{
             errors::{COLLECTION_CONFLICT, COLLECTION_INVALID, COLLECTION_TAINTED},
             models::{
                 CrowdSecCollectionOperation, CrowdSecCollectionOperationResponse,
-                CrowdSecCollectionServiceReloadState,
-                CrowdSecCollectionState,
+                CrowdSecCollectionServiceReloadState, CrowdSecCollectionState,
             },
         },
         errors::FwcError,
@@ -433,5 +500,55 @@ mod tests {
         assert_eq!(response["service_reload"], json!("reloaded"));
         assert!(response.get("api_key").is_none());
         assert!(response.get("enrollment_key").is_none());
+    }
+
+    #[test]
+    fn reports_completed_collection_mutations_when_service_reload_fails() {
+        for (operation, collection, processed_collections) in [
+            (
+                CrowdSecCollectionOperation::Install,
+                Some("crowdsecurity/sshd".to_string()),
+                vec!["crowdsecurity/sshd".to_string()],
+            ),
+            (
+                CrowdSecCollectionOperation::Remove,
+                Some("crowdsecurity/nginx".to_string()),
+                vec!["crowdsecurity/nginx".to_string()],
+            ),
+            (
+                CrowdSecCollectionOperation::Update,
+                None,
+                vec!["crowdsecurity/linux".to_string()],
+            ),
+        ] {
+            let response = collection_operation_response(
+                operation,
+                collection,
+                processed_collections,
+                vec![],
+                CrowdSecCollectionServiceReloadState::Failed,
+                "CrowdSec collection mutation completed",
+            );
+            let response = serde_json::to_value(response).unwrap();
+
+            assert_eq!(response["service_reload"], json!("failed"));
+            assert_eq!(response["processed_collections"].as_array().unwrap().len(), 1);
+            assert!(response["message"]
+                .as_str()
+                .unwrap()
+                .contains("CrowdSec service reload failed"));
+            assert!(response.get("api_key").is_none());
+            assert!(response.get("enrollment_key").is_none());
+        }
+    }
+
+    #[test]
+    fn maps_service_reload_errors_to_a_failed_state() {
+        let state = collection_service_reload_state_from_result(Err(FwcError::crowdsec(
+            COLLECTION_INVALID,
+            "CrowdSec service command failed",
+        )));
+
+        assert_eq!(state, CrowdSecCollectionServiceReloadState::Failed);
     }
 }
