@@ -33,7 +33,8 @@ use crate::{
         },
         models::{
             CrowdSecCollection, CrowdSecCollectionOperation, CrowdSecCollectionOperationResponse,
-            CrowdSecCollectionState, CrowdSecCollectionsResponse,
+            CrowdSecCollectionServiceReloadState, CrowdSecCollectionState,
+            CrowdSecCollectionsResponse,
         },
     },
     errors::{FwcError, Result},
@@ -68,6 +69,7 @@ pub async fn install(name: &str) -> Result<CrowdSecCollectionOperationResponse> 
         collection: Some(name.to_string()),
         processed_collections: vec![name.to_string()],
         skipped_collections: vec![],
+        service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
         message: "CrowdSec collection is installed and CrowdSec service is reloaded".to_string(),
     })
 }
@@ -93,6 +95,7 @@ pub async fn remove(name: &str) -> Result<CrowdSecCollectionOperationResponse> {
         collection: Some(name.to_string()),
         processed_collections: vec![name.to_string()],
         skipped_collections: vec![],
+        service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
         message: "CrowdSec collection is removed and CrowdSec service is reloaded".to_string(),
     })
 }
@@ -127,6 +130,7 @@ pub async fn update() -> Result<CrowdSecCollectionOperationResponse> {
         collection: None,
         processed_collections,
         skipped_collections,
+        service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
         message: "CrowdSec Hub index and installed collections are updated".to_string(),
     })
 }
@@ -318,6 +322,7 @@ mod tests {
             errors::{COLLECTION_CONFLICT, COLLECTION_INVALID, COLLECTION_TAINTED},
             models::{
                 CrowdSecCollectionOperation, CrowdSecCollectionOperationResponse,
+                CrowdSecCollectionServiceReloadState,
                 CrowdSecCollectionState,
             },
         },
@@ -415,6 +420,7 @@ mod tests {
             collection: None,
             processed_collections: vec!["crowdsecurity/sshd".to_string()],
             skipped_collections: vec![],
+            service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
             message: "CrowdSec Hub index and installed collections are updated".to_string(),
         };
         let response = serde_json::to_value(response).unwrap();
@@ -424,6 +430,7 @@ mod tests {
             response["processed_collections"],
             json!(["crowdsecurity/sshd"])
         );
+        assert_eq!(response["service_reload"], json!("reloaded"));
         assert!(response.get("api_key").is_none());
         assert!(response.get("enrollment_key").is_none());
     }
