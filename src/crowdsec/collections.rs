@@ -272,11 +272,17 @@ fn collection_from_json(value: &serde_json::Value) -> Option<CrowdSecCollection>
         .unwrap_or_else(|| status.is_some_and(|status| status.contains("tainted")));
     let disabled = status.is_some_and(|status| status.contains("disabled"));
 
+    let local_version = string_value(values, "local_version")
+        .or_else(|| string_value(values, "localversion"));
+    let locally_installed = installed || tainted || local_version.is_some();
+
     Some(CrowdSecCollection {
         name,
-        version: string_value(values, "version")
-            .or_else(|| string_value(values, "local_version"))
-            .or_else(|| string_value(values, "localversion")),
+        version: if locally_installed {
+            local_version.or_else(|| string_value(values, "version"))
+        } else {
+            None
+        },
         state: if tainted {
             CrowdSecCollectionState::Tainted
         } else if installed {
@@ -338,6 +344,18 @@ mod tests {
                 }
             ));
         }
+    }
+
+    #[test]
+    fn omits_remote_version_for_available_collections() {
+        let collection = collection_from_json(&json!({
+            "name": "crowdsecurity/sshd",
+            "version": "0.2"
+        }))
+        .unwrap();
+
+        assert_eq!(collection.version, None);
+        assert_eq!(collection.state, CrowdSecCollectionState::Available);
     }
 
     #[test]

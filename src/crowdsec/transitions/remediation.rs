@@ -202,6 +202,8 @@ pub async fn activate(
         return Err(conflict());
     }
     let lapi_url = verify_remote_url(&state.expected).await?;
+    let backup = capture_backup().await?;
+    save_backup(data, state.transition_id, &backup)?;
     state.phase = TransitionPhase::Activating;
     save(data, &state)?;
     let result = if state.target.local_remediation {
@@ -257,23 +259,40 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<RemediationTransition> {
     }
     state.phase = TransitionPhase::Completed;
     save(data, &state)?;
+    remove_backup(data, id).await?;
     Ok(state)
 }
 
 /// A prepared remediation transition has not changed local configuration and
-/// can be cancelled safely. Once removal has started, recreating the central
-/// Bouncer registration is an API-coordinated operation, so the agent keeps
-/// the failure visible instead of guessing a replacement key.
+/// can be cancelled safely. Activated or interrupted plans restore the local
+/// Bouncer configuration from the private backup; API compensates its central
+/// registration separately.
 pub async fn recover(data: &str, id: Uuid) -> Result<RemediationTransition> {
     let mut state = load(data, id).await?;
     if state.phase == TransitionPhase::RolledBack {
         return Ok(state);
     }
-    if state.phase != TransitionPhase::Prepared {
+    if state.phase == TransitionPhase::Prepared {
+        state.phase = TransitionPhase::RolledBack;
+        save(data, &state)?;
+        return Ok(state);
+    }
+    if !matches!(
+        state.phase,
+        TransitionPhase::Activating
+            | TransitionPhase::ActivePendingFinalize
+            | TransitionPhase::RecoveryRequired
+    ) {
+        return Err(recovery());
+    }
+    if restore_backup(data, id).await.is_err() {
+        state.phase = TransitionPhase::RecoveryRequired;
+        save(data, &state)?;
         return Err(recovery());
     }
     state.phase = TransitionPhase::RolledBack;
     save(data, &state)?;
+    remove_backup(data, id).await?;
     Ok(state)
 }
 
@@ -332,6 +351,56 @@ mod tests {
         assert_eq!(
             recover(data, id).await.unwrap().phase,
             TransitionPhase::RolledBack
+        );
+        assert_eq!(
+            recover(data, id).await.unwrap().phase,
+            TransitionPhase::RolledBack
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[tokio::test]
+    async fn requires_manual_recovery_when_the_activated_backup_is_missing() {
+        let root = std::env::temp_dir().join(format!(
+            "fwcloud-remediation-rollback-test-{}",
+            Uuid::new_v4()
+        ));
+        let data = root.to_str().unwrap();
+        std::fs::create_dir_all(directory(data)).unwrap();
+        let id = Uuid::new_v4();
+        let target = TransitionTarget {
+            mode: TransitionMode::Machine,
+            local_remediation: false,
+            machine_name: Some("fwcloud-node".into()),
+            lapi_url: Some("http://192.0.2.10:8080".into()),
+        };
+        save(
+            data,
+            &RemediationTransition {
+                kind: TransitionKind::Remediation,
+                transition_id: id,
+                phase: TransitionPhase::ActivePendingFinalize,
+                expected: TransitionTarget {
+                    local_remediation: true,
+                    ..target.clone()
+                },
+                target,
+                backend: None,
+                changed: true,
+                central_registration_cleanup_required: true,
+            },
+        )
+        .unwrap();
+        let error = recover(data, id).await.err().unwrap();
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: TRANSITION_RECOVERY_REQUIRED,
+                ..
+            }
+        ));
+        assert_eq!(
+            load(data, id).await.unwrap().phase,
+            TransitionPhase::RecoveryRequired
         );
         std::fs::remove_dir_all(root).unwrap();
     }

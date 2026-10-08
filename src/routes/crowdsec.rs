@@ -173,24 +173,61 @@ async fn recover_crowdsec_transition(
             "Explicit confirmation is required",
         ));
     }
-    match crate::crowdsec::transitions::kind(cfg.data_dir, request.transition_id).await? {
-        crate::crowdsec::transitions::TransitionKind::Address => Ok(HttpResponse::Ok().json(
+    let kind = crate::crowdsec::transitions::kind(cfg.data_dir, request.transition_id).await?;
+    let already_restored = match kind {
+        crate::crowdsec::transitions::TransitionKind::Address => {
+            crate::crowdsec::transitions::address::load(cfg.data_dir, request.transition_id)
+                .await?
+                .phase
+                == crate::crowdsec::transitions::TransitionPhase::RolledBack
+        }
+        crate::crowdsec::transitions::TransitionKind::Remote => {
+            crate::crowdsec::transitions::remote::load(cfg.data_dir, request.transition_id)
+                .await?
+                .phase
+                == crate::crowdsec::transitions::TransitionPhase::RolledBack
+        }
+        crate::crowdsec::transitions::TransitionKind::Remediation => {
+            crate::crowdsec::transitions::remediation::load(cfg.data_dir, request.transition_id)
+                .await?
+                .phase
+                == crate::crowdsec::transitions::TransitionPhase::RolledBack
+        }
+        crate::crowdsec::transitions::TransitionKind::Lapi => {
+            crate::crowdsec::transitions::local_lapi::load(cfg.data_dir, request.transition_id)
+                .await?
+                .phase
+                == crate::crowdsec::transitions::TransitionPhase::RolledBack
+        }
+    };
+    match kind {
+        crate::crowdsec::transitions::TransitionKind::Address => {
             crate::crowdsec::transitions::address::recover(cfg.data_dir, request.transition_id)
-                .await?,
-        )),
-        crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
+                .await?;
+        }
+        crate::crowdsec::transitions::TransitionKind::Remote => {
             crate::crowdsec::transitions::remote::recover(cfg.data_dir, request.transition_id)
-                .await?,
-        )),
-        crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
+                .await?;
+        }
+        crate::crowdsec::transitions::TransitionKind::Remediation => {
             crate::crowdsec::transitions::remediation::recover(cfg.data_dir, request.transition_id)
-                .await?,
-        )),
-        crate::crowdsec::transitions::TransitionKind::Lapi => Ok(HttpResponse::Ok().json(
+                .await?;
+        }
+        crate::crowdsec::transitions::TransitionKind::Lapi => {
             crate::crowdsec::transitions::local_lapi::recover(cfg.data_dir, request.transition_id)
-                .await?,
-        )),
+                .await?;
+        }
     }
+    Ok(
+        HttpResponse::Ok().json(crate::crowdsec::transitions::TransitionRecoveryResponse {
+            transition_id: request.transition_id,
+            outcome: if already_restored {
+                crate::crowdsec::transitions::TransitionRecoveryOutcome::AlreadyRestored
+            } else {
+                crate::crowdsec::transitions::TransitionRecoveryOutcome::Restored
+            },
+        }),
+    )
 }
 
 #[post("/crowdsec/transitions/finalize")]

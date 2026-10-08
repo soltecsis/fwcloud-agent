@@ -202,6 +202,8 @@ pub async fn activate(
     if state.phase != TransitionPhase::Prepared {
         return Err(conflict());
     }
+    let backup = capture_backup().await?;
+    save_backup(data, state.transition_id, &backup)?;
     state.phase = TransitionPhase::Activating;
     save(data, &state)?;
     progress.typed_message(
@@ -245,22 +247,39 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<LapiTransition> {
     }
     state.phase = TransitionPhase::Completed;
     save(data, &state)?;
+    remove_backup(data, id).await?;
     Ok(state)
 }
 
-/// Before activation no files or services have changed, so a prepared plan can
-/// be cancelled. After central registrations have been removed, restoring the
-/// former Machine is unsafe without API coordination and remains explicit.
+/// A prepared plan has not changed local configuration and can be cancelled.
+/// Activated or interrupted plans restore the original Machine configuration
+/// from the private backup; central registration compensation stays with API.
 pub async fn recover(data: &str, id: Uuid) -> Result<LapiTransition> {
     let mut state = load(data, id).await?;
     if state.phase == TransitionPhase::RolledBack {
         return Ok(state);
     }
-    if state.phase != TransitionPhase::Prepared {
+    if state.phase == TransitionPhase::Prepared {
+        state.phase = TransitionPhase::RolledBack;
+        save(data, &state)?;
+        return Ok(state);
+    }
+    if !matches!(
+        state.phase,
+        TransitionPhase::Activating
+            | TransitionPhase::ActivePendingFinalize
+            | TransitionPhase::RecoveryRequired
+    ) {
+        return Err(recovery());
+    }
+    if restore_backup(data, id).await.is_err() {
+        state.phase = TransitionPhase::RecoveryRequired;
+        save(data, &state)?;
         return Err(recovery());
     }
     state.phase = TransitionPhase::RolledBack;
     save(data, &state)?;
+    remove_backup(data, id).await?;
     Ok(state)
 }
 
@@ -327,6 +346,56 @@ mod tests {
         assert_eq!(
             recover(data, id).await.unwrap().phase,
             TransitionPhase::RolledBack
+        );
+        assert_eq!(
+            recover(data, id).await.unwrap().phase,
+            TransitionPhase::RolledBack
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[tokio::test]
+    async fn requires_manual_recovery_when_the_activated_backup_is_missing() {
+        let root =
+            std::env::temp_dir().join(format!("fwcloud-lapi-rollback-test-{}", Uuid::new_v4()));
+        let data = root.to_str().unwrap();
+        std::fs::create_dir_all(directory(data)).unwrap();
+        let id = Uuid::new_v4();
+        save(
+            data,
+            &LapiTransition {
+                kind: TransitionKind::Lapi,
+                transition_id: id,
+                phase: TransitionPhase::ActivePendingFinalize,
+                expected: TransitionTarget {
+                    mode: TransitionMode::Machine,
+                    local_remediation: false,
+                    machine_name: Some("fwcloud-node".into()),
+                    lapi_url: Some("http://192.0.2.10:8080".into()),
+                },
+                target: TransitionTarget {
+                    mode: TransitionMode::Lapi,
+                    local_remediation: true,
+                    machine_name: None,
+                    lapi_url: None,
+                },
+                backend: Some(CrowdSecFirewallBackend::Iptables),
+                changed: true,
+                central_machine_cleanup_required: true,
+                central_bouncer_cleanup_required: false,
+            },
+        )
+        .unwrap();
+        let error = recover(data, id).await.err().unwrap();
+        assert!(matches!(
+            error,
+            FwcError::CrowdSec {
+                code: TRANSITION_RECOVERY_REQUIRED,
+                ..
+            }
+        ));
+        assert_eq!(
+            load(data, id).await.unwrap().phase,
+            TransitionPhase::RecoveryRequired
         );
         std::fs::remove_dir_all(root).unwrap();
     }
