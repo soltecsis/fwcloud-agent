@@ -519,6 +519,13 @@ pub enum CrowdSecCollectionOperation {
     Update,
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecCollectionServiceReloadState {
+    Reloaded,
+    Failed,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CrowdSecCollectionOperationResponse {
     pub operation: CrowdSecCollectionOperation,
@@ -526,6 +533,7 @@ pub struct CrowdSecCollectionOperationResponse {
     pub collection: Option<String>,
     pub processed_collections: Vec<String>,
     pub skipped_collections: Vec<String>,
+    pub service_reload: CrowdSecCollectionServiceReloadState,
     pub message: String,
 }
 
