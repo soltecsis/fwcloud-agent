@@ -681,6 +681,67 @@ mod tests {
         assert_eq!(encoded["engine_service"]["enabled"], true);
         assert_eq!(encoded["bouncer_service"]["enabled"], false);
     }
+
+    #[tokio::test]
+    async fn finalization_removes_completed_state_and_retains_failed_transition_state() {
+        let root =
+            std::env::temp_dir().join(format!("fwcloud-remote-finalize-test-{}", Uuid::new_v4()));
+        let data = root.to_str().unwrap();
+        std::fs::create_dir_all(directory(data)).unwrap();
+        let expected = TransitionTarget {
+            mode: TransitionMode::Lapi,
+            local_remediation: true,
+            machine_name: None,
+            lapi_url: None,
+        };
+        let target = TransitionTarget {
+            mode: TransitionMode::Machine,
+            local_remediation: false,
+            machine_name: Some("fwcloud-node".into()),
+            lapi_url: Some("http://192.0.2.10:8080".into()),
+        };
+        let completed_id = Uuid::new_v4();
+        save(
+            data,
+            &RemoteTransition {
+                kind: TransitionKind::Remote,
+                transition_id: completed_id,
+                phase: TransitionPhase::ActivePendingFinalize,
+                expected: expected.clone(),
+                target: target.clone(),
+                backend: None,
+                changed: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            finalize(data, completed_id).await.unwrap().phase,
+            TransitionPhase::Completed
+        );
+        assert!(!state_path(data, completed_id).exists());
+
+        let failed_id = Uuid::new_v4();
+        save(
+            data,
+            &RemoteTransition {
+                kind: TransitionKind::Remote,
+                transition_id: failed_id,
+                phase: TransitionPhase::Prepared,
+                expected,
+                target,
+                backend: None,
+                changed: true,
+            },
+        )
+        .unwrap();
+        assert!(finalize(data, failed_id).await.is_err());
+        assert_eq!(
+            load(data, failed_id).await.unwrap().phase,
+            TransitionPhase::Prepared
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn requires_manual_recovery_when_the_activated_backup_is_missing() {
         let root =

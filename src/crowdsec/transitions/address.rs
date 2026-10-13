@@ -635,6 +635,40 @@ mod tests {
         assert!(!recovery_supported(&TransitionPhase::RolledBack));
     }
 
+    #[tokio::test]
+    async fn failed_finalization_retains_transition_state() {
+        let root =
+            std::env::temp_dir().join(format!("fwcloud-address-finalize-test-{}", Uuid::new_v4()));
+        let data = root.to_str().unwrap();
+        std::fs::create_dir_all(directory(data)).unwrap();
+        let id = Uuid::new_v4();
+        let target = TransitionTarget {
+            mode: TransitionMode::Machine,
+            local_remediation: false,
+            machine_name: Some("fwcloud-node".into()),
+            lapi_url: Some("http://192.0.2.10:8080".into()),
+        };
+        save(
+            data,
+            &AddressTransition {
+                kind: TransitionKind::Address,
+                transition_id: id,
+                phase: TransitionPhase::Prepared,
+                expected: target.clone(),
+                target,
+                backend: None,
+                changed: true,
+            },
+        )
+        .unwrap();
+        assert!(finalize(data, id).await.is_err());
+        assert_eq!(
+            load(data, id).await.unwrap().phase,
+            TransitionPhase::Prepared
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn supports_legacy_backups_without_service_enablement() {
         let backup: Backup = serde_json::from_value(serde_json::json!({
