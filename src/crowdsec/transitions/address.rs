@@ -529,6 +529,7 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<AddressTransition> {
     }
     state.phase = TransitionPhase::Completed;
     save(data, &state)?;
+    remove_state(data, id).await.map_err(|_| failed())?;
     Ok(state)
 }
 
@@ -595,11 +596,9 @@ mod tests {
         assert!(!serde_json::to_string(&state).unwrap().contains("secret"));
         finalize(data, id).await.unwrap();
         assert!(!backup_path(data, id).exists());
+        assert!(!state_path(data, id).exists());
         assert!(ensure_idle(data).await.is_ok());
-        assert_eq!(
-            finalize(data, id).await.unwrap().phase,
-            TransitionPhase::Completed
-        );
+        assert!(finalize(data, id).await.is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -634,6 +633,40 @@ mod tests {
         assert!(!recovery_supported(&TransitionPhase::Prepared));
         assert!(!recovery_supported(&TransitionPhase::Completed));
         assert!(!recovery_supported(&TransitionPhase::RolledBack));
+    }
+
+    #[tokio::test]
+    async fn failed_finalization_retains_transition_state() {
+        let root =
+            std::env::temp_dir().join(format!("fwcloud-address-finalize-test-{}", Uuid::new_v4()));
+        let data = root.to_str().unwrap();
+        std::fs::create_dir_all(directory(data)).unwrap();
+        let id = Uuid::new_v4();
+        let target = TransitionTarget {
+            mode: TransitionMode::Machine,
+            local_remediation: false,
+            machine_name: Some("fwcloud-node".into()),
+            lapi_url: Some("http://192.0.2.10:8080".into()),
+        };
+        save(
+            data,
+            &AddressTransition {
+                kind: TransitionKind::Address,
+                transition_id: id,
+                phase: TransitionPhase::Prepared,
+                expected: target.clone(),
+                target,
+                backend: None,
+                changed: true,
+            },
+        )
+        .unwrap();
+        assert!(finalize(data, id).await.is_err());
+        assert_eq!(
+            load(data, id).await.unwrap().phase,
+            TransitionPhase::Prepared
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
