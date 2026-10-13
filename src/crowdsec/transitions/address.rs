@@ -529,6 +529,7 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<AddressTransition> {
     }
     state.phase = TransitionPhase::Completed;
     save(data, &state)?;
+    remove_state(data, id).await.map_err(|_| failed())?;
     Ok(state)
 }
 
@@ -595,11 +596,9 @@ mod tests {
         assert!(!serde_json::to_string(&state).unwrap().contains("secret"));
         finalize(data, id).await.unwrap();
         assert!(!backup_path(data, id).exists());
+        assert!(!state_path(data, id).exists());
         assert!(ensure_idle(data).await.is_ok());
-        assert_eq!(
-            finalize(data, id).await.unwrap().phase,
-            TransitionPhase::Completed
-        );
+        assert!(finalize(data, id).await.is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

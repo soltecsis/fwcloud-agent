@@ -248,6 +248,7 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<LapiTransition> {
     state.phase = TransitionPhase::Completed;
     save(data, &state)?;
     remove_backup(data, id).await?;
+    remove_state(data, id).await.map_err(|_| failed())?;
     Ok(state)
 }
 

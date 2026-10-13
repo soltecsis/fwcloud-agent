@@ -45,6 +45,15 @@ pub mod local_lapi;
 pub mod remediation;
 pub mod remote;
 
+pub(crate) async fn remove_state(data_directory: &str, transition_id: Uuid) -> std::io::Result<()> {
+    fs::remove_file(
+        Path::new(data_directory)
+            .join("crowdsec/transitions")
+            .join(format!("{transition_id}.json")),
+    )
+    .await
+}
+
 const CROWDSEC_CONFIG_PATH: &str = "/etc/crowdsec/config.yaml";
 const CROWDSEC_CREDENTIALS_PATH: &str = "/etc/crowdsec/local_api_credentials.yaml";
 const CROWDSEC_SERVICE: &str = "crowdsec.service";

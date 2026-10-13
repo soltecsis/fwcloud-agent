@@ -587,6 +587,7 @@ pub async fn finalize(data: &str, id: Uuid) -> Result<RemoteTransition> {
     save(data, &state)?;
     let staged_credentials = staged_credentials_path(id);
     let _ = discard_stashed_credentials(Some(&staged_credentials)).await;
+    remove_state(data, id).await.map_err(|_| failed())?;
     Ok(state)
 }
 
