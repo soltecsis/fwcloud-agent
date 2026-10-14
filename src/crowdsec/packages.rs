@@ -56,6 +56,7 @@ const APT_KEYRING_PATH: &str = "/etc/apt/keyrings/crowdsec_crowdsec-archive-keyr
 const APT_KEYRING_TEMP_PATH: &str = "/etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg.tmp";
 const APT_REPOSITORY_PATH: &str = "/etc/apt/sources.list.d/crowdsec_crowdsec.list";
 const RPM_REPOSITORY_PATH: &str = "/etc/yum.repos.d/crowdsec_crowdsec.repo";
+const RPM_REPOSITORY_TEMP_PATH: &str = "/etc/yum.repos.d/crowdsec_crowdsec.repo.tmp";
 const CROWDSEC_RPM_REPOSITORY_CONFIG_URL: &str =
     "https://packagecloud.io/install/repositories/crowdsec/crowdsec/config_file.repo";
 const CROWDSEC_GPG_KEY_URL: &str = "https://packagecloud.io/crowdsec/crowdsec/gpgkey";
@@ -97,6 +98,76 @@ impl RpmRepositoryTarget {
             self.packagecloud_distribution(),
             self.major_version
         )
+    }
+}
+
+#[allow(dead_code)]
+async fn download_rpm_repository_configuration(
+    target: RpmRepositoryTarget,
+    progress: Option<&CrowdSecProgress>,
+) -> Result<String> {
+    let url = target.configuration_url();
+    run_command(
+        "/usr/bin/curl",
+        &[
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--output",
+            RPM_REPOSITORY_TEMP_PATH,
+            &url,
+        ],
+        progress,
+    )
+    .await?;
+
+    let contents = fs::read_to_string(RPM_REPOSITORY_TEMP_PATH)
+        .await
+        .map_err(FwcError::from);
+    let _ = fs::remove_file(RPM_REPOSITORY_TEMP_PATH).await;
+    let contents = contents?;
+    validate_rpm_repository_configuration(target, &contents)?;
+
+    Ok(contents)
+}
+
+#[allow(dead_code)]
+fn validate_rpm_repository_configuration(
+    target: RpmRepositoryTarget,
+    contents: &str,
+) -> Result<()> {
+    let expected_baseurl = format!(
+        "baseurl=https://packagecloud.io/crowdsec/crowdsec/{}/{}/",
+        target.packagecloud_distribution(),
+        target.major_version
+    );
+    let required = [
+        "[crowdsec_crowdsec]",
+        expected_baseurl.as_str(),
+        "repo_gpgcheck=1",
+        "gpgcheck=1",
+        "enabled=1",
+        "sslverify=1",
+        "sslcacert=/etc/pki/tls/certs/ca-bundle.crt",
+    ];
+
+    if required
+        .iter()
+        .all(|line| contents.lines().any(|value| value == *line))
+        && contents
+            .lines()
+            .any(|line| line == "gpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey")
+        && !contents.lines().any(|line| {
+            line == "repo_gpgcheck=0" || line == "gpgcheck=0" || line.starts_with("baseurl=http:")
+        })
+    {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            COMMAND_FAILED,
+            "Invalid CrowdSec RPM repository configuration",
+        ))
     }
 }
 
