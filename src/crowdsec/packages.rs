@@ -875,7 +875,8 @@ mod tests {
         apt_bouncer_package_arguments, apt_package_state, is_package_manager_command,
         package_manager_for_os_release, package_removal_message, stream_command_output,
         validate_rpm_repository_configuration, PackageManager, PackageState,
-        CROWDSEC_REMOVABLE_PACKAGES, FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
+        CROWDSEC_APT_REPOSITORY, CROWDSEC_REMOVABLE_PACKAGES, CROWDSEC_RPM_REPOSITORY_CONFIG_URL,
+        FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
     };
     use crate::{
         crowdsec::{
@@ -926,6 +927,38 @@ mod tests {
         assert!(
             validate_rpm_repository_configuration(&valid_rpm_repository_configuration()).is_ok()
         );
+    }
+
+    #[test]
+    fn uses_the_generic_rpm_any_packagecloud_configuration_url() {
+        assert_eq!(
+            CROWDSEC_RPM_REPOSITORY_CONFIG_URL,
+            "https://packagecloud.io/install/repositories/crowdsec/crowdsec/config_file.repo?os=rpm_any&dist=rpm_any&source=script"
+        );
+    }
+
+    #[test]
+    fn keeps_the_apt_repository_configuration_independent_from_rpm() {
+        assert!(CROWDSEC_APT_REPOSITORY
+            .contains("https://packagecloud.io/crowdsec/crowdsec/any any main"));
+        assert!(!CROWDSEC_APT_REPOSITORY.contains("rpm_any"));
+    }
+
+    #[test]
+    fn rejects_rpm_repository_configurations_missing_required_security_settings() {
+        let valid = valid_rpm_repository_configuration();
+
+        for invalid in [
+            valid.replacen("repo_gpgcheck=1", "", 1),
+            valid.replacen("sslverify=1", "sslverify=0", 1),
+            valid.replacen(
+                "gpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey",
+                "",
+                1,
+            ),
+        ] {
+            assert!(validate_rpm_repository_configuration(&invalid).is_err());
+        }
     }
 
     #[test]
