@@ -56,11 +56,13 @@ const APT_KEYRING_PATH: &str = "/etc/apt/keyrings/crowdsec_crowdsec-archive-keyr
 const APT_KEYRING_TEMP_PATH: &str = "/etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg.tmp";
 const APT_REPOSITORY_PATH: &str = "/etc/apt/sources.list.d/crowdsec_crowdsec.list";
 const RPM_REPOSITORY_PATH: &str = "/etc/yum.repos.d/crowdsec_crowdsec.repo";
+const RPM_REPOSITORY_TEMP_PATH: &str = "/etc/yum.repos.d/crowdsec_crowdsec.repo.tmp";
+const CROWDSEC_RPM_REPOSITORY_CONFIG_URL: &str =
+    "https://packagecloud.io/install/repositories/crowdsec/crowdsec/config_file.repo?os=rpm_any&dist=rpm_any&source=script";
 const CROWDSEC_GPG_KEY_URL: &str = "https://packagecloud.io/crowdsec/crowdsec/gpgkey";
 const APT_DPKG_FORCE_CONFOLD_OPTION: &str = "Dpkg::Options::=--force-confold";
 const APT_NONINTERACTIVE_ENVIRONMENT: (&str, &str) = ("DEBIAN_FRONTEND", "noninteractive");
 const CROWDSEC_APT_REPOSITORY: &str = "deb [signed-by=/etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg] https://packagecloud.io/crowdsec/crowdsec/any any main\ndeb-src [signed-by=/etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg] https://packagecloud.io/crowdsec/crowdsec/any any main\n";
-const CROWDSEC_RPM_REPOSITORY: &str = "[crowdsec_crowdsec]\nname=crowdsec_crowdsec\nbaseurl=https://packagecloud.io/crowdsec/crowdsec/rpm_any/rpm_any/$basearch\nrepo_gpgcheck=1\ngpgcheck=1\nenabled=1\ngpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey\n       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-EDE2C695EC9A5A5C.pub.gpg\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PackageManager {
@@ -69,6 +71,138 @@ enum PackageManager {
     Yum,
 }
 
+async fn download_rpm_repository_configuration(
+    progress: Option<&CrowdSecProgress>,
+) -> Result<String> {
+    let result = async {
+        run_command(
+            "/usr/bin/curl",
+            &[
+                "--fail",
+                "--silent",
+                "--show-error",
+                "--location",
+                "--output",
+                RPM_REPOSITORY_TEMP_PATH,
+                CROWDSEC_RPM_REPOSITORY_CONFIG_URL,
+            ],
+            progress,
+        )
+        .await?;
+
+        let contents = fs::read_to_string(RPM_REPOSITORY_TEMP_PATH)
+            .await
+            .map_err(FwcError::from)?;
+        validate_rpm_repository_configuration(&contents)?;
+
+        Ok(contents)
+    }
+    .await;
+    let _ = fs::remove_file(RPM_REPOSITORY_TEMP_PATH).await;
+
+    result
+}
+
+#[derive(Default)]
+struct RpmRepositorySection {
+    seen: bool,
+    name: bool,
+    baseurl: bool,
+    repo_gpgcheck: bool,
+    gpgcheck: bool,
+    enabled: bool,
+    sslverify: bool,
+    gpgkey: bool,
+}
+
+impl RpmRepositorySection {
+    fn is_complete(&self) -> bool {
+        self.seen
+            && self.name
+            && self.baseurl
+            && self.repo_gpgcheck
+            && self.gpgcheck
+            && self.enabled
+            && self.sslverify
+            && self.gpgkey
+    }
+}
+
+fn validate_rpm_repository_configuration(contents: &str) -> Result<()> {
+    let repository_base = "https://packagecloud.io/crowdsec/crowdsec/rpm_any/rpm_any";
+    let primary_baseurl = format!("baseurl={repository_base}/$basearch");
+    let source_baseurl = format!("baseurl={repository_base}/SRPMS");
+    let mut section = None;
+    let mut primary = RpmRepositorySection::default();
+    let mut source = RpmRepositorySection::default();
+
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some(name) = line
+            .strip_prefix('[')
+            .and_then(|line| line.strip_suffix(']'))
+        {
+            let state = match name {
+                "crowdsec_crowdsec" => &mut primary,
+                "crowdsec_crowdsec-source" => &mut source,
+                _ => return invalid_rpm_repository_configuration(),
+            };
+            if state.seen {
+                return invalid_rpm_repository_configuration();
+            }
+            state.seen = true;
+            section = Some(name);
+            continue;
+        }
+
+        let Some(section_name) = section else {
+            return invalid_rpm_repository_configuration();
+        };
+        let (state, expected_baseurl) = if section_name == "crowdsec_crowdsec" {
+            (&mut primary, &primary_baseurl)
+        } else {
+            (&mut source, &source_baseurl)
+        };
+        if line == format!("name={section_name}") {
+            state.name = true;
+        } else if line == expected_baseurl {
+            state.baseurl = true;
+        } else if line == "repo_gpgcheck=1" {
+            state.repo_gpgcheck = true;
+        } else if line == "gpgcheck=1" {
+            state.gpgcheck = true;
+        } else if line == "enabled=1" {
+            state.enabled = true;
+        } else if line == "sslverify=1" {
+            state.sslverify = true;
+        } else if line == "gpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey" {
+            state.gpgkey = true;
+        } else if line == "sslcacert=/etc/pki/tls/certs/ca-bundle.crt"
+            || line
+                .strip_prefix("metadata_expire=")
+                .is_some_and(|value| value.parse::<u64>().is_ok())
+            || line.starts_with("https://packagecloud.io/crowdsec/crowdsec/gpgkey/")
+        {
+        } else {
+            return invalid_rpm_repository_configuration();
+        }
+    }
+
+    if primary.is_complete() && source.is_complete() {
+        Ok(())
+    } else {
+        invalid_rpm_repository_configuration()
+    }
+}
+fn invalid_rpm_repository_configuration<T>() -> Result<T> {
+    Err(FwcError::crowdsec(
+        COMMAND_FAILED,
+        "Invalid CrowdSec RPM repository configuration",
+    ))
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PackageState {
     Installed,
@@ -323,7 +457,6 @@ fn package_manager_for_os_release(
         _ => None,
     }
 }
-
 fn package_removal_message(removed_packages: &[&str], absent_packages: &[&str]) -> String {
     match (removed_packages.is_empty(), absent_packages.is_empty()) {
         (true, false) => "CrowdSec packages are already absent".to_string(),
@@ -344,12 +477,15 @@ async fn configure_repository(
     match package_manager {
         PackageManager::Apt => configure_apt_repository(progress).await,
         PackageManager::Dnf | PackageManager::Yum => {
-            write_if_changed(RPM_REPOSITORY_PATH, CROWDSEC_RPM_REPOSITORY).await?;
-            Ok(())
+            debug!(
+                "Preparing CrowdSec RPM repository from {}",
+                CROWDSEC_RPM_REPOSITORY_CONFIG_URL
+            );
+            let repository = download_rpm_repository_configuration(progress).await?;
+            write_if_changed(RPM_REPOSITORY_PATH, &repository).await
         }
     }
 }
-
 async fn configure_apt_repository(progress: Option<&CrowdSecProgress>) -> Result<()> {
     if apt_repository_is_configured().await {
         return run_command("/usr/bin/apt-get", &["update"], progress).await;
@@ -738,7 +874,8 @@ mod tests {
     use super::{
         apt_bouncer_package_arguments, apt_package_state, is_package_manager_command,
         package_manager_for_os_release, package_removal_message, stream_command_output,
-        PackageManager, PackageState, CROWDSEC_REMOVABLE_PACKAGES,
+        validate_rpm_repository_configuration, PackageManager, PackageState,
+        CROWDSEC_APT_REPOSITORY, CROWDSEC_REMOVABLE_PACKAGES, CROWDSEC_RPM_REPOSITORY_CONFIG_URL,
         FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
     };
     use crate::{
@@ -751,7 +888,7 @@ mod tests {
     };
 
     #[test]
-    fn selects_supported_package_managers() {
+    fn selects_supported_package_managers_without_a_distribution_version() {
         assert_eq!(
             package_manager_for_os_release("ubuntu", true, false, false),
             Some(PackageManager::Apt)
@@ -761,8 +898,16 @@ mod tests {
             Some(PackageManager::Dnf)
         );
         assert_eq!(
+            package_manager_for_os_release("rhel", false, true, false),
+            Some(PackageManager::Dnf)
+        );
+        assert_eq!(
             package_manager_for_os_release("centos", false, false, true),
             Some(PackageManager::Yum)
+        );
+        assert_eq!(
+            package_manager_for_os_release("fedora", false, true, false),
+            Some(PackageManager::Dnf)
         );
         assert_eq!(
             package_manager_for_os_release("alpine", false, false, false),
@@ -770,6 +915,65 @@ mod tests {
         );
     }
 
+    fn valid_rpm_repository_configuration() -> String {
+        let base = "https://packagecloud.io/crowdsec/crowdsec/rpm_any/rpm_any";
+        format!(
+            "[crowdsec_crowdsec]\nname=crowdsec_crowdsec\nbaseurl={base}/$basearch\nrepo_gpgcheck=1\ngpgcheck=1\nenabled=1\ngpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey\n       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-C822EDD6B39954A1.pub.gpg\nsslverify=1\nmetadata_expire=300\n\n[crowdsec_crowdsec-source]\nname=crowdsec_crowdsec-source\nbaseurl={base}/SRPMS\nrepo_gpgcheck=1\ngpgcheck=1\nenabled=1\ngpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey\n       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-FED78314A2468CCF.pub.gpg\nsslverify=1\nmetadata_expire=300\n"
+        )
+    }
+
+    #[test]
+    fn accepts_the_expected_packagecloud_rpm_repository_configuration() {
+        assert!(
+            validate_rpm_repository_configuration(&valid_rpm_repository_configuration()).is_ok()
+        );
+    }
+
+    #[test]
+    fn uses_the_generic_rpm_any_packagecloud_configuration_url() {
+        assert_eq!(
+            CROWDSEC_RPM_REPOSITORY_CONFIG_URL,
+            "https://packagecloud.io/install/repositories/crowdsec/crowdsec/config_file.repo?os=rpm_any&dist=rpm_any&source=script"
+        );
+    }
+
+    #[test]
+    fn keeps_the_apt_repository_configuration_independent_from_rpm() {
+        assert!(CROWDSEC_APT_REPOSITORY
+            .contains("https://packagecloud.io/crowdsec/crowdsec/any any main"));
+        assert!(!CROWDSEC_APT_REPOSITORY.contains("rpm_any"));
+    }
+
+    #[test]
+    fn rejects_rpm_repository_configurations_missing_required_security_settings() {
+        let valid = valid_rpm_repository_configuration();
+
+        for invalid in [
+            valid.replacen("repo_gpgcheck=1", "", 1),
+            valid.replacen("sslverify=1", "sslverify=0", 1),
+            valid.replacen(
+                "gpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey",
+                "",
+                1,
+            ),
+        ] {
+            assert!(validate_rpm_repository_configuration(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_an_invalid_packagecloud_rpm_repository_configuration() {
+        let valid = valid_rpm_repository_configuration();
+
+        assert!(
+            validate_rpm_repository_configuration(&valid.replace("gpgcheck=1", "gpgcheck=0"))
+                .is_err()
+        );
+        assert!(validate_rpm_repository_configuration(&format!(
+            "{valid}\n[untrusted]\nbaseurl=https://example.invalid\n"
+        ))
+        .is_err());
+    }
     #[test]
     fn removal_message_reports_idempotent_results() {
         assert_eq!(
