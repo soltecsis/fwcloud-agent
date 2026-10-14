@@ -65,8 +65,20 @@ const CROWDSEC_RPM_REPOSITORY: &str = "[crowdsec_crowdsec]\nname=crowdsec_crowds
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PackageManager {
     Apt,
-    Dnf,
-    Yum,
+    Dnf(RpmRepositoryTarget),
+    Yum(RpmRepositoryTarget),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RpmRepositoryTarget {
+    distribution: RpmRepositoryDistribution,
+    major_version: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RpmRepositoryDistribution {
+    EnterpriseLinux,
+    Fedora,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,9 +307,11 @@ async fn detect_package_manager() -> Result<PackageManager> {
         FwcError::crowdsec(UNSUPPORTED_OS, "Unable to identify the operating system")
     })?;
     let distribution = os_release_value(&os_release, "ID").unwrap_or_default();
+    let version_id = os_release_value(&os_release, "VERSION_ID").unwrap_or_default();
 
     package_manager_for_os_release(
         &distribution,
+        &version_id,
         command_exists("/usr/bin/apt-get"),
         command_exists("/usr/bin/dnf"),
         command_exists("/usr/bin/yum"),
@@ -312,16 +326,40 @@ async fn detect_package_manager() -> Result<PackageManager> {
 
 fn package_manager_for_os_release(
     distribution: &str,
+    version_id: &str,
     apt_available: bool,
     dnf_available: bool,
     yum_available: bool,
 ) -> Option<PackageManager> {
     match distribution {
         "debian" | "ubuntu" if apt_available => Some(PackageManager::Apt),
-        "rhel" | "centos" | "rocky" | "fedora" if dnf_available => Some(PackageManager::Dnf),
-        "rhel" | "centos" | "rocky" | "fedora" if yum_available => Some(PackageManager::Yum),
+        "rhel" | "centos" | "rocky" | "fedora" => {
+            let target = rpm_repository_target(distribution, version_id)?;
+
+            if dnf_available {
+                Some(PackageManager::Dnf(target))
+            } else if yum_available {
+                Some(PackageManager::Yum(target))
+            } else {
+                None
+            }
+        }
         _ => None,
     }
+}
+
+fn rpm_repository_target(distribution: &str, version_id: &str) -> Option<RpmRepositoryTarget> {
+    let major_version = version_id.split('.').next()?.parse().ok()?;
+    let distribution = match distribution {
+        "rhel" | "centos" | "rocky" => RpmRepositoryDistribution::EnterpriseLinux,
+        "fedora" => RpmRepositoryDistribution::Fedora,
+        _ => return None,
+    };
+
+    Some(RpmRepositoryTarget {
+        distribution,
+        major_version,
+    })
 }
 
 fn package_removal_message(removed_packages: &[&str], absent_packages: &[&str]) -> String {
@@ -343,7 +381,11 @@ async fn configure_repository(
 ) -> Result<()> {
     match package_manager {
         PackageManager::Apt => configure_apt_repository(progress).await,
-        PackageManager::Dnf | PackageManager::Yum => {
+        PackageManager::Dnf(target) | PackageManager::Yum(target) => {
+            debug!(
+                "Preparing CrowdSec RPM repository for {:?} {}",
+                target.distribution, target.major_version
+            );
             write_if_changed(RPM_REPOSITORY_PATH, CROWDSEC_RPM_REPOSITORY).await?;
             Ok(())
         }
@@ -406,7 +448,9 @@ async fn package_state(package_manager: PackageManager, package: &str) -> Result
             "/usr/bin/dpkg-query",
             vec!["--show", "--showformat=${db:Status-Status}", package],
         ),
-        PackageManager::Dnf | PackageManager::Yum => ("/usr/bin/rpm", vec!["--query", package]),
+        PackageManager::Dnf(_) | PackageManager::Yum(_) => {
+            ("/usr/bin/rpm", vec!["--query", package])
+        }
     };
 
     let output = run_command_allow_failure(program, &arguments, None).await?;
@@ -416,7 +460,7 @@ async fn package_state(package_manager: PackageManager, package: &str) -> Result
             output.status.success(),
             String::from_utf8_lossy(&output.stdout).trim(),
         )),
-        PackageManager::Dnf | PackageManager::Yum => Ok(if output.status.success() {
+        PackageManager::Dnf(_) | PackageManager::Yum(_) => Ok(if output.status.success() {
             PackageState::Installed
         } else {
             PackageState::Absent
@@ -443,8 +487,8 @@ async fn install_package(
 ) -> Result<()> {
     let (program, arguments): (&str, Vec<&str>) = match package_manager {
         PackageManager::Apt => ("/usr/bin/apt-get", vec!["install", "--yes", package]),
-        PackageManager::Dnf => ("/usr/bin/dnf", vec!["install", "--assumeyes", package]),
-        PackageManager::Yum => ("/usr/bin/yum", vec!["install", "--assumeyes", package]),
+        PackageManager::Dnf(_) => ("/usr/bin/dnf", vec!["install", "--assumeyes", package]),
+        PackageManager::Yum(_) => ("/usr/bin/yum", vec!["install", "--assumeyes", package]),
     };
 
     run_command(program, &arguments, progress).await
@@ -466,7 +510,7 @@ async fn install_bouncer_package(
             )
             .await
         }
-        PackageManager::Dnf | PackageManager::Yum => {
+        PackageManager::Dnf(_) | PackageManager::Yum(_) => {
             install_package(package_manager, package, progress).await
         }
     }
@@ -479,8 +523,8 @@ async fn remove_package(
 ) -> Result<()> {
     let (program, arguments): (&str, Vec<&str>) = match package_manager {
         PackageManager::Apt => ("/usr/bin/apt-get", vec!["remove", "--yes", package]),
-        PackageManager::Dnf => ("/usr/bin/dnf", vec!["remove", "--assumeyes", package]),
-        PackageManager::Yum => ("/usr/bin/yum", vec!["remove", "--assumeyes", package]),
+        PackageManager::Dnf(_) => ("/usr/bin/dnf", vec!["remove", "--assumeyes", package]),
+        PackageManager::Yum(_) => ("/usr/bin/yum", vec!["remove", "--assumeyes", package]),
     };
 
     run_command(program, &arguments, progress).await
@@ -493,8 +537,8 @@ async fn purge_package(
 ) -> Result<()> {
     let (program, arguments): (&str, Vec<&str>) = match package_manager {
         PackageManager::Apt => ("/usr/bin/apt-get", vec!["purge", "--yes", package]),
-        PackageManager::Dnf => ("/usr/bin/dnf", vec!["remove", "--assumeyes", package]),
-        PackageManager::Yum => ("/usr/bin/yum", vec!["remove", "--assumeyes", package]),
+        PackageManager::Dnf(_) => ("/usr/bin/dnf", vec!["remove", "--assumeyes", package]),
+        PackageManager::Yum(_) => ("/usr/bin/yum", vec!["remove", "--assumeyes", package]),
     };
 
     run_command(program, &arguments, progress).await
@@ -516,7 +560,7 @@ async fn remove_bouncer_package(
             )
             .await
         }
-        PackageManager::Dnf | PackageManager::Yum => {
+        PackageManager::Dnf(_) | PackageManager::Yum(_) => {
             remove_package(package_manager, package, progress).await
         }
     }
@@ -538,7 +582,7 @@ async fn purge_bouncer_package(
             )
             .await
         }
-        PackageManager::Dnf | PackageManager::Yum => {
+        PackageManager::Dnf(_) | PackageManager::Yum(_) => {
             purge_package(package_manager, package, progress).await
         }
     }
@@ -738,8 +782,8 @@ mod tests {
     use super::{
         apt_bouncer_package_arguments, apt_package_state, is_package_manager_command,
         package_manager_for_os_release, package_removal_message, stream_command_output,
-        PackageManager, PackageState, CROWDSEC_REMOVABLE_PACKAGES,
-        FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
+        PackageManager, PackageState, RpmRepositoryDistribution, RpmRepositoryTarget,
+        CROWDSEC_REMOVABLE_PACKAGES, FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
     };
     use crate::{
         crowdsec::{
@@ -753,19 +797,36 @@ mod tests {
     #[test]
     fn selects_supported_package_managers() {
         assert_eq!(
-            package_manager_for_os_release("ubuntu", true, false, false),
+            package_manager_for_os_release("ubuntu", "", true, false, false),
             Some(PackageManager::Apt)
         );
         assert_eq!(
-            package_manager_for_os_release("rocky", false, true, true),
-            Some(PackageManager::Dnf)
+            package_manager_for_os_release("rocky", "9.5", false, true, true),
+            Some(PackageManager::Dnf(RpmRepositoryTarget {
+                distribution: RpmRepositoryDistribution::EnterpriseLinux,
+                major_version: 9,
+            }))
         );
         assert_eq!(
-            package_manager_for_os_release("centos", false, false, true),
-            Some(PackageManager::Yum)
+            package_manager_for_os_release("centos", "8", false, false, true),
+            Some(PackageManager::Yum(RpmRepositoryTarget {
+                distribution: RpmRepositoryDistribution::EnterpriseLinux,
+                major_version: 8,
+            }))
         );
         assert_eq!(
-            package_manager_for_os_release("alpine", false, false, false),
+            package_manager_for_os_release("fedora", "40", false, true, false),
+            Some(PackageManager::Dnf(RpmRepositoryTarget {
+                distribution: RpmRepositoryDistribution::Fedora,
+                major_version: 40,
+            }))
+        );
+        assert_eq!(
+            package_manager_for_os_release("rocky", "", false, true, false),
+            None
+        );
+        assert_eq!(
+            package_manager_for_os_release("alpine", "", false, false, false),
             None
         );
     }
