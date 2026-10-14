@@ -132,43 +132,90 @@ async fn download_rpm_repository_configuration(
     Ok(contents)
 }
 
-#[allow(dead_code)]
 fn validate_rpm_repository_configuration(
     target: RpmRepositoryTarget,
     contents: &str,
 ) -> Result<()> {
-    let expected_baseurl = format!(
-        "baseurl=https://packagecloud.io/crowdsec/crowdsec/{}/{}/",
+    let repository_base = format!(
+        "https://packagecloud.io/crowdsec/crowdsec/{}/{}",
         target.packagecloud_distribution(),
         target.major_version
     );
-    let required = [
-        "[crowdsec_crowdsec]",
-        expected_baseurl.as_str(),
-        "repo_gpgcheck=1",
-        "gpgcheck=1",
-        "enabled=1",
-        "sslverify=1",
-        "sslcacert=/etc/pki/tls/certs/ca-bundle.crt",
-    ];
+    let primary_baseurl = format!("baseurl={repository_base}/$basearch");
+    let source_baseurl = format!("baseurl={repository_base}/SRPMS");
+    let mut section = None;
+    let mut primary_seen = false;
+    let mut source_seen = false;
+    let mut generic_key_seen = false;
 
-    if required
-        .iter()
-        .all(|line| contents.lines().any(|value| value == *line))
-        && contents
-            .lines()
-            .any(|line| line == "gpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey")
-        && !contents.lines().any(|line| {
-            line == "repo_gpgcheck=0" || line == "gpgcheck=0" || line.starts_with("baseurl=http:")
-        })
-    {
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some(name) = line
+            .strip_prefix('[')
+            .and_then(|line| line.strip_suffix(']'))
+        {
+            section = match name {
+                "crowdsec_crowdsec" => {
+                    primary_seen = true;
+                    Some(name)
+                }
+                "crowdsec_crowdsec-source" => {
+                    source_seen = true;
+                    Some(name)
+                }
+                _ => return invalid_rpm_repository_configuration(),
+            };
+            continue;
+        }
+
+        let Some(section_name) = section else {
+            return invalid_rpm_repository_configuration();
+        };
+        let expected_name = format!("name={section_name}");
+        let expected_baseurl = if section_name == "crowdsec_crowdsec" {
+            &primary_baseurl
+        } else {
+            &source_baseurl
+        };
+        let valid = line == expected_name
+            || line == expected_baseurl
+            || matches!(
+                line,
+                "repo_gpgcheck=1"
+                    | "gpgcheck=1"
+                    | "enabled=1"
+                    | "sslverify=1"
+                    | "sslcacert=/etc/pki/tls/certs/ca-bundle.crt"
+            )
+            || line
+                .strip_prefix("metadata_expire=")
+                .is_some_and(|value| value.parse::<u64>().is_ok())
+            || line == "gpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey"
+            || line.starts_with("https://packagecloud.io/crowdsec/crowdsec/gpgkey/");
+
+        if line == "gpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey" {
+            generic_key_seen = true;
+        }
+        if !valid {
+            return invalid_rpm_repository_configuration();
+        }
+    }
+
+    if primary_seen && source_seen && generic_key_seen {
         Ok(())
     } else {
-        Err(FwcError::crowdsec(
-            COMMAND_FAILED,
-            "Invalid CrowdSec RPM repository configuration",
-        ))
+        invalid_rpm_repository_configuration()
     }
+}
+
+fn invalid_rpm_repository_configuration<T>() -> Result<T> {
+    Err(FwcError::crowdsec(
+        COMMAND_FAILED,
+        "Invalid CrowdSec RPM repository configuration",
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
