@@ -63,7 +63,6 @@ const CROWDSEC_GPG_KEY_URL: &str = "https://packagecloud.io/crowdsec/crowdsec/gp
 const APT_DPKG_FORCE_CONFOLD_OPTION: &str = "Dpkg::Options::=--force-confold";
 const APT_NONINTERACTIVE_ENVIRONMENT: (&str, &str) = ("DEBIAN_FRONTEND", "noninteractive");
 const CROWDSEC_APT_REPOSITORY: &str = "deb [signed-by=/etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg] https://packagecloud.io/crowdsec/crowdsec/any any main\ndeb-src [signed-by=/etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg] https://packagecloud.io/crowdsec/crowdsec/any any main\n";
-const CROWDSEC_RPM_REPOSITORY: &str = "[crowdsec_crowdsec]\nname=crowdsec_crowdsec\nbaseurl=https://packagecloud.io/crowdsec/crowdsec/rpm_any/rpm_any/$basearch\nrepo_gpgcheck=1\ngpgcheck=1\nenabled=1\ngpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey\n       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-EDE2C695EC9A5A5C.pub.gpg\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PackageManager {
@@ -101,35 +100,38 @@ impl RpmRepositoryTarget {
     }
 }
 
-#[allow(dead_code)]
 async fn download_rpm_repository_configuration(
     target: RpmRepositoryTarget,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<String> {
     let url = target.configuration_url();
-    run_command(
-        "/usr/bin/curl",
-        &[
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--location",
-            "--output",
-            RPM_REPOSITORY_TEMP_PATH,
-            &url,
-        ],
-        progress,
-    )
-    .await?;
+    let result = async {
+        run_command(
+            "/usr/bin/curl",
+            &[
+                "--fail",
+                "--silent",
+                "--show-error",
+                "--location",
+                "--output",
+                RPM_REPOSITORY_TEMP_PATH,
+                &url,
+            ],
+            progress,
+        )
+        .await?;
 
-    let contents = fs::read_to_string(RPM_REPOSITORY_TEMP_PATH)
-        .await
-        .map_err(FwcError::from);
+        let contents = fs::read_to_string(RPM_REPOSITORY_TEMP_PATH)
+            .await
+            .map_err(FwcError::from)?;
+        validate_rpm_repository_configuration(target, &contents)?;
+
+        Ok(contents)
+    }
+    .await;
     let _ = fs::remove_file(RPM_REPOSITORY_TEMP_PATH).await;
-    let contents = contents?;
-    validate_rpm_repository_configuration(target, &contents)?;
 
-    Ok(contents)
+    result
 }
 
 fn validate_rpm_repository_configuration(
@@ -525,7 +527,8 @@ async fn configure_repository(
                 target.major_version,
                 target.configuration_url()
             );
-            write_if_changed(RPM_REPOSITORY_PATH, CROWDSEC_RPM_REPOSITORY).await?;
+            let repository = download_rpm_repository_configuration(target, progress).await?;
+            write_if_changed(RPM_REPOSITORY_PATH, &repository).await?;
             Ok(())
         }
     }
@@ -921,8 +924,9 @@ mod tests {
     use super::{
         apt_bouncer_package_arguments, apt_package_state, is_package_manager_command,
         package_manager_for_os_release, package_removal_message, stream_command_output,
-        PackageManager, PackageState, RpmRepositoryDistribution, RpmRepositoryTarget,
-        CROWDSEC_REMOVABLE_PACKAGES, FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
+        validate_rpm_repository_configuration, PackageManager, PackageState,
+        RpmRepositoryDistribution, RpmRepositoryTarget, CROWDSEC_REMOVABLE_PACKAGES,
+        FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
     };
     use crate::{
         crowdsec::{
@@ -941,6 +945,13 @@ mod tests {
         );
         assert_eq!(
             package_manager_for_os_release("rocky", "9.5", false, true, true),
+            Some(PackageManager::Dnf(RpmRepositoryTarget {
+                distribution: RpmRepositoryDistribution::EnterpriseLinux,
+                major_version: 9,
+            }))
+        );
+        assert_eq!(
+            package_manager_for_os_release("rhel", "9.4", false, true, false),
             Some(PackageManager::Dnf(RpmRepositoryTarget {
                 distribution: RpmRepositoryDistribution::EnterpriseLinux,
                 major_version: 9,
@@ -988,6 +999,51 @@ mod tests {
             .configuration_url(),
             "https://packagecloud.io/install/repositories/crowdsec/crowdsec/config_file.repo?os=fedora&dist=40&source=script"
         );
+    }
+
+    fn valid_rpm_repository_configuration(target: RpmRepositoryTarget) -> String {
+        let base = format!(
+            "https://packagecloud.io/crowdsec/crowdsec/{}/{}",
+            target.packagecloud_distribution(),
+            target.major_version
+        );
+        format!(
+            "[crowdsec_crowdsec]\nname=crowdsec_crowdsec\nbaseurl={base}/$basearch\nrepo_gpgcheck=1\ngpgcheck=1\nenabled=1\ngpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey\n       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-C822EDD6B39954A1.pub.gpg\nsslverify=1\nsslcacert=/etc/pki/tls/certs/ca-bundle.crt\nmetadata_expire=300\n\n[crowdsec_crowdsec-source]\nname=crowdsec_crowdsec-source\nbaseurl={base}/SRPMS\nrepo_gpgcheck=1\ngpgcheck=1\nenabled=1\ngpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey\n       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-FED78314A2468CCF.pub.gpg\nsslverify=1\nsslcacert=/etc/pki/tls/certs/ca-bundle.crt\nmetadata_expire=300\n"
+        )
+    }
+
+    #[test]
+    fn accepts_the_expected_packagecloud_rpm_repository_configuration() {
+        let target = RpmRepositoryTarget {
+            distribution: RpmRepositoryDistribution::EnterpriseLinux,
+            major_version: 9,
+        };
+
+        assert!(validate_rpm_repository_configuration(
+            target,
+            &valid_rpm_repository_configuration(target)
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn rejects_an_invalid_packagecloud_rpm_repository_configuration() {
+        let target = RpmRepositoryTarget {
+            distribution: RpmRepositoryDistribution::EnterpriseLinux,
+            major_version: 9,
+        };
+        let valid = valid_rpm_repository_configuration(target);
+
+        assert!(validate_rpm_repository_configuration(
+            target,
+            &valid.replace("gpgcheck=1", "gpgcheck=0")
+        )
+        .is_err());
+        assert!(validate_rpm_repository_configuration(
+            target,
+            &format!("{valid}\n[untrusted]\nbaseurl=https://example.invalid\n")
+        )
+        .is_err());
     }
 
     #[test]
