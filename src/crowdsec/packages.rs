@@ -58,7 +58,7 @@ const APT_REPOSITORY_PATH: &str = "/etc/apt/sources.list.d/crowdsec_crowdsec.lis
 const RPM_REPOSITORY_PATH: &str = "/etc/yum.repos.d/crowdsec_crowdsec.repo";
 const RPM_REPOSITORY_TEMP_PATH: &str = "/etc/yum.repos.d/crowdsec_crowdsec.repo.tmp";
 const CROWDSEC_RPM_REPOSITORY_CONFIG_URL: &str =
-    "https://packagecloud.io/install/repositories/crowdsec/crowdsec/config_file.repo";
+    "https://packagecloud.io/install/repositories/crowdsec/crowdsec/config_file.repo?os=rpm_any&dist=rpm_any&source=script";
 const CROWDSEC_GPG_KEY_URL: &str = "https://packagecloud.io/crowdsec/crowdsec/gpgkey";
 const APT_DPKG_FORCE_CONFOLD_OPTION: &str = "Dpkg::Options::=--force-confold";
 const APT_NONINTERACTIVE_ENVIRONMENT: (&str, &str) = ("DEBIAN_FRONTEND", "noninteractive");
@@ -67,44 +67,13 @@ const CROWDSEC_APT_REPOSITORY: &str = "deb [signed-by=/etc/apt/keyrings/crowdsec
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PackageManager {
     Apt,
-    Dnf(RpmRepositoryTarget),
-    Yum(RpmRepositoryTarget),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RpmRepositoryTarget {
-    distribution: RpmRepositoryDistribution,
-    major_version: u16,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RpmRepositoryDistribution {
-    EnterpriseLinux,
-    Fedora,
-}
-
-impl RpmRepositoryTarget {
-    fn packagecloud_distribution(self) -> &'static str {
-        match self.distribution {
-            RpmRepositoryDistribution::EnterpriseLinux => "el",
-            RpmRepositoryDistribution::Fedora => "fedora",
-        }
-    }
-
-    fn configuration_url(self) -> String {
-        format!(
-            "{CROWDSEC_RPM_REPOSITORY_CONFIG_URL}?os={}&dist={}&source=script",
-            self.packagecloud_distribution(),
-            self.major_version
-        )
-    }
+    Dnf,
+    Yum,
 }
 
 async fn download_rpm_repository_configuration(
-    target: RpmRepositoryTarget,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<String> {
-    let url = target.configuration_url();
     let result = async {
         run_command(
             "/usr/bin/curl",
@@ -115,7 +84,7 @@ async fn download_rpm_repository_configuration(
                 "--location",
                 "--output",
                 RPM_REPOSITORY_TEMP_PATH,
-                &url,
+                CROWDSEC_RPM_REPOSITORY_CONFIG_URL,
             ],
             progress,
         )
@@ -124,7 +93,7 @@ async fn download_rpm_repository_configuration(
         let contents = fs::read_to_string(RPM_REPOSITORY_TEMP_PATH)
             .await
             .map_err(FwcError::from)?;
-        validate_rpm_repository_configuration(target, &contents)?;
+        validate_rpm_repository_configuration(&contents)?;
 
         Ok(contents)
     }
@@ -134,15 +103,8 @@ async fn download_rpm_repository_configuration(
     result
 }
 
-fn validate_rpm_repository_configuration(
-    target: RpmRepositoryTarget,
-    contents: &str,
-) -> Result<()> {
-    let repository_base = format!(
-        "https://packagecloud.io/crowdsec/crowdsec/{}/{}",
-        target.packagecloud_distribution(),
-        target.major_version
-    );
+fn validate_rpm_repository_configuration(contents: &str) -> Result<()> {
+    let repository_base = "https://packagecloud.io/crowdsec/crowdsec/rpm_any/rpm_any";
     let primary_baseurl = format!("baseurl={repository_base}/$basearch");
     let source_baseurl = format!("baseurl={repository_base}/SRPMS");
     let mut section = None;
@@ -219,7 +181,6 @@ fn invalid_rpm_repository_configuration<T>() -> Result<T> {
         "Invalid CrowdSec RPM repository configuration",
     ))
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PackageState {
     Installed,
@@ -446,11 +407,9 @@ async fn detect_package_manager() -> Result<PackageManager> {
         FwcError::crowdsec(UNSUPPORTED_OS, "Unable to identify the operating system")
     })?;
     let distribution = os_release_value(&os_release, "ID").unwrap_or_default();
-    let version_id = os_release_value(&os_release, "VERSION_ID").unwrap_or_default();
 
     package_manager_for_os_release(
         &distribution,
-        &version_id,
         command_exists("/usr/bin/apt-get"),
         command_exists("/usr/bin/dnf"),
         command_exists("/usr/bin/yum"),
@@ -465,42 +424,17 @@ async fn detect_package_manager() -> Result<PackageManager> {
 
 fn package_manager_for_os_release(
     distribution: &str,
-    version_id: &str,
     apt_available: bool,
     dnf_available: bool,
     yum_available: bool,
 ) -> Option<PackageManager> {
     match distribution {
         "debian" | "ubuntu" if apt_available => Some(PackageManager::Apt),
-        "rhel" | "centos" | "rocky" | "fedora" => {
-            let target = rpm_repository_target(distribution, version_id)?;
-
-            if dnf_available {
-                Some(PackageManager::Dnf(target))
-            } else if yum_available {
-                Some(PackageManager::Yum(target))
-            } else {
-                None
-            }
-        }
+        "rhel" | "centos" | "rocky" | "fedora" if dnf_available => Some(PackageManager::Dnf),
+        "rhel" | "centos" | "rocky" | "fedora" if yum_available => Some(PackageManager::Yum),
         _ => None,
     }
 }
-
-fn rpm_repository_target(distribution: &str, version_id: &str) -> Option<RpmRepositoryTarget> {
-    let major_version = version_id.split('.').next()?.parse().ok()?;
-    let distribution = match distribution {
-        "rhel" | "centos" | "rocky" => RpmRepositoryDistribution::EnterpriseLinux,
-        "fedora" => RpmRepositoryDistribution::Fedora,
-        _ => return None,
-    };
-
-    Some(RpmRepositoryTarget {
-        distribution,
-        major_version,
-    })
-}
-
 fn package_removal_message(removed_packages: &[&str], absent_packages: &[&str]) -> String {
     match (removed_packages.is_empty(), absent_packages.is_empty()) {
         (true, false) => "CrowdSec packages are already absent".to_string(),
@@ -520,20 +454,16 @@ async fn configure_repository(
 ) -> Result<()> {
     match package_manager {
         PackageManager::Apt => configure_apt_repository(progress).await,
-        PackageManager::Dnf(target) | PackageManager::Yum(target) => {
+        PackageManager::Dnf | PackageManager::Yum => {
             debug!(
-                "Preparing CrowdSec RPM repository for {:?} {} from {}",
-                target.distribution,
-                target.major_version,
-                target.configuration_url()
+                "Preparing CrowdSec RPM repository from {}",
+                CROWDSEC_RPM_REPOSITORY_CONFIG_URL
             );
-            let repository = download_rpm_repository_configuration(target, progress).await?;
-            write_if_changed(RPM_REPOSITORY_PATH, &repository).await?;
-            Ok(())
+            let repository = download_rpm_repository_configuration(progress).await?;
+            write_if_changed(RPM_REPOSITORY_PATH, &repository).await
         }
     }
 }
-
 async fn configure_apt_repository(progress: Option<&CrowdSecProgress>) -> Result<()> {
     if apt_repository_is_configured().await {
         return run_command("/usr/bin/apt-get", &["update"], progress).await;
@@ -590,9 +520,7 @@ async fn package_state(package_manager: PackageManager, package: &str) -> Result
             "/usr/bin/dpkg-query",
             vec!["--show", "--showformat=${db:Status-Status}", package],
         ),
-        PackageManager::Dnf(_) | PackageManager::Yum(_) => {
-            ("/usr/bin/rpm", vec!["--query", package])
-        }
+        PackageManager::Dnf | PackageManager::Yum => ("/usr/bin/rpm", vec!["--query", package]),
     };
 
     let output = run_command_allow_failure(program, &arguments, None).await?;
@@ -602,7 +530,7 @@ async fn package_state(package_manager: PackageManager, package: &str) -> Result
             output.status.success(),
             String::from_utf8_lossy(&output.stdout).trim(),
         )),
-        PackageManager::Dnf(_) | PackageManager::Yum(_) => Ok(if output.status.success() {
+        PackageManager::Dnf | PackageManager::Yum => Ok(if output.status.success() {
             PackageState::Installed
         } else {
             PackageState::Absent
@@ -629,8 +557,8 @@ async fn install_package(
 ) -> Result<()> {
     let (program, arguments): (&str, Vec<&str>) = match package_manager {
         PackageManager::Apt => ("/usr/bin/apt-get", vec!["install", "--yes", package]),
-        PackageManager::Dnf(_) => ("/usr/bin/dnf", vec!["install", "--assumeyes", package]),
-        PackageManager::Yum(_) => ("/usr/bin/yum", vec!["install", "--assumeyes", package]),
+        PackageManager::Dnf => ("/usr/bin/dnf", vec!["install", "--assumeyes", package]),
+        PackageManager::Yum => ("/usr/bin/yum", vec!["install", "--assumeyes", package]),
     };
 
     run_command(program, &arguments, progress).await
@@ -652,7 +580,7 @@ async fn install_bouncer_package(
             )
             .await
         }
-        PackageManager::Dnf(_) | PackageManager::Yum(_) => {
+        PackageManager::Dnf | PackageManager::Yum => {
             install_package(package_manager, package, progress).await
         }
     }
@@ -665,8 +593,8 @@ async fn remove_package(
 ) -> Result<()> {
     let (program, arguments): (&str, Vec<&str>) = match package_manager {
         PackageManager::Apt => ("/usr/bin/apt-get", vec!["remove", "--yes", package]),
-        PackageManager::Dnf(_) => ("/usr/bin/dnf", vec!["remove", "--assumeyes", package]),
-        PackageManager::Yum(_) => ("/usr/bin/yum", vec!["remove", "--assumeyes", package]),
+        PackageManager::Dnf => ("/usr/bin/dnf", vec!["remove", "--assumeyes", package]),
+        PackageManager::Yum => ("/usr/bin/yum", vec!["remove", "--assumeyes", package]),
     };
 
     run_command(program, &arguments, progress).await
@@ -679,8 +607,8 @@ async fn purge_package(
 ) -> Result<()> {
     let (program, arguments): (&str, Vec<&str>) = match package_manager {
         PackageManager::Apt => ("/usr/bin/apt-get", vec!["purge", "--yes", package]),
-        PackageManager::Dnf(_) => ("/usr/bin/dnf", vec!["remove", "--assumeyes", package]),
-        PackageManager::Yum(_) => ("/usr/bin/yum", vec!["remove", "--assumeyes", package]),
+        PackageManager::Dnf => ("/usr/bin/dnf", vec!["remove", "--assumeyes", package]),
+        PackageManager::Yum => ("/usr/bin/yum", vec!["remove", "--assumeyes", package]),
     };
 
     run_command(program, &arguments, progress).await
@@ -702,7 +630,7 @@ async fn remove_bouncer_package(
             )
             .await
         }
-        PackageManager::Dnf(_) | PackageManager::Yum(_) => {
+        PackageManager::Dnf | PackageManager::Yum => {
             remove_package(package_manager, package, progress).await
         }
     }
@@ -724,7 +652,7 @@ async fn purge_bouncer_package(
             )
             .await
         }
-        PackageManager::Dnf(_) | PackageManager::Yum(_) => {
+        PackageManager::Dnf | PackageManager::Yum => {
             purge_package(package_manager, package, progress).await
         }
     }
@@ -925,8 +853,7 @@ mod tests {
         apt_bouncer_package_arguments, apt_package_state, is_package_manager_command,
         package_manager_for_os_release, package_removal_message, stream_command_output,
         validate_rpm_repository_configuration, PackageManager, PackageState,
-        RpmRepositoryDistribution, RpmRepositoryTarget, CROWDSEC_REMOVABLE_PACKAGES,
-        FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
+        CROWDSEC_REMOVABLE_PACKAGES, FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
     };
     use crate::{
         crowdsec::{
@@ -938,114 +865,60 @@ mod tests {
     };
 
     #[test]
-    fn selects_supported_package_managers() {
+    fn selects_supported_package_managers_without_a_distribution_version() {
         assert_eq!(
-            package_manager_for_os_release("ubuntu", "", true, false, false),
+            package_manager_for_os_release("ubuntu", true, false, false),
             Some(PackageManager::Apt)
         );
         assert_eq!(
-            package_manager_for_os_release("rocky", "9.5", false, true, true),
-            Some(PackageManager::Dnf(RpmRepositoryTarget {
-                distribution: RpmRepositoryDistribution::EnterpriseLinux,
-                major_version: 9,
-            }))
+            package_manager_for_os_release("rocky", false, true, true),
+            Some(PackageManager::Dnf)
         );
         assert_eq!(
-            package_manager_for_os_release("rhel", "9.4", false, true, false),
-            Some(PackageManager::Dnf(RpmRepositoryTarget {
-                distribution: RpmRepositoryDistribution::EnterpriseLinux,
-                major_version: 9,
-            }))
+            package_manager_for_os_release("rhel", false, true, false),
+            Some(PackageManager::Dnf)
         );
         assert_eq!(
-            package_manager_for_os_release("centos", "8", false, false, true),
-            Some(PackageManager::Yum(RpmRepositoryTarget {
-                distribution: RpmRepositoryDistribution::EnterpriseLinux,
-                major_version: 8,
-            }))
+            package_manager_for_os_release("centos", false, false, true),
+            Some(PackageManager::Yum)
         );
         assert_eq!(
-            package_manager_for_os_release("fedora", "40", false, true, false),
-            Some(PackageManager::Dnf(RpmRepositoryTarget {
-                distribution: RpmRepositoryDistribution::Fedora,
-                major_version: 40,
-            }))
+            package_manager_for_os_release("fedora", false, true, false),
+            Some(PackageManager::Dnf)
         );
         assert_eq!(
-            package_manager_for_os_release("rocky", "", false, true, false),
-            None
-        );
-        assert_eq!(
-            package_manager_for_os_release("alpine", "", false, false, false),
+            package_manager_for_os_release("alpine", false, false, false),
             None
         );
     }
 
-    #[test]
-    fn builds_packagecloud_repository_urls_for_supported_rpm_targets() {
-        assert_eq!(
-            RpmRepositoryTarget {
-                distribution: RpmRepositoryDistribution::EnterpriseLinux,
-                major_version: 9,
-            }
-            .configuration_url(),
-            "https://packagecloud.io/install/repositories/crowdsec/crowdsec/config_file.repo?os=el&dist=9&source=script"
-        );
-        assert_eq!(
-            RpmRepositoryTarget {
-                distribution: RpmRepositoryDistribution::Fedora,
-                major_version: 40,
-            }
-            .configuration_url(),
-            "https://packagecloud.io/install/repositories/crowdsec/crowdsec/config_file.repo?os=fedora&dist=40&source=script"
-        );
-    }
-
-    fn valid_rpm_repository_configuration(target: RpmRepositoryTarget) -> String {
-        let base = format!(
-            "https://packagecloud.io/crowdsec/crowdsec/{}/{}",
-            target.packagecloud_distribution(),
-            target.major_version
-        );
+    fn valid_rpm_repository_configuration() -> String {
+        let base = "https://packagecloud.io/crowdsec/crowdsec/rpm_any/rpm_any";
         format!(
-            "[crowdsec_crowdsec]\nname=crowdsec_crowdsec\nbaseurl={base}/$basearch\nrepo_gpgcheck=1\ngpgcheck=1\nenabled=1\ngpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey\n       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-C822EDD6B39954A1.pub.gpg\nsslverify=1\nsslcacert=/etc/pki/tls/certs/ca-bundle.crt\nmetadata_expire=300\n\n[crowdsec_crowdsec-source]\nname=crowdsec_crowdsec-source\nbaseurl={base}/SRPMS\nrepo_gpgcheck=1\ngpgcheck=1\nenabled=1\ngpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey\n       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-FED78314A2468CCF.pub.gpg\nsslverify=1\nsslcacert=/etc/pki/tls/certs/ca-bundle.crt\nmetadata_expire=300\n"
+            "[crowdsec_crowdsec]\nname=crowdsec_crowdsec\nbaseurl={base}/$basearch\nrepo_gpgcheck=1\ngpgcheck=1\nenabled=1\ngpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey\n       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-C822EDD6B39954A1.pub.gpg\nsslverify=1\nmetadata_expire=300\n\n[crowdsec_crowdsec-source]\nname=crowdsec_crowdsec-source\nbaseurl={base}/SRPMS\nrepo_gpgcheck=1\ngpgcheck=1\nenabled=1\ngpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey\n       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-FED78314A2468CCF.pub.gpg\nsslverify=1\nmetadata_expire=300\n"
         )
     }
 
     #[test]
     fn accepts_the_expected_packagecloud_rpm_repository_configuration() {
-        let target = RpmRepositoryTarget {
-            distribution: RpmRepositoryDistribution::EnterpriseLinux,
-            major_version: 9,
-        };
-
-        assert!(validate_rpm_repository_configuration(
-            target,
-            &valid_rpm_repository_configuration(target)
-        )
-        .is_ok());
+        assert!(
+            validate_rpm_repository_configuration(&valid_rpm_repository_configuration()).is_ok()
+        );
     }
 
     #[test]
     fn rejects_an_invalid_packagecloud_rpm_repository_configuration() {
-        let target = RpmRepositoryTarget {
-            distribution: RpmRepositoryDistribution::EnterpriseLinux,
-            major_version: 9,
-        };
-        let valid = valid_rpm_repository_configuration(target);
+        let valid = valid_rpm_repository_configuration();
 
-        assert!(validate_rpm_repository_configuration(
-            target,
-            &valid.replace("gpgcheck=1", "gpgcheck=0")
-        )
-        .is_err());
-        assert!(validate_rpm_repository_configuration(
-            target,
-            &format!("{valid}\n[untrusted]\nbaseurl=https://example.invalid\n")
-        )
+        assert!(
+            validate_rpm_repository_configuration(&valid.replace("gpgcheck=1", "gpgcheck=0"))
+                .is_err()
+        );
+        assert!(validate_rpm_repository_configuration(&format!(
+            "{valid}\n[untrusted]\nbaseurl=https://example.invalid\n"
+        ))
         .is_err());
     }
-
     #[test]
     fn removal_message_reports_idempotent_results() {
         assert_eq!(
