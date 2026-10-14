@@ -56,6 +56,8 @@ const APT_KEYRING_PATH: &str = "/etc/apt/keyrings/crowdsec_crowdsec-archive-keyr
 const APT_KEYRING_TEMP_PATH: &str = "/etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg.tmp";
 const APT_REPOSITORY_PATH: &str = "/etc/apt/sources.list.d/crowdsec_crowdsec.list";
 const RPM_REPOSITORY_PATH: &str = "/etc/yum.repos.d/crowdsec_crowdsec.repo";
+const CROWDSEC_RPM_REPOSITORY_CONFIG_URL: &str =
+    "https://packagecloud.io/install/repositories/crowdsec/crowdsec/config_file.repo";
 const CROWDSEC_GPG_KEY_URL: &str = "https://packagecloud.io/crowdsec/crowdsec/gpgkey";
 const APT_DPKG_FORCE_CONFOLD_OPTION: &str = "Dpkg::Options::=--force-confold";
 const APT_NONINTERACTIVE_ENVIRONMENT: (&str, &str) = ("DEBIAN_FRONTEND", "noninteractive");
@@ -79,6 +81,23 @@ struct RpmRepositoryTarget {
 enum RpmRepositoryDistribution {
     EnterpriseLinux,
     Fedora,
+}
+
+impl RpmRepositoryTarget {
+    fn packagecloud_distribution(self) -> &'static str {
+        match self.distribution {
+            RpmRepositoryDistribution::EnterpriseLinux => "el",
+            RpmRepositoryDistribution::Fedora => "fedora",
+        }
+    }
+
+    fn configuration_url(self) -> String {
+        format!(
+            "{CROWDSEC_RPM_REPOSITORY_CONFIG_URL}?os={}&dist={}&source=script",
+            self.packagecloud_distribution(),
+            self.major_version
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -383,8 +402,10 @@ async fn configure_repository(
         PackageManager::Apt => configure_apt_repository(progress).await,
         PackageManager::Dnf(target) | PackageManager::Yum(target) => {
             debug!(
-                "Preparing CrowdSec RPM repository for {:?} {}",
-                target.distribution, target.major_version
+                "Preparing CrowdSec RPM repository for {:?} {} from {}",
+                target.distribution,
+                target.major_version,
+                target.configuration_url()
             );
             write_if_changed(RPM_REPOSITORY_PATH, CROWDSEC_RPM_REPOSITORY).await?;
             Ok(())
@@ -828,6 +849,26 @@ mod tests {
         assert_eq!(
             package_manager_for_os_release("alpine", "", false, false, false),
             None
+        );
+    }
+
+    #[test]
+    fn builds_packagecloud_repository_urls_for_supported_rpm_targets() {
+        assert_eq!(
+            RpmRepositoryTarget {
+                distribution: RpmRepositoryDistribution::EnterpriseLinux,
+                major_version: 9,
+            }
+            .configuration_url(),
+            "https://packagecloud.io/install/repositories/crowdsec/crowdsec/config_file.repo?os=el&dist=9&source=script"
+        );
+        assert_eq!(
+            RpmRepositoryTarget {
+                distribution: RpmRepositoryDistribution::Fedora,
+                major_version: 40,
+            }
+            .configuration_url(),
+            "https://packagecloud.io/install/repositories/crowdsec/crowdsec/config_file.repo?os=fedora&dist=40&source=script"
         );
     }
 
