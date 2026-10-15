@@ -20,6 +20,9 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+use std::time::{Duration, SystemTime};
+
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::Value;
 
 use crate::{
@@ -314,13 +317,64 @@ fn decision_from_json(decision: &Value, alert: Option<&Value>) -> Option<CrowdSe
             decision.get("scenario"),
             alert.and_then(|value| value.get("scenario")),
         ]),
-        expires_at: first_string(&[
-            decision.get("until"),
-            decision.get("expires_at"),
-            decision.get("expiration"),
-            decision.get("stop_at"),
-        ]),
+        expires_at: expires_at_from_duration(decision.get("duration")),
     })
+}
+
+fn expires_at_from_duration(value: Option<&Value>) -> Option<String> {
+    let duration = parse_remaining_duration(value?.as_str()?)?;
+    let expires_at = SystemTime::now().checked_add(duration)?;
+
+    Some(DateTime::<Utc>::from(expires_at).to_rfc3339_opts(SecondsFormat::Millis, true))
+}
+
+fn parse_remaining_duration(value: &str) -> Option<Duration> {
+    let mut remaining = value;
+    let mut seconds = 0.0;
+
+    while !remaining.is_empty() {
+        let number_length = remaining
+            .find(|character: char| !character.is_ascii_digit() && character != '.')
+            .unwrap_or(remaining.len());
+        let amount = remaining[..number_length].parse::<f64>().ok()?;
+        let suffix = &remaining[number_length..];
+        let (unit_length, unit_seconds) = if suffix.starts_with("ns") {
+            ("ns".len(), 1e-9)
+        } else if suffix.starts_with("us") || suffix.starts_with("µs") {
+            (
+                if suffix.starts_with("us") {
+                    "us"
+                } else {
+                    "µs"
+                }
+                .len(),
+                1e-6,
+            )
+        } else if suffix.starts_with("ms") {
+            ("ms".len(), 1e-3)
+        } else if suffix.starts_with('s') {
+            ("s".len(), 1.0)
+        } else if suffix.starts_with('m') {
+            ("m".len(), 60.0)
+        } else if suffix.starts_with('h') {
+            ("h".len(), 3_600.0)
+        } else {
+            return None;
+        };
+
+        if !amount.is_finite() || amount < 0.0 {
+            return None;
+        }
+
+        seconds += amount * unit_seconds;
+        if !seconds.is_finite() {
+            return None;
+        }
+
+        remaining = &suffix[unit_length..];
+    }
+
+    Duration::try_from_secs_f64(seconds).ok()
 }
 
 fn first_string(values: &[Option<&Value>]) -> Option<String> {
