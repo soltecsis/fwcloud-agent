@@ -329,6 +329,9 @@ fn expires_at_from_duration(value: Option<&Value>) -> Option<String> {
 }
 
 fn parse_remaining_duration(value: &str) -> Option<Duration> {
+    if value.is_empty() {
+        return None;
+    }
     let mut remaining = value;
     let mut seconds = 0.0;
 
