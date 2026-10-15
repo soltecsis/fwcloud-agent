@@ -97,8 +97,8 @@ async fn systemctl_with_invalid_data() {
 }
 
 #[test]
-fn systemctl_openvpn_service_validation() {
-    let valid_services = vec!["openvpn@firewall1", "openvpn-server@firewall1"];
+fn systemctl_service_validation() {
+    let valid_services = vec!["openvpn@firewall1", "openvpn-server@firewall1", "crowdsec"];
 
     for service in valid_services {
         let data = Systemctl {
