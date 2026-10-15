@@ -162,7 +162,7 @@ fn filter_decisions(
             query
                 .value
                 .as_deref()
-                .is_none_or(|value| decision.value == value)
+                .is_none_or(|value| decision.value.starts_with(value))
         })
         .filter(|decision| {
             query
