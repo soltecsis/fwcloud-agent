@@ -43,20 +43,27 @@ const MAXIMUM_LIST_LIMIT: u32 = 100;
 pub async fn list(query: &CrowdSecDecisionsQuery) -> Result<CrowdSecDecisionsResponse> {
     validate_filters(query)?;
     let limit = list_limit(query.limit)?;
-    let decisions = all_decisions().await?;
+    Ok(decisions_response(all_decisions().await?, query, limit))
+}
+
+pub async fn total() -> Result<u64> {
+    Ok(all_decisions().await?.len() as u64)
+}
+
+fn decisions_response(
+    decisions: Vec<CrowdSecDecision>,
+    query: &CrowdSecDecisionsQuery,
+    limit: u32,
+) -> CrowdSecDecisionsResponse {
     let total = decisions.len() as u64;
 
-    Ok(CrowdSecDecisionsResponse {
+    CrowdSecDecisionsResponse {
         decisions: filter_decisions(decisions, query)
             .into_iter()
             .take(limit as usize)
             .collect(),
         total,
-    })
-}
-
-pub async fn total() -> Result<u64> {
-    Ok(all_decisions().await?.len() as u64)
+    }
 }
 
 pub async fn delete(id: &str) -> Result<CrowdSecDecisionOperationResponse> {
@@ -67,7 +74,6 @@ pub async fn delete(id: &str) -> Result<CrowdSecDecisionOperationResponse> {
     } else {
         0
     };
-
     Ok(CrowdSecDecisionOperationResponse {
         operation: CrowdSecDecisionOperation::Delete,
         decision_id: Some(id.to_string()),
@@ -394,9 +400,20 @@ fn value_as_string(value: Option<&Value>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{list_limit, require_flush_confirmation, validate_decision_id};
+    use std::time::SystemTime;
+
+    use chrono::{DateTime, Utc};
+    use serde_json::json;
+
+    use super::{
+        decision_from_json, decisions_response, list_limit, parse_remaining_duration,
+        require_flush_confirmation, validate_decision_id,
+    };
     use crate::{
-        crowdsec::errors::{DECISIONS_CONFIRMATION_REQUIRED, DECISIONS_INVALID},
+        crowdsec::{
+            errors::{DECISIONS_CONFIRMATION_REQUIRED, DECISIONS_INVALID},
+            models::{CrowdSecDecision, CrowdSecDecisionsQuery},
+        },
         errors::FwcError,
     };
 
@@ -431,10 +448,78 @@ mod tests {
     }
 
     #[test]
+    fn decision_response_keeps_total_before_prefix_and_scope_filters() {
+        let query = CrowdSecDecisionsQuery {
+            limit: Some(1),
+            scope: Some("Ip".to_string()),
+            value: Some("14.".to_string()),
+            ..Default::default()
+        };
+        let response = decisions_response(
+            vec![
+                decision("1", "Ip", "14.90.1.1"),
+                decision("2", "Network", "14.90.1.0/24"),
+                decision("3", "Ip", "15.90.1.1"),
+            ],
+            &query,
+            1,
+        );
+
+        assert_eq!(response.total, 3);
+        assert_eq!(response.decisions.len(), 1);
+        assert_eq!(response.decisions[0].id, "1");
+    }
+
+    #[test]
+    fn decision_expiration_uses_remaining_duration() {
+        let before = SystemTime::now();
+        let decision = decision_from_json(
+            &json!({
+                "id": 1,
+                "duration": "1h30m",
+                "stop_at": "2020-01-01T00:00:00Z",
+            }),
+            None,
+        )
+        .unwrap();
+        let expiration = DateTime::parse_from_rfc3339(decision.expires_at.as_deref().unwrap())
+            .unwrap()
+            .with_timezone(&Utc);
+        let remaining = expiration.signed_duration_since(DateTime::<Utc>::from(before));
+
+        assert!((5_399..=5_400).contains(&remaining.num_seconds()));
+    }
+
+    #[test]
+    fn invalid_or_missing_decision_duration_has_no_expiration() {
+        assert!(parse_remaining_duration("").is_none());
+        assert!(parse_remaining_duration("invalid").is_none());
+        assert!(parse_remaining_duration("NaNs").is_none());
+        assert!(
+            decision_from_json(&json!({ "id": 1 }), None)
+                .unwrap()
+                .expires_at
+                .is_none()
+        );
+    }
+
+    #[test]
     fn decision_id_must_be_a_positive_integer() {
         assert!(validate_decision_id("123").is_ok());
         assert!(validate_decision_id("0").is_err());
         assert!(validate_decision_id("invalid").is_err());
         assert!(validate_decision_id("1;rm").is_err());
+    }
+
+    fn decision(id: &str, scope: &str, value: &str) -> CrowdSecDecision {
+        CrowdSecDecision {
+            id: id.to_string(),
+            scope: scope.to_string(),
+            value: value.to_string(),
+            decision_type: "ban".to_string(),
+            origin: None,
+            scenario: None,
+            expires_at: None,
+        }
     }
 }
