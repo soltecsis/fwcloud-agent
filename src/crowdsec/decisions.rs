@@ -38,19 +38,22 @@ const DEFAULT_LIST_LIMIT: u32 = 50;
 const MAXIMUM_LIST_LIMIT: u32 = 100;
 
 pub async fn list(query: &CrowdSecDecisionsQuery) -> Result<CrowdSecDecisionsResponse> {
+    validate_filters(query)?;
     let limit = list_limit(query.limit)?;
-    let limit_argument = limit.to_string();
-    let arguments = list_arguments(query, &limit_argument)?;
-    let output = CrowdSecCommand::cscli(&arguments)?.execute().await?;
-    let value = serde_json::from_str::<Value>(output.stdout())
-        .map_err(|_| FwcError::crowdsec(COMMAND_FAILED, "Unable to read CrowdSec decision list"))?;
+    let decisions = all_decisions().await?;
+    let total = decisions.len() as u64;
 
     Ok(CrowdSecDecisionsResponse {
-        decisions: filter_decisions(decisions_from_json(&value), query)
+        decisions: filter_decisions(decisions, query)
             .into_iter()
             .take(limit as usize)
             .collect(),
+        total,
     })
+}
+
+pub async fn total() -> Result<u64> {
+    Ok(all_decisions().await?.len() as u64)
 }
 
 pub async fn delete(id: &str) -> Result<CrowdSecDecisionOperationResponse> {
@@ -119,33 +122,6 @@ async fn all_decisions() -> Result<Vec<CrowdSecDecision>> {
     Ok(decisions_from_json(&value))
 }
 
-fn list_arguments<'a>(query: &'a CrowdSecDecisionsQuery, limit: &'a str) -> Result<Vec<&'a str>> {
-    validate_filters(query)?;
-    let include_capi = query.origin.as_deref().is_some_and(|origin| {
-        origin.eq_ignore_ascii_case("all") || origin.eq_ignore_ascii_case("capi")
-    });
-    let use_unbounded_command = include_capi || filter_count(query) > 1;
-    let command_limit = if use_unbounded_command { "0" } else { limit };
-    let mut arguments = vec!["decisions", "list", "--limit", command_limit];
-
-    if include_capi {
-        arguments.push("--all");
-    } else {
-        if let Some(origin) = query.origin.as_deref() {
-            if !origin.eq_ignore_ascii_case("local") {
-                arguments.extend(["--origin", origin]);
-            }
-        }
-
-        if !use_unbounded_command {
-            append_supported_filters(&mut arguments, query);
-        }
-    }
-
-    arguments.extend(["-o", "json"]);
-    Ok(arguments)
-}
-
 fn validate_filters(query: &CrowdSecDecisionsQuery) -> Result<()> {
     if let Some(scope) = query.scope.as_deref() {
         validate_token(scope, "scope")?;
@@ -168,37 +144,6 @@ fn validate_filters(query: &CrowdSecDecisionsQuery) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn append_supported_filters<'a>(arguments: &mut Vec<&'a str>, query: &'a CrowdSecDecisionsQuery) {
-    if let Some(scope) = query.scope.as_deref() {
-        arguments.extend(["--scope", scope]);
-    }
-
-    if let Some(value) = query.value.as_deref() {
-        arguments.extend(["--value", value]);
-    }
-
-    if let Some(decision_type) = query.decision_type.as_deref() {
-        arguments.extend(["--type", decision_type]);
-    }
-
-    if let Some(scenario) = query.scenario.as_deref() {
-        arguments.extend(["--scenario", scenario]);
-    }
-}
-
-fn filter_count(query: &CrowdSecDecisionsQuery) -> usize {
-    [
-        query.scope.is_some(),
-        query.value.is_some(),
-        query.decision_type.is_some(),
-        query.origin.is_some(),
-        query.scenario.is_some(),
-    ]
-    .iter()
-    .filter(|present| **present)
-    .count()
 }
 
 fn filter_decisions(
