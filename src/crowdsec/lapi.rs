@@ -1429,7 +1429,7 @@ mod tests {
 
     use super::{
         central_lapi_configuration, central_lapi_listen_uri, finish_machine_replication_command,
-        machine_credentials_from_contents, machine_from_json,
+        machine_credentials_from_contents, machine_from_json, machine_has_loopback_address,
         machine_reauthentication_required_message, machine_replication_plan, machines_from_json,
         remote_lapi_connection_error, remote_lapi_connectivity_error_code,
         remote_lapi_socket_address, remote_lapi_url, remote_machine_configuration,
@@ -1718,12 +1718,41 @@ mod tests {
     }
 
     #[test]
+    fn identifies_local_loopback_machine_addresses() {
+        let machine = |ip_address: Option<&str>| CrowdSecMachine {
+            name: "local".to_string(),
+            state: CrowdSecMachineState::Validated,
+            ip_address: ip_address.map(str::to_string),
+            os: None,
+            last_heartbeat: None,
+        };
+
+        for address in [
+            "127.0.0.1",
+            "127.255.255.255",
+            "::1",
+            "[::1]",
+            "localhost",
+            "LOCALHOST",
+            "lo",
+            "loopback",
+        ] {
+            assert!(machine_has_loopback_address(&machine(Some(address))));
+        }
+        for address in ["192.0.2.10", "::2"] {
+            assert!(!machine_has_loopback_address(&machine(Some(address))));
+        }
+        assert!(!machine_has_loopback_address(&machine(None)));
+    }
+
+    #[test]
     fn normalizes_machine_metadata_and_last_heartbeat() {
         let machine = machine_from_json(&json!({
             "machineId": "fwcloud-machine-1",
             "isValidated": false,
             "ipAddress": "192.0.2.10",
             "os": "linux",
+            "last_push": "2026-09-01T09:00:00Z",
             "last_heartbeat": "2026-09-01T10:00:00Z"
         }))
         .unwrap();
