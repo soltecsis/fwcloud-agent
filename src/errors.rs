@@ -147,6 +147,7 @@ impl ResponseError for FwcError {
                         | crate::crowdsec::errors::TRANSITION_RECOVERY_REQUIRED
                         | crate::crowdsec::errors::COLLECTION_CONFLICT
                         | crate::crowdsec::errors::MACHINE_CONFLICT
+                        | crate::crowdsec::errors::MACHINE_PROTECTED
                         | crate::crowdsec::errors::MACHINE_REAUTHENTICATION_REQUIRED
                 ) =>
             {

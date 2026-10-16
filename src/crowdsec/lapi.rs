@@ -22,7 +22,7 @@
 
 use std::{
     io::{self, ErrorKind},
-    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     time::Duration,
@@ -46,8 +46,8 @@ use crate::{
         errors::{
             COMMAND_FAILED, LAPI_CONNECTION_FAILED, LAPI_CONNECTION_REFUSED,
             LAPI_CONNECTION_TIMEOUT, LAPI_HOST_UNRESOLVABLE, LAPI_INVALID, LAPI_UNREACHABLE,
-            MACHINE_INVALID, MACHINE_NOT_FOUND, MACHINE_REAUTHENTICATION_REQUIRED,
-            TRANSITION_RECOVERY_REQUIRED,
+            MACHINE_INVALID, MACHINE_NOT_FOUND, MACHINE_PROTECTED,
+            MACHINE_REAUTHENTICATION_REQUIRED, TRANSITION_RECOVERY_REQUIRED,
         },
         install,
         models::{
@@ -432,7 +432,13 @@ pub async fn validate_machine(name: &str) -> Result<CrowdSecMachineValidationRes
 
 pub async fn remove_machine(name: &str) -> Result<CrowdSecMachineRemoveResponse> {
     validate_machine_name(name)?;
-    let _machine = machine_by_name(name).await?;
+    let machine = machine_by_name(name).await?;
+    if machine_has_loopback_address(&machine) {
+        return Err(FwcError::crowdsec(
+            MACHINE_PROTECTED,
+            "The local CrowdSec LAPI Machine cannot be removed",
+        ));
+    }
 
     debug!("Removing CrowdSec machine: {}", name);
     CrowdSecCommand::cscli(&["machines", "delete", name])?
@@ -733,6 +739,25 @@ async fn machine_by_name(name: &str) -> Result<CrowdSecMachine> {
         .into_iter()
         .find(|machine| machine.name == name)
         .ok_or_else(|| FwcError::crowdsec(MACHINE_NOT_FOUND, "CrowdSec machine is not registered"))
+}
+
+fn machine_has_loopback_address(machine: &CrowdSecMachine) -> bool {
+    let Some(address) = machine.ip_address.as_deref() else {
+        return false;
+    };
+    let normalized = address
+        .trim()
+        .trim_matches(|character| character == '[' || character == ']')
+        .to_ascii_lowercase();
+
+    normalized
+        .parse::<IpAddr>()
+        .map(|address| address.is_loopback())
+        .unwrap_or(false)
+        || matches!(
+            normalized.as_str(),
+            "localhost" | "localhost.localdomain" | "lo" | "loopback"
+        )
 }
 
 async fn require_crowdsec_installed() -> Result<()> {
