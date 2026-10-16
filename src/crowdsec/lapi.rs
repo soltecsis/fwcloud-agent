@@ -1209,15 +1209,18 @@ fn machine_from_json(value: &Value) -> Option<CrowdSecMachine> {
         Some(false) => CrowdSecMachineState::Pending,
         None => CrowdSecMachineState::Unknown,
     };
-    let last_heartbeat = values
-        .get("last_push")
-        .or_else(|| values.get("last_heartbeat"))
-        .or_else(|| values.get("updated_at"))
+    let ip_address = values
+        .get("ipAddress")
+        .or_else(|| values.get("ip_address"))
         .and_then(value_as_string);
+    let os = values.get("os").and_then(value_as_string);
+    let last_heartbeat = values.get("last_heartbeat").and_then(value_as_string);
 
     Some(CrowdSecMachine {
         name: name.to_string(),
         state,
+        ip_address,
+        os,
         last_heartbeat,
     })
 }
@@ -1533,6 +1536,8 @@ mod tests {
         let machine = |state| CrowdSecMachine {
             name: "fwcloud-machine-01".to_string(),
             state,
+            ip_address: None,
+            os: None,
             last_heartbeat: None,
         };
 
@@ -1688,16 +1693,20 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_machine_status_and_last_heartbeat() {
+    fn normalizes_machine_metadata_and_last_heartbeat() {
         let machine = machine_from_json(&json!({
             "machineId": "fwcloud-machine-1",
             "isValidated": false,
-            "last_push": "2026-09-01T10:00:00Z"
+            "ipAddress": "192.0.2.10",
+            "os": "linux",
+            "last_heartbeat": "2026-09-01T10:00:00Z"
         }))
         .unwrap();
 
         assert_eq!(machine.name, "fwcloud-machine-1");
         assert_eq!(machine.state, CrowdSecMachineState::Pending);
+        assert_eq!(machine.ip_address.as_deref(), Some("192.0.2.10"));
+        assert_eq!(machine.os.as_deref(), Some("linux"));
         assert_eq!(
             machine.last_heartbeat.as_deref(),
             Some("2026-09-01T10:00:00Z")
