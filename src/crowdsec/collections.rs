@@ -343,26 +343,26 @@ fn collection_from_json(value: &serde_json::Value) -> Option<CrowdSecCollection>
         .unwrap_or_else(|| status.is_some_and(|status| status.contains("tainted")));
     let disabled = status.is_some_and(|status| status.contains("disabled"));
 
-    let local_version = string_value(values, "local_version")
-        .or_else(|| string_value(values, "localversion"));
-    let locally_installed = installed || tainted || local_version.is_some();
+    let local_version =
+        string_value(values, "local_version").or_else(|| string_value(values, "localversion"));
+    let state = if tainted {
+        CrowdSecCollectionState::Tainted
+    } else if installed {
+        CrowdSecCollectionState::Installed
+    } else if disabled {
+        CrowdSecCollectionState::Disabled
+    } else {
+        CrowdSecCollectionState::Available
+    };
 
     Some(CrowdSecCollection {
         name,
-        version: if locally_installed {
+        version: if state == CrowdSecCollectionState::Installed {
             local_version.or_else(|| string_value(values, "version"))
         } else {
             None
         },
-        state: if tainted {
-            CrowdSecCollectionState::Tainted
-        } else if installed {
-            CrowdSecCollectionState::Installed
-        } else if disabled {
-            CrowdSecCollectionState::Disabled
-        } else {
-            CrowdSecCollectionState::Available
-        },
+        state,
         available: true,
         path: string_value(values, "local_path")
             .or_else(|| string_value(values, "path"))
@@ -428,6 +428,31 @@ mod tests {
 
         assert_eq!(collection.version, None);
         assert_eq!(collection.state, CrowdSecCollectionState::Available);
+    }
+
+    #[test]
+    fn omits_stale_local_version_for_uninstalled_collections() {
+        for value in [
+            json!({
+                "name": "crowdsecurity/sshd",
+                "local_version": "0.2"
+            }),
+            json!({
+                "name": "crowdsecurity/sshd",
+                "local_version": "0.2",
+                "status": "disabled"
+            }),
+            json!({
+                "name": "crowdsecurity/sshd",
+                "local_version": "0.2",
+                "status": "tainted"
+            }),
+        ] {
+            let collection = collection_from_json(&value).unwrap();
+
+            assert_ne!(collection.state, CrowdSecCollectionState::Installed);
+            assert_eq!(collection.version, None);
+        }
     }
 
     #[test]
