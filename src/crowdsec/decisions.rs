@@ -20,6 +20,9 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+use std::time::{Duration, SystemTime};
+
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::Value;
 
 use crate::{
@@ -38,19 +41,29 @@ const DEFAULT_LIST_LIMIT: u32 = 50;
 const MAXIMUM_LIST_LIMIT: u32 = 100;
 
 pub async fn list(query: &CrowdSecDecisionsQuery) -> Result<CrowdSecDecisionsResponse> {
+    validate_filters(query)?;
     let limit = list_limit(query.limit)?;
-    let limit_argument = limit.to_string();
-    let arguments = list_arguments(query, &limit_argument)?;
-    let output = CrowdSecCommand::cscli(&arguments)?.execute().await?;
-    let value = serde_json::from_str::<Value>(output.stdout())
-        .map_err(|_| FwcError::crowdsec(COMMAND_FAILED, "Unable to read CrowdSec decision list"))?;
+    Ok(decisions_response(all_decisions().await?, query, limit))
+}
 
-    Ok(CrowdSecDecisionsResponse {
-        decisions: filter_decisions(decisions_from_json(&value), query)
+pub async fn total() -> Result<u64> {
+    Ok(all_decisions().await?.len() as u64)
+}
+
+fn decisions_response(
+    decisions: Vec<CrowdSecDecision>,
+    query: &CrowdSecDecisionsQuery,
+    limit: u32,
+) -> CrowdSecDecisionsResponse {
+    let total = decisions.len() as u64;
+
+    CrowdSecDecisionsResponse {
+        decisions: filter_decisions(decisions, query)
             .into_iter()
             .take(limit as usize)
             .collect(),
-    })
+        total,
+    }
 }
 
 pub async fn delete(id: &str) -> Result<CrowdSecDecisionOperationResponse> {
@@ -61,7 +74,6 @@ pub async fn delete(id: &str) -> Result<CrowdSecDecisionOperationResponse> {
     } else {
         0
     };
-
     Ok(CrowdSecDecisionOperationResponse {
         operation: CrowdSecDecisionOperation::Delete,
         decision_id: Some(id.to_string()),
@@ -119,33 +131,6 @@ async fn all_decisions() -> Result<Vec<CrowdSecDecision>> {
     Ok(decisions_from_json(&value))
 }
 
-fn list_arguments<'a>(query: &'a CrowdSecDecisionsQuery, limit: &'a str) -> Result<Vec<&'a str>> {
-    validate_filters(query)?;
-    let include_capi = query.origin.as_deref().is_some_and(|origin| {
-        origin.eq_ignore_ascii_case("all") || origin.eq_ignore_ascii_case("capi")
-    });
-    let use_unbounded_command = include_capi || filter_count(query) > 1;
-    let command_limit = if use_unbounded_command { "0" } else { limit };
-    let mut arguments = vec!["decisions", "list", "--limit", command_limit];
-
-    if include_capi {
-        arguments.push("--all");
-    } else {
-        if let Some(origin) = query.origin.as_deref() {
-            if !origin.eq_ignore_ascii_case("local") {
-                arguments.extend(["--origin", origin]);
-            }
-        }
-
-        if !use_unbounded_command {
-            append_supported_filters(&mut arguments, query);
-        }
-    }
-
-    arguments.extend(["-o", "json"]);
-    Ok(arguments)
-}
-
 fn validate_filters(query: &CrowdSecDecisionsQuery) -> Result<()> {
     if let Some(scope) = query.scope.as_deref() {
         validate_token(scope, "scope")?;
@@ -170,37 +155,6 @@ fn validate_filters(query: &CrowdSecDecisionsQuery) -> Result<()> {
     Ok(())
 }
 
-fn append_supported_filters<'a>(arguments: &mut Vec<&'a str>, query: &'a CrowdSecDecisionsQuery) {
-    if let Some(scope) = query.scope.as_deref() {
-        arguments.extend(["--scope", scope]);
-    }
-
-    if let Some(value) = query.value.as_deref() {
-        arguments.extend(["--value", value]);
-    }
-
-    if let Some(decision_type) = query.decision_type.as_deref() {
-        arguments.extend(["--type", decision_type]);
-    }
-
-    if let Some(scenario) = query.scenario.as_deref() {
-        arguments.extend(["--scenario", scenario]);
-    }
-}
-
-fn filter_count(query: &CrowdSecDecisionsQuery) -> usize {
-    [
-        query.scope.is_some(),
-        query.value.is_some(),
-        query.decision_type.is_some(),
-        query.origin.is_some(),
-        query.scenario.is_some(),
-    ]
-    .iter()
-    .filter(|present| **present)
-    .count()
-}
-
 fn filter_decisions(
     decisions: Vec<CrowdSecDecision>,
     query: &CrowdSecDecisionsQuery,
@@ -217,7 +171,7 @@ fn filter_decisions(
             query
                 .value
                 .as_deref()
-                .is_none_or(|value| decision.value == value)
+                .is_none_or(|value| decision.value.starts_with(value))
         })
         .filter(|decision| {
             query
@@ -369,13 +323,67 @@ fn decision_from_json(decision: &Value, alert: Option<&Value>) -> Option<CrowdSe
             decision.get("scenario"),
             alert.and_then(|value| value.get("scenario")),
         ]),
-        expires_at: first_string(&[
-            decision.get("until"),
-            decision.get("expires_at"),
-            decision.get("expiration"),
-            decision.get("stop_at"),
-        ]),
+        expires_at: expires_at_from_duration(decision.get("duration")),
     })
+}
+
+fn expires_at_from_duration(value: Option<&Value>) -> Option<String> {
+    let duration = parse_remaining_duration(value?.as_str()?)?;
+    let expires_at = SystemTime::now().checked_add(duration)?;
+
+    Some(DateTime::<Utc>::from(expires_at).to_rfc3339_opts(SecondsFormat::Millis, true))
+}
+
+fn parse_remaining_duration(value: &str) -> Option<Duration> {
+    if value.is_empty() {
+        return None;
+    }
+    let mut remaining = value;
+    let mut seconds = 0.0;
+
+    while !remaining.is_empty() {
+        let number_length = remaining
+            .find(|character: char| !character.is_ascii_digit() && character != '.')
+            .unwrap_or(remaining.len());
+        let amount = remaining[..number_length].parse::<f64>().ok()?;
+        let suffix = &remaining[number_length..];
+        let (unit_length, unit_seconds) = if suffix.starts_with("ns") {
+            ("ns".len(), 1e-9)
+        } else if suffix.starts_with("us") || suffix.starts_with("µs") {
+            (
+                if suffix.starts_with("us") {
+                    "us"
+                } else {
+                    "µs"
+                }
+                .len(),
+                1e-6,
+            )
+        } else if suffix.starts_with("ms") {
+            ("ms".len(), 1e-3)
+        } else if suffix.starts_with('s') {
+            ("s".len(), 1.0)
+        } else if suffix.starts_with('m') {
+            ("m".len(), 60.0)
+        } else if suffix.starts_with('h') {
+            ("h".len(), 3_600.0)
+        } else {
+            return None;
+        };
+
+        if !amount.is_finite() || amount < 0.0 {
+            return None;
+        }
+
+        seconds += amount * unit_seconds;
+        if !seconds.is_finite() {
+            return None;
+        }
+
+        remaining = &suffix[unit_length..];
+    }
+
+    Duration::try_from_secs_f64(seconds).ok()
 }
 
 fn first_string(values: &[Option<&Value>]) -> Option<String> {
@@ -392,9 +400,20 @@ fn value_as_string(value: Option<&Value>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{list_limit, require_flush_confirmation, validate_decision_id};
+    use std::time::SystemTime;
+
+    use chrono::{DateTime, Utc};
+    use serde_json::json;
+
+    use super::{
+        decision_from_json, decisions_response, list_limit, parse_remaining_duration,
+        require_flush_confirmation, validate_decision_id,
+    };
     use crate::{
-        crowdsec::errors::{DECISIONS_CONFIRMATION_REQUIRED, DECISIONS_INVALID},
+        crowdsec::{
+            errors::{DECISIONS_CONFIRMATION_REQUIRED, DECISIONS_INVALID},
+            models::{CrowdSecDecision, CrowdSecDecisionsQuery},
+        },
         errors::FwcError,
     };
 
@@ -429,10 +448,78 @@ mod tests {
     }
 
     #[test]
+    fn decision_response_keeps_total_before_prefix_and_scope_filters() {
+        let query = CrowdSecDecisionsQuery {
+            limit: Some(1),
+            scope: Some("Ip".to_string()),
+            value: Some("14.".to_string()),
+            ..Default::default()
+        };
+        let response = decisions_response(
+            vec![
+                decision("1", "Ip", "14.90.1.1"),
+                decision("2", "Network", "14.90.1.0/24"),
+                decision("3", "Ip", "15.90.1.1"),
+            ],
+            &query,
+            1,
+        );
+
+        assert_eq!(response.total, 3);
+        assert_eq!(response.decisions.len(), 1);
+        assert_eq!(response.decisions[0].id, "1");
+    }
+
+    #[test]
+    fn decision_expiration_uses_remaining_duration() {
+        let before = SystemTime::now();
+        let decision = decision_from_json(
+            &json!({
+                "id": 1,
+                "duration": "1h30m",
+                "stop_at": "2020-01-01T00:00:00Z",
+            }),
+            None,
+        )
+        .unwrap();
+        let expiration = DateTime::parse_from_rfc3339(decision.expires_at.as_deref().unwrap())
+            .unwrap()
+            .with_timezone(&Utc);
+        let remaining = expiration.signed_duration_since(DateTime::<Utc>::from(before));
+
+        assert!((5_399..=5_400).contains(&remaining.num_seconds()));
+    }
+
+    #[test]
+    fn invalid_or_missing_decision_duration_has_no_expiration() {
+        assert!(parse_remaining_duration("").is_none());
+        assert!(parse_remaining_duration("invalid").is_none());
+        assert!(parse_remaining_duration("NaNs").is_none());
+        assert!(
+            decision_from_json(&json!({ "id": 1 }), None)
+                .unwrap()
+                .expires_at
+                .is_none()
+        );
+    }
+
+    #[test]
     fn decision_id_must_be_a_positive_integer() {
         assert!(validate_decision_id("123").is_ok());
         assert!(validate_decision_id("0").is_err());
         assert!(validate_decision_id("invalid").is_err());
         assert!(validate_decision_id("1;rm").is_err());
+    }
+
+    fn decision(id: &str, scope: &str, value: &str) -> CrowdSecDecision {
+        CrowdSecDecision {
+            id: id.to_string(),
+            scope: scope.to_string(),
+            value: value.to_string(),
+            decision_type: "ban".to_string(),
+            origin: None,
+            scenario: None,
+            expires_at: None,
+        }
     }
 }

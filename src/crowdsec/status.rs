@@ -34,7 +34,7 @@ use crate::{
         lapi,
         models::{
             CrowdSecConsoleEnrollmentState, CrowdSecConsoleState, CrowdSecConsoleStatusResponse,
-            CrowdSecDecisionsQuery, CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus,
+            CrowdSecFirewallBackend, CrowdSecFirewallBouncerStatus,
             CrowdSecHealthState, CrowdSecHealthStatus, CrowdSecPackageStatus,
             CrowdSecServiceStatus, CrowdSecStatusCount, CrowdSecStatusResponse,
             CrowdSecStatusWarning,
@@ -46,7 +46,6 @@ use crate::{
 
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
-const DECISION_COUNT_LIMIT: u32 = 100;
 
 pub async fn status() -> Result<CrowdSecStatusResponse> {
     let (packages, package_status_error) = match packages::package_status().await {
@@ -341,32 +340,17 @@ fn health_error_status(message: &str) -> CrowdSecHealthStatus {
 }
 
 async fn active_decision_count() -> CrowdSecStatusCount {
-    debug!(
-        "Counting local CrowdSec decisions with a maximum of {} entries",
-        DECISION_COUNT_LIMIT
-    );
-    let query = CrowdSecDecisionsQuery {
-        limit: Some(DECISION_COUNT_LIMIT),
-        ..Default::default()
-    };
+    debug!("Counting all active CrowdSec decisions");
 
-    match decisions::list(&query).await {
-        Ok(response) => {
-            let count = response.decisions.len() as u64;
-            let truncated = count == DECISION_COUNT_LIMIT as u64;
-            CrowdSecStatusCount {
-                count: Some(count),
-                limit: Some(DECISION_COUNT_LIMIT as u64),
-                truncated,
-                state: CrowdSecHealthState::Ready,
-                message: if truncated {
-                    format!("At least {count} local active CrowdSec decisions")
-                } else {
-                    format!("{count} local active CrowdSec decisions")
-                },
-            }
-        }
-        Err(_) => count_error_status("Unable to count local active CrowdSec decisions"),
+    match decisions::total().await {
+        Ok(count) => CrowdSecStatusCount {
+            count: Some(count),
+            limit: None,
+            truncated: false,
+            state: CrowdSecHealthState::Ready,
+            message: format!("{count} active CrowdSec decisions"),
+        },
+        Err(_) => count_error_status("Unable to count active CrowdSec decisions"),
     }
 }
 

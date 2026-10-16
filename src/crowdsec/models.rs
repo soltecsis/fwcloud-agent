@@ -589,6 +589,7 @@ pub struct CrowdSecDecision {
 #[derive(Debug, Serialize)]
 pub struct CrowdSecDecisionsResponse {
     pub decisions: Vec<CrowdSecDecision>,
+    pub total: u64,
 }
 
 #[derive(Debug, Default, Deserialize)]
