@@ -50,6 +50,7 @@ pub fn routes_setup(config: &mut web::ServiceConfig) {
             .service(crowdsec::finalize_crowdsec_transition)
             .service(crowdsec::crowdsec_status)
             .service(crowdsec::crowdsec_bouncer_statistics)
+            .service(crowdsec::take_crowdsec_bouncer_statistics_samples)
             .service(crowdsec::crowdsec_bouncer_statistics_sampling)
             .service(crowdsec::update_crowdsec_bouncer_statistics_sampling)
             .service(crowdsec::crowdsec_collections)

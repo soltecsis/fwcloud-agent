@@ -22,12 +22,15 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    fs, io,
-    path::Path,
+    fs,
+    io::{self, Write},
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
 const API_CONFIG_FILE: &str = "crowdsec_firewall_bouncer_statistics.json";
+const CACHE_DIRECTORY: &str = "crowdsec";
+const CACHE_FILE: &str = "firewall_bouncer_statistics.jsonl";
 pub const DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_SAMPLING_INTERVAL: u64 = 30;
 pub const DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_CACHE_MAX_SIZE: usize = 10485760;
 
@@ -113,6 +116,84 @@ impl CrowdSecFirewallBouncerStatisticsConfig {
 
         Ok(())
     }
+}
+
+pub fn cache_path(data_dir: &str) -> PathBuf {
+    Path::new(data_dir).join(CACHE_DIRECTORY).join(CACHE_FILE)
+}
+
+pub fn cached_samples(data_dir: &str) -> io::Result<Vec<CrowdSecFirewallBouncerStatisticsSample>> {
+    let path = cache_path(data_dir);
+
+    if !path.is_file() {
+        return Ok(vec![]);
+    }
+
+    fs::read_to_string(path)?
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            serde_json::from_str(line)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
+        })
+        .collect()
+}
+
+pub fn append_cached_sample(
+    data_dir: &str,
+    sample: CrowdSecFirewallBouncerStatisticsSample,
+    cache_max_size: usize,
+) -> io::Result<()> {
+    let mut samples = cached_samples(data_dir)?;
+    samples.push(sample);
+
+    let mut lines = samples
+        .into_iter()
+        .map(|sample| {
+            serde_json::to_string(&sample)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let mut cache_size = lines.iter().map(|line| line.len() + 1).sum::<usize>();
+
+    while cache_size > cache_max_size && !lines.is_empty() {
+        cache_size = cache_size.saturating_sub(lines.remove(0).len() + 1);
+    }
+
+    write_cached_lines(data_dir, &lines)
+}
+
+pub fn take_cached_samples(
+    data_dir: &str,
+) -> io::Result<Vec<CrowdSecFirewallBouncerStatisticsSample>> {
+    let samples = cached_samples(data_dir)?;
+    clear_cached_samples(data_dir)?;
+
+    Ok(samples)
+}
+
+pub fn clear_cached_samples(data_dir: &str) -> io::Result<()> {
+    match fs::remove_file(cache_path(data_dir)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn write_cached_lines(data_dir: &str, lines: &[String]) -> io::Result<()> {
+    let path = cache_path(data_dir);
+    let directory = path
+        .parent()
+        .ok_or_else(|| io::Error::other("CrowdSec statistics cache directory is unavailable"))?;
+    fs::create_dir_all(directory)?;
+
+    let temporary = path.with_extension("tmp");
+    let mut file = fs::File::create(&temporary)?;
+    for line in lines {
+        writeln!(file, "{line}")?;
+    }
+    file.sync_all()?;
+    fs::rename(temporary, path)
 }
 
 #[derive(Clone, Default)]
@@ -349,5 +430,38 @@ mod tests {
         store.clear().unwrap();
 
         assert_eq!(store.configuration().unwrap(), None);
+    }
+
+    #[test]
+    fn retains_a_bounded_cache_and_consumes_it() {
+        let root = std::env::temp_dir().join(format!(
+            "fwcloud-crowdsec-statistics-cache-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let data_dir = root.to_str().unwrap();
+        let first = CrowdSecFirewallBouncerStatisticsSample {
+            collected_at: "2026-10-19T10:00:00.000Z".to_string(),
+            policy_generation: 0,
+            ipv4_input: CrowdSecFirewallBouncerCounter::default(),
+            ipv4_forward: CrowdSecFirewallBouncerCounter::default(),
+            ipv6_input: CrowdSecFirewallBouncerCounter::default(),
+            ipv6_forward: CrowdSecFirewallBouncerCounter::default(),
+            addresses: vec![],
+        };
+        let second = CrowdSecFirewallBouncerStatisticsSample {
+            collected_at: "2026-10-19T10:00:01.000Z".to_string(),
+            ..first.clone()
+        };
+        let cache_max_size = serde_json::to_string(&first).unwrap().len() + 1;
+
+        append_cached_sample(data_dir, first, cache_max_size).unwrap();
+        append_cached_sample(data_dir, second.clone(), cache_max_size).unwrap();
+
+        assert_eq!(cached_samples(data_dir).unwrap(), vec![second.clone()]);
+        assert_eq!(take_cached_samples(data_dir).unwrap(), vec![second]);
+        assert!(cached_samples(data_dir).unwrap().is_empty());
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

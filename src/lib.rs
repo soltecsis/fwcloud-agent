@@ -71,7 +71,10 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
     // Start workers threads.
     let openvpn_st_collector = OpenVPNStCollector::new(&cfg);
     let crowdsec_statistics_collector =
-        CrowdSecFirewallBouncerStatisticsCollector::new(crowdsec_statistics_config.clone());
+        CrowdSecFirewallBouncerStatisticsCollector::new(
+            &cfg.data_dir,
+            crowdsec_statistics_config.clone(),
+        );
     crowdsec_statistics_collector.start(cfg.clone());
     let workers_channels = WorkersChannels {
         openvpn_st_collector: openvpn_st_collector.start(cfg.clone()),

@@ -43,7 +43,8 @@ use crate::{
         packages,
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
         statistics::{
-            CrowdSecFirewallBouncerStatisticsConfig, CrowdSecFirewallBouncerStatisticsConfigStore,
+            clear_cached_samples, CrowdSecFirewallBouncerStatisticsConfig,
+            CrowdSecFirewallBouncerStatisticsConfigStore,
         },
         status, uninstall,
     },
@@ -56,6 +57,15 @@ async fn crowdsec_bouncer_statistics(
     collector: web::Data<CrowdSecFirewallBouncerStatisticsCollector>,
 ) -> Result<HttpResponse> {
     Ok(HttpResponse::Ok().json(collector.samples()))
+}
+
+#[put("/crowdsec/bouncer/statistics/samples")]
+async fn take_crowdsec_bouncer_statistics_samples(
+    cfg: web::Data<Arc<Config>>,
+    collector: web::Data<CrowdSecFirewallBouncerStatisticsCollector>,
+) -> Result<HttpResponse> {
+    let _guard = cfg.mutex.crowdsec.lock().await;
+    Ok(HttpResponse::Ok().json(collector.take_samples()?))
 }
 
 #[get("/crowdsec/bouncer/statistics/sampling")]
@@ -981,6 +991,7 @@ async fn synchronize_crowdsec_bouncer_statistics_configuration(
         store.replace(configuration)?;
     } else {
         CrowdSecFirewallBouncerStatisticsConfig::remove(cfg.etc_dir)?;
+        clear_cached_samples(cfg.data_dir)?;
         store.clear()?;
     }
 

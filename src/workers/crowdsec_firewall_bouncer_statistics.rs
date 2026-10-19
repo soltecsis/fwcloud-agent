@@ -24,7 +24,6 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use futures::executor::block_on;
 use log::{debug, error, info};
 use std::{
-    collections::VecDeque,
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant, SystemTime},
@@ -35,6 +34,7 @@ use crate::{
     crowdsec::{
         bouncers,
         statistics::{
+            append_cached_sample, cached_samples, take_cached_samples,
             CrowdSecFirewallBouncerStatisticsConfigStore, CrowdSecFirewallBouncerStatisticsSample,
             CrowdSecFirewallBouncerStatisticsSamplesResponse,
             CrowdSecFirewallBouncerStatisticsState,
@@ -43,7 +43,6 @@ use crate::{
 };
 
 struct CrowdSecFirewallBouncerStatisticsCollectorInner {
-    samples: VecDeque<CrowdSecFirewallBouncerStatisticsSample>,
     state: CrowdSecFirewallBouncerStatisticsState,
     policy_generation: u64,
     next_sample_at: Option<Instant>,
@@ -53,20 +52,24 @@ struct CrowdSecFirewallBouncerStatisticsCollectorInner {
 pub struct CrowdSecFirewallBouncerStatisticsCollector {
     inner: Arc<Mutex<CrowdSecFirewallBouncerStatisticsCollectorInner>>,
     configuration: CrowdSecFirewallBouncerStatisticsConfigStore,
+    data_dir: String,
 }
 
 impl CrowdSecFirewallBouncerStatisticsCollector {
-    pub fn new(configuration: CrowdSecFirewallBouncerStatisticsConfigStore) -> Self {
+    pub fn new(
+        data_dir: &str,
+        configuration: CrowdSecFirewallBouncerStatisticsConfigStore,
+    ) -> Self {
         CrowdSecFirewallBouncerStatisticsCollector {
             inner: Arc::new(Mutex::new(
                 CrowdSecFirewallBouncerStatisticsCollectorInner {
-                    samples: VecDeque::new(),
                     state: CrowdSecFirewallBouncerStatisticsState::Unavailable,
                     policy_generation: 0,
                     next_sample_at: None,
                 },
             )),
             configuration,
+            data_dir: data_dir.to_string(),
         }
     }
 
@@ -78,12 +81,38 @@ impl CrowdSecFirewallBouncerStatisticsCollector {
             };
         }
 
+        let samples = match cached_samples(&self.data_dir) {
+            Ok(samples) => samples,
+            Err(error) => {
+                error!("Reading CrowdSec Firewall Bouncer statistics cache ({error})");
+                return CrowdSecFirewallBouncerStatisticsSamplesResponse {
+                    state: CrowdSecFirewallBouncerStatisticsState::Unavailable,
+                    samples: vec![],
+                };
+            }
+        };
         let collector = self.inner.lock().unwrap();
 
         CrowdSecFirewallBouncerStatisticsSamplesResponse {
             state: collector.state.clone(),
-            samples: collector.samples.iter().cloned().collect(),
+            samples,
         }
+    }
+
+    pub fn take_samples(
+        &self,
+    ) -> std::io::Result<CrowdSecFirewallBouncerStatisticsSamplesResponse> {
+        if self.configuration.configuration()?.is_none() {
+            return Ok(CrowdSecFirewallBouncerStatisticsSamplesResponse {
+                state: CrowdSecFirewallBouncerStatisticsState::Unavailable,
+                samples: vec![],
+            });
+        }
+
+        Ok(CrowdSecFirewallBouncerStatisticsSamplesResponse {
+            state: self.inner.lock().unwrap().state.clone(),
+            samples: take_cached_samples(&self.data_dir)?,
+        })
     }
 
     pub fn start(&self, cfg: Arc<Config>) {
@@ -141,19 +170,22 @@ impl CrowdSecFirewallBouncerStatisticsCollector {
         };
 
         match counters {
-            Ok(counters) => self.store_sample(
-                CrowdSecFirewallBouncerStatisticsSample {
-                    collected_at: DateTime::<Utc>::from(SystemTime::now())
-                        .to_rfc3339_opts(SecondsFormat::Millis, true),
-                    policy_generation: self.policy_generation(),
-                    ipv4_input: counters.ipv4_input,
-                    ipv4_forward: counters.ipv4_forward,
-                    ipv6_input: counters.ipv6_input,
-                    ipv6_forward: counters.ipv6_forward,
-                    addresses: counters.addresses,
-                },
-                configuration.cache_max_size,
-            ),
+            Ok(counters) => {
+                let _guard = cfg.mutex.crowdsec.lock().await;
+                self.store_sample(
+                    CrowdSecFirewallBouncerStatisticsSample {
+                        collected_at: DateTime::<Utc>::from(SystemTime::now())
+                            .to_rfc3339_opts(SecondsFormat::Millis, true),
+                        policy_generation: self.policy_generation(),
+                        ipv4_input: counters.ipv4_input,
+                        ipv4_forward: counters.ipv4_forward,
+                        ipv6_input: counters.ipv6_input,
+                        ipv6_forward: counters.ipv6_forward,
+                        addresses: counters.addresses,
+                    },
+                    configuration.cache_max_size,
+                );
+            }
             Err(error) => {
                 debug!("CrowdSec Firewall Bouncer statistics are unavailable ({error})");
                 self.set_unavailable();
@@ -185,41 +217,16 @@ impl CrowdSecFirewallBouncerStatisticsCollector {
     }
 
     fn store_sample(&self, sample: CrowdSecFirewallBouncerStatisticsSample, cache_max_size: usize) {
-        let sample_size = match serde_json::to_vec(&sample) {
-            Ok(sample) => sample.len(),
-            Err(error) => {
-                error!("Serializing CrowdSec Firewall Bouncer statistics sample ({error})");
-                return;
+        match append_cached_sample(&self.data_dir, sample, cache_max_size) {
+            Ok(()) => {
+                self.inner.lock().unwrap().state =
+                    CrowdSecFirewallBouncerStatisticsState::Available;
             }
-        };
-        let mut collector = self.inner.lock().unwrap();
-
-        if sample_size > cache_max_size {
-            collector.samples.clear();
-            collector.state = CrowdSecFirewallBouncerStatisticsState::Available;
-            return;
+            Err(error) => {
+                error!("Writing CrowdSec Firewall Bouncer statistics cache ({error})");
+                self.set_unavailable();
+            }
         }
-
-        let mut cache_size = collector
-            .samples
-            .iter()
-            .filter_map(|sample| serde_json::to_vec(sample).ok())
-            .map(|sample| sample.len())
-            .sum::<usize>();
-
-        while cache_size + sample_size > cache_max_size {
-            let Some(removed) = collector.samples.pop_front() else {
-                break;
-            };
-            cache_size = cache_size.saturating_sub(
-                serde_json::to_vec(&removed)
-                    .map(|sample| sample.len())
-                    .unwrap_or_default(),
-            );
-        }
-
-        collector.samples.push_back(sample);
-        collector.state = CrowdSecFirewallBouncerStatisticsState::Available;
     }
 }
 
@@ -248,9 +255,15 @@ mod tests {
 
     #[test]
     fn retains_only_samples_that_fit_the_cache() {
-        let collector = CrowdSecFirewallBouncerStatisticsCollector::new(
-            CrowdSecFirewallBouncerStatisticsConfigStore::default(),
-        );
+        let root = std::env::temp_dir().join(format!(
+            "fwcloud-crowdsec-statistics-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let configuration = CrowdSecFirewallBouncerStatisticsConfigStore::default();
+        configuration.replace(Default::default()).unwrap();
+        let collector =
+            CrowdSecFirewallBouncerStatisticsCollector::new(root.to_str().unwrap(), configuration);
         let first = sample("192.0.2.1");
         let second = sample("192.0.2.2");
         let cache_max_size = serde_json::to_vec(&first).unwrap().len() + 1;
@@ -265,5 +278,7 @@ mod tests {
         );
         assert_eq!(samples.samples.len(), 1);
         assert_eq!(samples.samples[0].addresses[0].address, "192.0.2.2");
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
