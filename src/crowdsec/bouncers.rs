@@ -55,6 +55,10 @@ use crate::{
         },
         packages,
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
+        statistics::{
+            CrowdSecFirewallBouncerAddressCounter, CrowdSecFirewallBouncerBlockingCounters,
+            CrowdSecFirewallBouncerCounter,
+        },
     },
     errors::{FwcError, Result},
 };
@@ -1655,6 +1659,261 @@ pub async fn validate_blocking_statistics_resources(
     }
 }
 
+pub async fn collect_blocking_statistics(
+    backend: CrowdSecFirewallBackend,
+) -> Result<CrowdSecFirewallBouncerBlockingCounters> {
+    validate_blocking_statistics_resources(backend).await?;
+
+    match backend {
+        CrowdSecFirewallBackend::Iptables => {
+            let ipv4_input =
+                iptables_blocking_chain_counter(IPTABLES_COMMAND, IPTABLES_V4_INPUT_BLOCKING_CHAIN)
+                    .await?;
+            let ipv4_forward = iptables_blocking_chain_counter(
+                IPTABLES_COMMAND,
+                IPTABLES_V4_FORWARD_BLOCKING_CHAIN,
+            )
+            .await?;
+            let ipv6_input =
+                iptables_blocking_chain_counter(IP6TABLES_COMMAND, IPTABLES_V6_INPUT_BLOCKING_CHAIN)
+                    .await?;
+            let ipv6_forward = iptables_blocking_chain_counter(
+                IP6TABLES_COMMAND,
+                IPTABLES_V6_FORWARD_BLOCKING_CHAIN,
+            )
+            .await?;
+            let mut addresses = ipset_address_counters(IPSET_V4_BLACKLIST).await?;
+            addresses.extend(ipset_address_counters(IPSET_V6_BLACKLIST).await?);
+
+            Ok(CrowdSecFirewallBouncerBlockingCounters {
+                ipv4_input,
+                ipv4_forward,
+                ipv6_input,
+                ipv6_forward,
+                addresses,
+            })
+        }
+        CrowdSecFirewallBackend::Nftables => {
+            validate_nftables_blacklist_sets().await?;
+            let ipv4_input =
+                nftables_blocking_counter("ip", NFTABLES_V4_INPUT_BLOCKING_COUNTER).await?;
+            let ipv4_forward =
+                nftables_blocking_counter("ip", NFTABLES_V4_FORWARD_BLOCKING_COUNTER).await?;
+            let ipv6_input =
+                nftables_blocking_counter("ip6", NFTABLES_V6_INPUT_BLOCKING_COUNTER).await?;
+            let ipv6_forward =
+                nftables_blocking_counter("ip6", NFTABLES_V6_FORWARD_BLOCKING_COUNTER).await?;
+            let mut addresses = nftables_address_counters("ip", IPSET_V4_BLACKLIST).await?;
+            addresses.extend(nftables_address_counters("ip6", IPSET_V6_BLACKLIST).await?);
+
+            Ok(CrowdSecFirewallBouncerBlockingCounters {
+                ipv4_input,
+                ipv4_forward,
+                ipv6_input,
+                ipv6_forward,
+                addresses,
+            })
+        }
+    }
+}
+
+async fn iptables_blocking_chain_counter(
+    command: &str,
+    chain: &str,
+) -> Result<CrowdSecFirewallBouncerCounter> {
+    let output = run_iptables_blocking_chain_counters(command, chain).await?;
+
+    if !output.status.success() {
+        return Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to inspect FWCloud CrowdSec blocking counter",
+        ));
+    }
+
+    parse_iptables_blocking_chain_counter(String::from_utf8_lossy(&output.stdout).as_ref())
+        .ok_or_else(|| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "FWCloud CrowdSec blocking counter is invalid",
+            )
+        })
+}
+
+fn parse_iptables_blocking_chain_counter(output: &str) -> Option<CrowdSecFirewallBouncerCounter> {
+    output.lines().find_map(|line| {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        if fields.len() >= 3 && fields[2] == "DROP" {
+            Some(CrowdSecFirewallBouncerCounter {
+                packets: fields[0].parse().ok()?,
+                bytes: fields[1].parse().ok()?,
+            })
+        } else {
+            None
+        }
+    })
+}
+
+async fn ipset_address_counters(name: &str) -> Result<Vec<CrowdSecFirewallBouncerAddressCounter>> {
+    let output = run_ipset(&["save", name]).await?;
+
+    if !output.status.success() {
+        return Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to inspect FWCloud CrowdSec blacklist IPSet counters",
+        ));
+    }
+
+    Ok(parse_ipset_address_counters(
+        String::from_utf8_lossy(&output.stdout).as_ref(),
+        name,
+    ))
+}
+
+fn parse_ipset_address_counters(
+    output: &str,
+    name: &str,
+) -> Vec<CrowdSecFirewallBouncerAddressCounter> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            if fields.len() < 3 || fields[0] != "add" || fields[1] != name {
+                return None;
+            }
+
+            let counter = counter_from_fields(&fields)?;
+            (counter.packets > 0).then(|| CrowdSecFirewallBouncerAddressCounter {
+                address: fields[2].to_string(),
+                packets: counter.packets,
+                bytes: counter.bytes,
+            })
+        })
+        .collect()
+}
+
+fn counter_from_fields(fields: &[&str]) -> Option<CrowdSecFirewallBouncerCounter> {
+    let packets = fields
+        .windows(2)
+        .find(|fields| fields[0] == "packets")?
+        .get(1)?
+        .parse()
+        .ok()?;
+    let bytes = fields
+        .windows(2)
+        .find(|fields| fields[0] == "bytes")?
+        .get(1)?
+        .parse()
+        .ok()?;
+
+    Some(CrowdSecFirewallBouncerCounter { packets, bytes })
+}
+
+async fn nftables_blocking_counter(
+    family: &str,
+    name: &str,
+) -> Result<CrowdSecFirewallBouncerCounter> {
+    let output = run_nft(&["--json", "list", "counter", family, NFTABLES_V4_TABLE, name]).await?;
+
+    if !output.status.success() {
+        return Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to inspect FWCloud CrowdSec blocking counter",
+        ));
+    }
+
+    parse_nftables_counter(String::from_utf8_lossy(&output.stdout).as_ref(), family, name)
+        .ok_or_else(|| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "FWCloud CrowdSec blocking counter is invalid",
+            )
+        })
+}
+
+fn parse_nftables_counter(
+    output: &str,
+    family: &str,
+    name: &str,
+) -> Option<CrowdSecFirewallBouncerCounter> {
+    serde_json::from_str::<Value>(output)
+        .ok()?
+        .get("nftables")?
+        .as_array()?
+        .iter()
+        .find_map(|entry| {
+            let counter = entry.get("counter")?;
+            if counter.get("family").and_then(Value::as_str) == Some(family)
+                && counter.get("table").and_then(Value::as_str) == Some(NFTABLES_V4_TABLE)
+                && counter.get("name").and_then(Value::as_str) == Some(name)
+            {
+                Some(CrowdSecFirewallBouncerCounter {
+                    packets: counter.get("packets").and_then(Value::as_u64)?,
+                    bytes: counter.get("bytes").and_then(Value::as_u64)?,
+                })
+            } else {
+                None
+            }
+        })
+}
+
+async fn nftables_address_counters(
+    family: &str,
+    name: &str,
+) -> Result<Vec<CrowdSecFirewallBouncerAddressCounter>> {
+    let output = run_nft(&["--json", "list", "set", family, NFTABLES_V4_TABLE, name]).await?;
+
+    if !output.status.success() {
+        return Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to inspect FWCloud CrowdSec blacklist NFTables set counters",
+        ));
+    }
+
+    Ok(parse_nftables_address_counters(
+        String::from_utf8_lossy(&output.stdout).as_ref(),
+        family,
+        name,
+    ))
+}
+
+fn parse_nftables_address_counters(
+    output: &str,
+    family: &str,
+    name: &str,
+) -> Vec<CrowdSecFirewallBouncerAddressCounter> {
+    let Some(entries) = serde_json::from_str::<Value>(output)
+        .ok()
+        .and_then(|value| value.get("nftables")?.as_array().cloned())
+    else {
+        return vec![];
+    };
+
+    entries
+        .iter()
+        .filter_map(|entry| entry.get("set"))
+        .filter(|set| {
+            set.get("family").and_then(Value::as_str) == Some(family)
+                && set.get("table").and_then(Value::as_str) == Some(NFTABLES_V4_TABLE)
+                && set.get("name").and_then(Value::as_str) == Some(name)
+        })
+        .flat_map(|set| set.get("elem").and_then(Value::as_array).into_iter().flatten())
+        .filter_map(|element| {
+            let element = element.get("elem")?;
+            let counter = element.get("counter")?;
+            let packets = counter.get("packets").and_then(Value::as_u64)?;
+            if packets == 0 {
+                return None;
+            }
+
+            Some(CrowdSecFirewallBouncerAddressCounter {
+                address: element.get("val")?.as_str()?.to_string(),
+                packets,
+                bytes: counter.get("bytes").and_then(Value::as_u64)?,
+            })
+        })
+        .collect()
+}
+
 async fn iptables_blocking_chain_is_ready(
     command: &str,
     chain: &str,
@@ -2448,6 +2707,35 @@ async fn run_iptables_chain(command: &str, chain: &str) -> Result<std::process::
     })
 }
 
+async fn run_iptables_blocking_chain_counters(
+    command: &str,
+    chain: &str,
+) -> Result<std::process::Output> {
+    debug!(
+        "Reading FWCloud CrowdSec blocking counter: {} {}",
+        command, chain
+    );
+    timeout(
+        IPSET_COMMAND_TIMEOUT,
+        Command::new(command)
+            .args(["-L", chain, "-v", "-n", "-x"])
+            .output(),
+    )
+    .await
+    .map_err(|_| {
+        FwcError::crowdsec(
+            OPERATION_TIMEOUT,
+            "CrowdSec blocking counter read timed out",
+        )
+    })?
+    .map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to read FWCloud CrowdSec blocking counter",
+        )
+    })
+}
+
 async fn run_iptables(command: &str, arguments: &[&str]) -> Result<()> {
     debug!(
         "Running legacy CrowdSec Firewall Bouncer cleanup command: {} {:?}",
@@ -2771,7 +3059,9 @@ mod tests {
         iptables_blocking_chain_is_compatible, nftables_blacklist_set_is_compatible,
         nftables_bouncer_service_action, nftables_counter_is_compatible,
         nftables_counter_validation_arguments, nftables_set_only_configuration_contents,
-        non_selected_firewall_backend, pending_backend_contents, pending_backend_from_contents,
+        non_selected_firewall_backend, parse_ipset_address_counters,
+        parse_iptables_blocking_chain_counter, parse_nftables_address_counters,
+        parse_nftables_counter, pending_backend_contents, pending_backend_from_contents,
         pending_policy_status, reject_fwcloud_bouncer, select_active_backend,
         set_only_configuration_contents, validate_bouncer_name, BouncerConfigurationState,
         BouncerReconciliationAction, CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig,
@@ -2902,6 +3192,73 @@ mod tests {
             "ip6",
             NFTABLES_V4_INPUT_BLOCKING_COUNTER,
         ));
+    }
+
+    #[test]
+    fn parses_dedicated_iptables_blocking_chain_counters() {
+        let output = "Chain FWC_CROWDSEC_V4_INPUT (0 references)\n pkts bytes target     prot opt in     out     source               destination\n   12   840 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0\n";
+
+        let counter = parse_iptables_blocking_chain_counter(output).unwrap();
+
+        assert_eq!(counter.packets, 12);
+        assert_eq!(counter.bytes, 840);
+    }
+
+    #[test]
+    fn parses_only_ipset_addresses_with_blocked_packets() {
+        let output = "create crowdsec-blacklists hash:ip family inet hashsize 1024 maxelem 150000 counters\nadd crowdsec-blacklists 192.0.2.1 timeout 0 packets 0 bytes 0\nadd crowdsec-blacklists 192.0.2.2 timeout 0 packets 3 bytes 240\n";
+
+        let counters = parse_ipset_address_counters(output, IPSET_V4_BLACKLIST);
+
+        assert_eq!(counters.len(), 1);
+        assert_eq!(counters[0].address, "192.0.2.2");
+        assert_eq!(counters[0].packets, 3);
+        assert_eq!(counters[0].bytes, 240);
+    }
+
+    #[test]
+    fn parses_named_nftables_blocking_counter() {
+        let output = r#"{
+            "nftables": [{
+                "counter": {
+                    "family": "ip",
+                    "table": "filter",
+                    "name": "fwcloud_crowdsec_v4_input",
+                    "packets": 7,
+                    "bytes": 560
+                }
+            }]
+        }"#;
+
+        let counter = parse_nftables_counter(output, "ip", NFTABLES_V4_INPUT_BLOCKING_COUNTER)
+            .unwrap();
+
+        assert_eq!(counter.packets, 7);
+        assert_eq!(counter.bytes, 560);
+    }
+
+    #[test]
+    fn parses_only_nftables_addresses_with_blocked_packets() {
+        let output = r#"{
+            "nftables": [{
+                "set": {
+                    "family": "ip",
+                    "table": "filter",
+                    "name": "crowdsec-blacklists",
+                    "elem": [
+                        {"elem": {"val": "192.0.2.1", "counter": {"packets": 0, "bytes": 0}}},
+                        {"elem": {"val": "192.0.2.2", "counter": {"packets": 5, "bytes": 400}}}
+                    ]
+                }
+            }]
+        }"#;
+
+        let counters = parse_nftables_address_counters(output, "ip", IPSET_V4_BLACKLIST);
+
+        assert_eq!(counters.len(), 1);
+        assert_eq!(counters[0].address, "192.0.2.2");
+        assert_eq!(counters[0].packets, 5);
+        assert_eq!(counters[0].bytes, 400);
     }
 
     #[test]

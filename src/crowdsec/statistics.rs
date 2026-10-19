@@ -144,12 +144,23 @@ pub struct CrowdSecFirewallBouncerAddressCounter {
     pub bytes: u64,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+pub struct CrowdSecFirewallBouncerBlockingCounters {
+    pub ipv4_input: CrowdSecFirewallBouncerCounter,
+    pub ipv4_forward: CrowdSecFirewallBouncerCounter,
+    pub ipv6_input: CrowdSecFirewallBouncerCounter,
+    pub ipv6_forward: CrowdSecFirewallBouncerCounter,
+    pub addresses: Vec<CrowdSecFirewallBouncerAddressCounter>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct CrowdSecFirewallBouncerStatisticsSample {
     pub collected_at: String,
     pub policy_generation: u64,
-    pub ipv4: CrowdSecFirewallBouncerCounter,
-    pub ipv6: CrowdSecFirewallBouncerCounter,
+    pub ipv4_input: CrowdSecFirewallBouncerCounter,
+    pub ipv4_forward: CrowdSecFirewallBouncerCounter,
+    pub ipv6_input: CrowdSecFirewallBouncerCounter,
+    pub ipv6_forward: CrowdSecFirewallBouncerCounter,
     pub addresses: Vec<CrowdSecFirewallBouncerAddressCounter>,
 }
 
@@ -177,11 +188,13 @@ mod tests {
         let sample = CrowdSecFirewallBouncerStatisticsSample {
             collected_at: "2026-10-19T10:00:00.000Z".to_string(),
             policy_generation: 4,
-            ipv4: CrowdSecFirewallBouncerCounter {
+            ipv4_input: CrowdSecFirewallBouncerCounter {
                 packets: 12,
                 bytes: 3456,
             },
-            ipv6: CrowdSecFirewallBouncerCounter::default(),
+            ipv4_forward: CrowdSecFirewallBouncerCounter::default(),
+            ipv6_input: CrowdSecFirewallBouncerCounter::default(),
+            ipv6_forward: CrowdSecFirewallBouncerCounter::default(),
             addresses: vec![CrowdSecFirewallBouncerAddressCounter {
                 address: "192.0.2.15".to_string(),
                 packets: 3,
@@ -194,8 +207,10 @@ mod tests {
             json!({
                 "collected_at": "2026-10-19T10:00:00.000Z",
                 "policy_generation": 4,
-                "ipv4": { "packets": 12, "bytes": 3456 },
-                "ipv6": { "packets": 0, "bytes": 0 },
+                "ipv4_input": { "packets": 12, "bytes": 3456 },
+                "ipv4_forward": { "packets": 0, "bytes": 0 },
+                "ipv6_input": { "packets": 0, "bytes": 0 },
+                "ipv6_forward": { "packets": 0, "bytes": 0 },
                 "addresses": [{
                     "address": "192.0.2.15",
                     "packets": 3,

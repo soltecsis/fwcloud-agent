@@ -42,9 +42,7 @@ use crate::workers::{
     openvpn_status_collector::{OpenVPNStCollector, OpenVPNStatusSamplingConfig},
     WorkersChannels,
 };
-use crowdsec::statistics::{
-    CrowdSecFirewallBouncerStatisticsConfig, CrowdSecFirewallBouncerStatisticsConfigStore,
-};
+use crowdsec::statistics::CrowdSecFirewallBouncerStatisticsConfigStore;
 use config::Config;
 
 pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Error> {
@@ -65,12 +63,6 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
 
     OpenVPNStatusSamplingConfig::load_or_create(config.etc_dir)?;
     let crowdsec_statistics_config = CrowdSecFirewallBouncerStatisticsConfigStore::default();
-    match futures::executor::block_on(crowdsec::packages::crowdsec_package_is_installed()) {
-        Ok(true) => crowdsec_statistics_config
-            .replace(CrowdSecFirewallBouncerStatisticsConfig::load_or_create(config.etc_dir)?)?,
-        Ok(false) => (),
-        Err(error) => warn!("Unable to determine whether CrowdSec is installed: {error}"),
-    }
 
     let cfg = Arc::new(config);
     let cfg_main_thread = cfg.clone();

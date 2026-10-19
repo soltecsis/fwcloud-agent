@@ -853,6 +853,7 @@ async fn remove_crowdsec_bouncer(
 #[post("/crowdsec/install")]
 async fn install_crowdsec(
     cfg: web::Data<Arc<Config>>,
+    store: web::Data<CrowdSecFirewallBouncerStatisticsConfigStore>,
     request: web::Json<CrowdSecInstallRequest>,
 ) -> Result<HttpResponse> {
     let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
@@ -894,11 +895,23 @@ async fn install_crowdsec(
             }
         };
 
+        initialize_crowdsec_bouncer_statistics_configuration(&cfg, &store)?;
+
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         response
     };
 
     Ok(response)
+}
+
+fn initialize_crowdsec_bouncer_statistics_configuration(
+    cfg: &web::Data<Arc<Config>>,
+    store: &web::Data<CrowdSecFirewallBouncerStatisticsConfigStore>,
+) -> Result<()> {
+    let configuration = CrowdSecFirewallBouncerStatisticsConfig::load_or_create(cfg.etc_dir)?;
+    store.replace(configuration)?;
+
+    Ok(())
 }
 
 fn required_machine_install_value<'a>(value: &'a Option<String>, field: &str) -> Result<&'a str> {
