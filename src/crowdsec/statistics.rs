@@ -21,6 +21,11 @@
 */
 
 use serde::{Deserialize, Serialize};
+use std::{fs, io, path::Path};
+
+const API_CONFIG_FILE: &str = "crowdsec_firewall_bouncer_statistics.json";
+pub const DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_SAMPLING_INTERVAL: u64 = 30;
+pub const DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_CACHE_MAX_SIZE: usize = 10485760;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -28,6 +33,74 @@ pub struct CrowdSecFirewallBouncerStatisticsConfig {
     pub enabled: bool,
     pub sampling_interval: u64,
     pub cache_max_size: usize,
+}
+
+impl Default for CrowdSecFirewallBouncerStatisticsConfig {
+    fn default() -> Self {
+        CrowdSecFirewallBouncerStatisticsConfig {
+            enabled: false,
+            sampling_interval: DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_SAMPLING_INTERVAL,
+            cache_max_size: DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_CACHE_MAX_SIZE,
+        }
+    }
+}
+
+impl CrowdSecFirewallBouncerStatisticsConfig {
+    pub fn path(etc_dir: &str) -> String {
+        format!("{etc_dir}/{API_CONFIG_FILE}")
+    }
+
+    pub fn load(etc_dir: &str) -> io::Result<Option<Self>> {
+        let path = Self::path(etc_dir);
+
+        if !Path::new(&path).is_file() {
+            return Ok(None);
+        }
+
+        let config: Self = serde_json::from_str(&fs::read_to_string(path)?)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+        config.validate()?;
+
+        Ok(Some(config))
+    }
+
+    pub fn load_or_create(etc_dir: &str) -> io::Result<Self> {
+        match Self::load(etc_dir)? {
+            Some(config) => Ok(config),
+            None => {
+                let config = Self::default();
+                config.save(etc_dir)?;
+                Ok(config)
+            }
+        }
+    }
+
+    pub fn save(&self, etc_dir: &str) -> io::Result<()> {
+        self.validate()?;
+        fs::write(
+            Self::path(etc_dir),
+            serde_json::to_string_pretty(self)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?,
+        )
+    }
+
+    pub fn validate(&self) -> io::Result<()> {
+        if self.sampling_interval == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "CrowdSec Firewall Bouncer statistics sampling interval must be a positive integer",
+            ));
+        }
+
+        if self.cache_max_size == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "CrowdSec Firewall Bouncer statistics cache max size must be a positive integer",
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -69,6 +142,7 @@ pub struct CrowdSecFirewallBouncerStatisticsSamplesResponse {
 mod tests {
     use super::*;
     use serde_json::json;
+    use uuid::Uuid;
 
     #[test]
     fn serializes_statistics_sample_with_aggregate_and_address_counters() {
@@ -115,5 +189,51 @@ mod tests {
         assert_eq!(config.enabled, true);
         assert_eq!(config.sampling_interval, 30);
         assert_eq!(config.cache_max_size, 1000);
+    }
+
+    #[test]
+    fn loads_and_persists_sampling_configuration() {
+        let root = std::env::temp_dir().join(format!(
+            "fwcloud-crowdsec-statistics-config-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let etc_dir = root.to_str().unwrap();
+
+        let config = CrowdSecFirewallBouncerStatisticsConfig {
+            enabled: false,
+            sampling_interval: 15,
+            cache_max_size: 1024,
+        };
+        config.save(etc_dir).unwrap();
+
+        assert_eq!(
+            CrowdSecFirewallBouncerStatisticsConfig::load(etc_dir).unwrap(),
+            Some(config)
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_non_positive_sampling_configuration_values() {
+        assert!(
+            CrowdSecFirewallBouncerStatisticsConfig {
+                enabled: true,
+                sampling_interval: 0,
+                cache_max_size: 1024,
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            CrowdSecFirewallBouncerStatisticsConfig {
+                enabled: true,
+                sampling_interval: 30,
+                cache_max_size: 0,
+            }
+            .validate()
+            .is_err()
+        );
     }
 }

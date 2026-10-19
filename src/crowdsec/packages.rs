@@ -337,6 +337,11 @@ pub async fn firewall_bouncer_package_is_installed(
     .await
 }
 
+pub async fn crowdsec_package_is_installed() -> Result<bool> {
+    let package_manager = detect_package_manager().await?;
+    package_is_installed(package_manager, "crowdsec").await
+}
+
 pub async fn firewall_bouncer_package_is_present(backend: CrowdSecFirewallBackend) -> Result<bool> {
     let package_manager = detect_package_manager().await?;
     package_is_present(
