@@ -28,7 +28,7 @@ use log::debug;
 use crate::{
     config::Config,
     crowdsec::{
-        alerts, bouncers, collections, console, decisions, install, lapi, packages,
+        alerts, bouncers, collections, console, decisions, install, lapi,
         models::{
             CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerRegisterRequest,
             CrowdSecBouncerReplicationRequest, CrowdSecBouncerUninstallRequest,
@@ -40,10 +40,10 @@ use crate::{
             CrowdSecRemoteMachineActivationRequest, CrowdSecRemoteMachineReauthenticationRequest,
             CrowdSecRemoteMachineResumeRequest, CrowdSecUninstallRequest,
         },
+        packages,
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
         statistics::{
-            CrowdSecFirewallBouncerStatisticsConfig,
-            CrowdSecFirewallBouncerStatisticsConfigStore,
+            CrowdSecFirewallBouncerStatisticsConfig, CrowdSecFirewallBouncerStatisticsConfigStore,
         },
         status, uninstall,
     },
@@ -95,14 +95,21 @@ async fn crowdsec_bouncer_statistics_configuration(
 }
 
 async fn ensure_crowdsec_statistics_available() -> Result<()> {
-    if packages::crowdsec_package_is_installed().await? {
-        Ok(())
-    } else {
+    if !packages::crowdsec_package_is_installed().await? {
         Err(crate::errors::FwcError::crowdsec(
             crate::crowdsec::errors::NOT_INSTALLED,
             "CrowdSec is not installed",
-        ))
+        ))?;
     }
+
+    if bouncers::configured_backend().await?.is_none() {
+        return Err(crate::errors::FwcError::crowdsec(
+            crate::crowdsec::errors::FIREWALL_INTEGRATION_INVALID,
+            "CrowdSec Firewall Bouncer is not configured",
+        ));
+    }
+
+    Ok(())
 }
 
 #[post("/crowdsec/transitions/preflight")]
@@ -292,6 +299,7 @@ async fn recover_crowdsec_transition(
 #[post("/crowdsec/transitions/finalize")]
 async fn finalize_crowdsec_transition(
     cfg: web::Data<Arc<Config>>,
+    store: web::Data<CrowdSecFirewallBouncerStatisticsConfigStore>,
     request: web::Json<TransitionConfirmation>,
 ) -> Result<HttpResponse> {
     let _guard = cfg.mutex.crowdsec.lock().await;
@@ -302,25 +310,74 @@ async fn finalize_crowdsec_transition(
         ));
     }
     match crate::crowdsec::transitions::kind(cfg.data_dir, request.transition_id).await? {
-        crate::crowdsec::transitions::TransitionKind::Address => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::address::finalize(cfg.data_dir, request.transition_id)
-                .await?,
-        )),
-        crate::crowdsec::transitions::TransitionKind::Remote => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::remote::finalize(cfg.data_dir, request.transition_id)
-                .await?,
-        )),
-        crate::crowdsec::transitions::TransitionKind::Remediation => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::remediation::finalize(
+        crate::crowdsec::transitions::TransitionKind::Address => {
+            let transition =
+                crate::crowdsec::transitions::address::load(cfg.data_dir, request.transition_id)
+                    .await?;
+            let response = crate::crowdsec::transitions::address::finalize(
                 cfg.data_dir,
                 request.transition_id,
             )
-            .await?,
-        )),
-        crate::crowdsec::transitions::TransitionKind::Lapi => Ok(HttpResponse::Ok().json(
-            crate::crowdsec::transitions::local_lapi::finalize(cfg.data_dir, request.transition_id)
-                .await?,
-        )),
+            .await?;
+            synchronize_crowdsec_bouncer_statistics_configuration(
+                &cfg,
+                &store,
+                transition.target.local_remediation,
+            )
+            .await?;
+            Ok(HttpResponse::Ok().json(response))
+        }
+        crate::crowdsec::transitions::TransitionKind::Remote => {
+            let transition =
+                crate::crowdsec::transitions::remote::load(cfg.data_dir, request.transition_id)
+                    .await?;
+            let response =
+                crate::crowdsec::transitions::remote::finalize(cfg.data_dir, request.transition_id)
+                    .await?;
+            synchronize_crowdsec_bouncer_statistics_configuration(
+                &cfg,
+                &store,
+                transition.target.local_remediation,
+            )
+            .await?;
+            Ok(HttpResponse::Ok().json(response))
+        }
+        crate::crowdsec::transitions::TransitionKind::Remediation => {
+            let transition = crate::crowdsec::transitions::remediation::load(
+                cfg.data_dir,
+                request.transition_id,
+            )
+            .await?;
+            let response = crate::crowdsec::transitions::remediation::finalize(
+                cfg.data_dir,
+                request.transition_id,
+            )
+            .await?;
+            synchronize_crowdsec_bouncer_statistics_configuration(
+                &cfg,
+                &store,
+                transition.target.local_remediation,
+            )
+            .await?;
+            Ok(HttpResponse::Ok().json(response))
+        }
+        crate::crowdsec::transitions::TransitionKind::Lapi => {
+            let transition =
+                crate::crowdsec::transitions::local_lapi::load(cfg.data_dir, request.transition_id)
+                    .await?;
+            let response = crate::crowdsec::transitions::local_lapi::finalize(
+                cfg.data_dir,
+                request.transition_id,
+            )
+            .await?;
+            synchronize_crowdsec_bouncer_statistics_configuration(
+                &cfg,
+                &store,
+                transition.target.local_remediation,
+            )
+            .await?;
+            Ok(HttpResponse::Ok().json(response))
+        }
     }
 }
 
@@ -857,6 +914,7 @@ async fn install_crowdsec(
     request: web::Json<CrowdSecInstallRequest>,
 ) -> Result<HttpResponse> {
     let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
+    let local_remediation = matches!(request.mode, CrowdSecInstallMode::Lapi);
     let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
@@ -895,7 +953,8 @@ async fn install_crowdsec(
             }
         };
 
-        initialize_crowdsec_bouncer_statistics_configuration(&cfg, &store)?;
+        synchronize_crowdsec_bouncer_statistics_configuration(&cfg, &store, local_remediation)
+            .await?;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         response
@@ -904,12 +963,18 @@ async fn install_crowdsec(
     Ok(response)
 }
 
-fn initialize_crowdsec_bouncer_statistics_configuration(
+async fn synchronize_crowdsec_bouncer_statistics_configuration(
     cfg: &web::Data<Arc<Config>>,
     store: &web::Data<CrowdSecFirewallBouncerStatisticsConfigStore>,
+    local_remediation: bool,
 ) -> Result<()> {
-    let configuration = CrowdSecFirewallBouncerStatisticsConfig::load_or_create(cfg.etc_dir)?;
-    store.replace(configuration)?;
+    if local_remediation && bouncers::configured_backend().await?.is_some() {
+        let configuration = CrowdSecFirewallBouncerStatisticsConfig::load_or_create(cfg.etc_dir)?;
+        store.replace(configuration)?;
+    } else {
+        CrowdSecFirewallBouncerStatisticsConfig::remove(cfg.etc_dir)?;
+        store.clear()?;
+    }
 
     Ok(())
 }
@@ -933,6 +998,7 @@ fn required_machine_install_value<'a>(value: &'a Option<String>, field: &str) ->
 #[post("/crowdsec/uninstall")]
 async fn uninstall_crowdsec(
     cfg: web::Data<Arc<Config>>,
+    store: web::Data<CrowdSecFirewallBouncerStatisticsConfigStore>,
     request: web::Json<CrowdSecUninstallRequest>,
 ) -> Result<HttpResponse> {
     uninstall::require_confirmation(request.confirm)?;
@@ -949,7 +1015,10 @@ async fn uninstall_crowdsec(
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         match uninstall_result {
-            Ok(response) => response,
+            Ok(response) => {
+                synchronize_crowdsec_bouncer_statistics_configuration(&cfg, &store, false).await?;
+                response
+            }
             Err(error) => {
                 emit_progress_error(&progress, "CrowdSec uninstall failed");
                 return Err(error);
@@ -963,6 +1032,7 @@ async fn uninstall_crowdsec(
 #[post("/crowdsec/bouncer/install")]
 async fn install_crowdsec_bouncer(
     cfg: web::Data<Arc<Config>>,
+    store: web::Data<CrowdSecFirewallBouncerStatisticsConfigStore>,
     body: web::Bytes,
 ) -> Result<HttpResponse> {
     let request = bouncer_install_request(&body)?;
@@ -979,7 +1049,10 @@ async fn install_crowdsec_bouncer(
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         match install_result {
-            Ok(response) => response,
+            Ok(response) => {
+                synchronize_crowdsec_bouncer_statistics_configuration(&cfg, &store, true).await?;
+                response
+            }
             Err(error) => {
                 emit_progress_error(&progress, "CrowdSec Firewall Bouncer installation failed");
                 return Err(error);
@@ -1006,6 +1079,7 @@ fn bouncer_install_request(body: &[u8]) -> Result<CrowdSecBouncerInstallRequest>
 #[post("/crowdsec/bouncer/uninstall")]
 async fn uninstall_crowdsec_bouncer(
     cfg: web::Data<Arc<Config>>,
+    store: web::Data<CrowdSecFirewallBouncerStatisticsConfigStore>,
     request: web::Json<CrowdSecBouncerUninstallRequest>,
 ) -> Result<HttpResponse> {
     uninstall::require_confirmation(request.confirm)?;
@@ -1022,7 +1096,10 @@ async fn uninstall_crowdsec_bouncer(
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         match uninstall_result {
-            Ok(response) => response,
+            Ok(response) => {
+                synchronize_crowdsec_bouncer_statistics_configuration(&cfg, &store, false).await?;
+                response
+            }
             Err(error) => {
                 emit_progress_error(&progress, "CrowdSec Firewall Bouncer uninstall failed");
                 return Err(error);

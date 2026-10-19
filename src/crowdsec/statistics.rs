@@ -79,6 +79,14 @@ impl CrowdSecFirewallBouncerStatisticsConfig {
         }
     }
 
+    pub fn remove(etc_dir: &str) -> io::Result<()> {
+        match fs::remove_file(Self::path(etc_dir)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn save(&self, etc_dir: &str) -> io::Result<()> {
         self.validate()?;
         fs::write(
@@ -117,7 +125,11 @@ impl CrowdSecFirewallBouncerStatisticsConfigStore {
         self.configuration
             .lock()
             .map(|configuration| configuration.clone())
-            .map_err(|_| io::Error::other("CrowdSec Firewall Bouncer statistics configuration is unavailable"))
+            .map_err(|_| {
+                io::Error::other(
+                    "CrowdSec Firewall Bouncer statistics configuration is unavailable",
+                )
+            })
     }
 
     pub fn replace(
@@ -127,7 +139,22 @@ impl CrowdSecFirewallBouncerStatisticsConfigStore {
         self.configuration
             .lock()
             .map(|mut current| *current = Some(configuration))
-            .map_err(|_| io::Error::other("CrowdSec Firewall Bouncer statistics configuration is unavailable"))
+            .map_err(|_| {
+                io::Error::other(
+                    "CrowdSec Firewall Bouncer statistics configuration is unavailable",
+                )
+            })
+    }
+
+    pub fn clear(&self) -> io::Result<()> {
+        self.configuration
+            .lock()
+            .map(|mut current| *current = None)
+            .map_err(|_| {
+                io::Error::other(
+                    "CrowdSec Firewall Bouncer statistics configuration is unavailable",
+                )
+            })
     }
 }
 
@@ -259,25 +286,43 @@ mod tests {
     }
 
     #[test]
+    fn removes_sampling_configuration() {
+        let root = std::env::temp_dir().join(format!(
+            "fwcloud-crowdsec-statistics-config-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let etc_dir = root.to_str().unwrap();
+
+        CrowdSecFirewallBouncerStatisticsConfig::default()
+            .save(etc_dir)
+            .unwrap();
+        CrowdSecFirewallBouncerStatisticsConfig::remove(etc_dir).unwrap();
+
+        assert_eq!(
+            CrowdSecFirewallBouncerStatisticsConfig::load(etc_dir).unwrap(),
+            None
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn rejects_non_positive_sampling_configuration_values() {
-        assert!(
-            CrowdSecFirewallBouncerStatisticsConfig {
-                enabled: true,
-                sampling_interval: 0,
-                cache_max_size: 1024,
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            CrowdSecFirewallBouncerStatisticsConfig {
-                enabled: true,
-                sampling_interval: 30,
-                cache_max_size: 0,
-            }
-            .validate()
-            .is_err()
-        );
+        assert!(CrowdSecFirewallBouncerStatisticsConfig {
+            enabled: true,
+            sampling_interval: 0,
+            cache_max_size: 1024,
+        }
+        .validate()
+        .is_err());
+        assert!(CrowdSecFirewallBouncerStatisticsConfig {
+            enabled: true,
+            sampling_interval: 30,
+            cache_max_size: 0,
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]
@@ -292,5 +337,17 @@ mod tests {
         store.replace(config.clone()).unwrap();
 
         assert_eq!(store.configuration().unwrap(), Some(config));
+    }
+
+    #[test]
+    fn clears_configuration_from_the_shared_store() {
+        let store = CrowdSecFirewallBouncerStatisticsConfigStore::default();
+        store
+            .replace(CrowdSecFirewallBouncerStatisticsConfig::default())
+            .unwrap();
+
+        store.clear().unwrap();
+
+        assert_eq!(store.configuration().unwrap(), None);
     }
 }
