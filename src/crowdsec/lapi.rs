@@ -22,7 +22,7 @@
 
 use std::{
     io::{self, ErrorKind},
-    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     time::Duration,
@@ -46,8 +46,8 @@ use crate::{
         errors::{
             COMMAND_FAILED, LAPI_CONNECTION_FAILED, LAPI_CONNECTION_REFUSED,
             LAPI_CONNECTION_TIMEOUT, LAPI_HOST_UNRESOLVABLE, LAPI_INVALID, LAPI_UNREACHABLE,
-            MACHINE_INVALID, MACHINE_NOT_FOUND, MACHINE_REAUTHENTICATION_REQUIRED,
-            TRANSITION_RECOVERY_REQUIRED,
+            MACHINE_INVALID, MACHINE_NOT_FOUND, MACHINE_PROTECTED,
+            MACHINE_REAUTHENTICATION_REQUIRED, TRANSITION_RECOVERY_REQUIRED,
         },
         install,
         models::{
@@ -432,7 +432,13 @@ pub async fn validate_machine(name: &str) -> Result<CrowdSecMachineValidationRes
 
 pub async fn remove_machine(name: &str) -> Result<CrowdSecMachineRemoveResponse> {
     validate_machine_name(name)?;
-    let _machine = machine_by_name(name).await?;
+    let machine = machine_by_name(name).await?;
+    if machine_has_loopback_address(&machine) {
+        return Err(FwcError::crowdsec(
+            MACHINE_PROTECTED,
+            "The local CrowdSec LAPI Machine cannot be removed",
+        ));
+    }
 
     debug!("Removing CrowdSec machine: {}", name);
     CrowdSecCommand::cscli(&["machines", "delete", name])?
@@ -733,6 +739,25 @@ async fn machine_by_name(name: &str) -> Result<CrowdSecMachine> {
         .into_iter()
         .find(|machine| machine.name == name)
         .ok_or_else(|| FwcError::crowdsec(MACHINE_NOT_FOUND, "CrowdSec machine is not registered"))
+}
+
+fn machine_has_loopback_address(machine: &CrowdSecMachine) -> bool {
+    let Some(address) = machine.ip_address.as_deref() else {
+        return false;
+    };
+    let normalized = address
+        .trim()
+        .trim_matches(|character| character == '[' || character == ']')
+        .to_ascii_lowercase();
+
+    normalized
+        .parse::<IpAddr>()
+        .map(|address| address.is_loopback())
+        .unwrap_or(false)
+        || matches!(
+            normalized.as_str(),
+            "localhost" | "localhost.localdomain" | "lo" | "loopback"
+        )
 }
 
 async fn require_crowdsec_installed() -> Result<()> {
@@ -1209,15 +1234,18 @@ fn machine_from_json(value: &Value) -> Option<CrowdSecMachine> {
         Some(false) => CrowdSecMachineState::Pending,
         None => CrowdSecMachineState::Unknown,
     };
-    let last_heartbeat = values
-        .get("last_push")
-        .or_else(|| values.get("last_heartbeat"))
-        .or_else(|| values.get("updated_at"))
+    let ip_address = values
+        .get("ipAddress")
+        .or_else(|| values.get("ip_address"))
         .and_then(value_as_string);
+    let os = values.get("os").and_then(value_as_string);
+    let last_heartbeat = values.get("last_heartbeat").and_then(value_as_string);
 
     Some(CrowdSecMachine {
         name: name.to_string(),
         state,
+        ip_address,
+        os,
         last_heartbeat,
     })
 }
@@ -1401,7 +1429,7 @@ mod tests {
 
     use super::{
         central_lapi_configuration, central_lapi_listen_uri, finish_machine_replication_command,
-        machine_credentials_from_contents, machine_from_json,
+        machine_credentials_from_contents, machine_from_json, machine_has_loopback_address,
         machine_reauthentication_required_message, machine_replication_plan, machines_from_json,
         remote_lapi_connection_error, remote_lapi_connectivity_error_code,
         remote_lapi_socket_address, remote_lapi_url, remote_machine_configuration,
@@ -1533,6 +1561,8 @@ mod tests {
         let machine = |state| CrowdSecMachine {
             name: "fwcloud-machine-01".to_string(),
             state,
+            ip_address: None,
+            os: None,
             last_heartbeat: None,
         };
 
@@ -1688,16 +1718,49 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_machine_status_and_last_heartbeat() {
+    fn identifies_local_loopback_machine_addresses() {
+        let machine = |ip_address: Option<&str>| CrowdSecMachine {
+            name: "local".to_string(),
+            state: CrowdSecMachineState::Validated,
+            ip_address: ip_address.map(str::to_string),
+            os: None,
+            last_heartbeat: None,
+        };
+
+        for address in [
+            "127.0.0.1",
+            "127.255.255.255",
+            "::1",
+            "[::1]",
+            "localhost",
+            "LOCALHOST",
+            "lo",
+            "loopback",
+        ] {
+            assert!(machine_has_loopback_address(&machine(Some(address))));
+        }
+        for address in ["192.0.2.10", "::2"] {
+            assert!(!machine_has_loopback_address(&machine(Some(address))));
+        }
+        assert!(!machine_has_loopback_address(&machine(None)));
+    }
+
+    #[test]
+    fn normalizes_machine_metadata_and_last_heartbeat() {
         let machine = machine_from_json(&json!({
             "machineId": "fwcloud-machine-1",
             "isValidated": false,
-            "last_push": "2026-09-01T10:00:00Z"
+            "ipAddress": "192.0.2.10",
+            "os": "linux",
+            "last_push": "2026-09-01T09:00:00Z",
+            "last_heartbeat": "2026-09-01T10:00:00Z"
         }))
         .unwrap();
 
         assert_eq!(machine.name, "fwcloud-machine-1");
         assert_eq!(machine.state, CrowdSecMachineState::Pending);
+        assert_eq!(machine.ip_address.as_deref(), Some("192.0.2.10"));
+        assert_eq!(machine.os.as_deref(), Some("linux"));
         assert_eq!(
             machine.last_heartbeat.as_deref(),
             Some("2026-09-01T10:00:00Z")

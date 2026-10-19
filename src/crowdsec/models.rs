@@ -268,6 +268,8 @@ pub enum CrowdSecRemoteMachineInstallState {
 pub struct CrowdSecMachine {
     pub name: String,
     pub state: CrowdSecMachineState,
+    pub ip_address: Option<String>,
+    pub os: Option<String>,
     pub last_heartbeat: Option<String>,
 }
 
