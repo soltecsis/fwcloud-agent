@@ -89,6 +89,14 @@ pub const NFTABLES_V4_TABLE: &str = "filter";
 pub const NFTABLES_V4_CHAIN: &str = "INPUT";
 pub const NFTABLES_V6_TABLE: &str = "filter";
 pub const NFTABLES_V6_CHAIN: &str = "INPUT";
+pub const IPTABLES_V4_INPUT_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_V4_INPUT";
+pub const IPTABLES_V4_FORWARD_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_V4_FORWARD";
+pub const IPTABLES_V6_INPUT_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_V6_INPUT";
+pub const IPTABLES_V6_FORWARD_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_V6_FORWARD";
+pub const NFTABLES_V4_INPUT_BLOCKING_COUNTER: &str = "fwcloud_crowdsec_v4_input";
+pub const NFTABLES_V4_FORWARD_BLOCKING_COUNTER: &str = "fwcloud_crowdsec_v4_forward";
+pub const NFTABLES_V6_INPUT_BLOCKING_COUNTER: &str = "fwcloud_crowdsec_v6_input";
+pub const NFTABLES_V6_FORWARD_BLOCKING_COUNTER: &str = "fwcloud_crowdsec_v6_forward";
 
 const IPSET_COMMAND: &str = "/usr/sbin/ipset";
 const NFT_COMMAND: &str = "/usr/sbin/nft";
@@ -1579,6 +1587,122 @@ pub async fn validate_nftables_blacklist_sets() -> Result<()> {
     Ok(())
 }
 
+pub async fn validate_blocking_statistics_resources(
+    backend: CrowdSecFirewallBackend,
+) -> Result<()> {
+    let ready = match backend {
+        CrowdSecFirewallBackend::Iptables => {
+            let ipv4_input = iptables_blocking_chain_is_ready(
+                IPTABLES_COMMAND,
+                IPTABLES_V4_INPUT_BLOCKING_CHAIN,
+                IPSET_V4_BLACKLIST,
+            )
+            .await?;
+            let ipv4_forward = iptables_blocking_chain_is_ready(
+                IPTABLES_COMMAND,
+                IPTABLES_V4_FORWARD_BLOCKING_CHAIN,
+                IPSET_V4_BLACKLIST,
+            )
+            .await?;
+            let ipv6_input = iptables_blocking_chain_is_ready(
+                IP6TABLES_COMMAND,
+                IPTABLES_V6_INPUT_BLOCKING_CHAIN,
+                IPSET_V6_BLACKLIST,
+            )
+            .await?;
+            let ipv6_forward = iptables_blocking_chain_is_ready(
+                IP6TABLES_COMMAND,
+                IPTABLES_V6_FORWARD_BLOCKING_CHAIN,
+                IPSET_V6_BLACKLIST,
+            )
+            .await?;
+
+            ipv4_input && ipv4_forward && ipv6_input && ipv6_forward
+        }
+        CrowdSecFirewallBackend::Nftables => {
+            let ipv4_input = nftables_counter_is_ready(
+                "ip",
+                NFTABLES_V4_INPUT_BLOCKING_COUNTER,
+            )
+            .await?;
+            let ipv4_forward = nftables_counter_is_ready(
+                "ip",
+                NFTABLES_V4_FORWARD_BLOCKING_COUNTER,
+            )
+            .await?;
+            let ipv6_input = nftables_counter_is_ready(
+                "ip6",
+                NFTABLES_V6_INPUT_BLOCKING_COUNTER,
+            )
+            .await?;
+            let ipv6_forward = nftables_counter_is_ready(
+                "ip6",
+                NFTABLES_V6_FORWARD_BLOCKING_COUNTER,
+            )
+            .await?;
+
+            ipv4_input && ipv4_forward && ipv6_input && ipv6_forward
+        }
+    };
+
+    if ready {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "FWCloud CrowdSec blocking statistics resources are missing or incompatible",
+        ))
+    }
+}
+
+async fn iptables_blocking_chain_is_ready(
+    command: &str,
+    chain: &str,
+    blacklist: &str,
+) -> Result<bool> {
+    if !Path::new(command).is_file() {
+        return Ok(false);
+    }
+
+    let output = run_iptables_chain(command, chain).await?;
+    Ok(output.status.success()
+        && iptables_blocking_chain_is_compatible(
+            String::from_utf8_lossy(&output.stdout).as_ref(),
+            chain,
+            blacklist,
+        ))
+}
+
+fn iptables_blocking_chain_is_compatible(rules: &str, chain: &str, blacklist: &str) -> bool {
+    rules
+        .lines()
+        .map(str::trim)
+        .any(|rule| rule == format!("-A {chain} -m set --match-set {blacklist} src -j DROP"))
+}
+
+async fn nftables_counter_is_ready(family: &str, name: &str) -> Result<bool> {
+    let output = run_nft(&["--json", "list", "counter", family, NFTABLES_V4_TABLE, name]).await?;
+    Ok(output.status.success()
+        && nftables_counter_is_compatible(String::from_utf8_lossy(&output.stdout).as_ref(), family, name))
+}
+
+fn nftables_counter_is_compatible(output: &str, family: &str, name: &str) -> bool {
+    serde_json::from_str::<Value>(output)
+        .ok()
+        .and_then(|value| value.get("nftables")?.as_array().cloned())
+        .is_some_and(|entries| {
+            entries.iter().any(|entry| {
+                let Some(counter) = entry.get("counter") else {
+                    return false;
+                };
+
+                counter.get("family").and_then(Value::as_str) == Some(family)
+                    && counter.get("table").and_then(Value::as_str) == Some(NFTABLES_V4_TABLE)
+                    && counter.get("name").and_then(Value::as_str) == Some(name)
+            })
+        })
+}
+
 async fn nftables_blacklist_set_supports_counters(
     family: &str,
     table: &str,
@@ -2300,6 +2424,30 @@ async fn run_iptables_save(command: &str) -> Result<std::process::Output> {
     }
 }
 
+async fn run_iptables_chain(command: &str, chain: &str) -> Result<std::process::Output> {
+    debug!(
+        "Inspecting FWCloud CrowdSec blocking chain: {} {}",
+        command, chain
+    );
+    timeout(
+        IPSET_COMMAND_TIMEOUT,
+        Command::new(command).args(["-S", chain]).output(),
+    )
+    .await
+    .map_err(|_| {
+        FwcError::crowdsec(
+            OPERATION_TIMEOUT,
+            "CrowdSec blocking chain inspection timed out",
+        )
+    })?
+    .map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to inspect FWCloud CrowdSec blocking chain",
+        )
+    })
+}
+
 async fn run_iptables(command: &str, arguments: &[&str]) -> Result<()> {
     debug!(
         "Running legacy CrowdSec Firewall Bouncer cleanup command: {} {:?}",
@@ -2620,7 +2768,8 @@ mod tests {
         configuration_is_set_only, emit_backend_startup_configuration_cleanup, emit_boolean_result,
         emit_reconciliation_skipped, firewall_rules_contain_unmanaged_crowdsec, integration_status,
         legacy_bouncer_ipset_names, legacy_bouncer_jump_chains, local_api_enabled_in_configuration,
-        nftables_blacklist_set_is_compatible, nftables_bouncer_service_action,
+        iptables_blocking_chain_is_compatible, nftables_blacklist_set_is_compatible,
+        nftables_bouncer_service_action, nftables_counter_is_compatible,
         nftables_counter_validation_arguments, nftables_set_only_configuration_contents,
         non_selected_firewall_backend, pending_backend_contents, pending_backend_from_contents,
         pending_policy_status, reject_fwcloud_bouncer, select_active_backend,
@@ -2632,8 +2781,10 @@ mod tests {
         BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVAL_MESSAGE, BOUNCER_CONFIG_PATH,
         BOUNCER_NFTABLES_DROP_IN_CONTENT, BOUNCER_NFTABLES_DROP_IN_PATH,
         BOUNCER_PACKAGE_TRANSITION_DROP_IN_CONTENT, BOUNCER_PACKAGE_TRANSITION_DROP_IN_PATH,
-        BOUNCER_RECONCILIATION_SKIPPED_MESSAGE, FWCLOUD_BOUNCER_NAME, IPSET_SETUP_SERVICE_CONTENT,
-        IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
+        BOUNCER_RECONCILIATION_SKIPPED_MESSAGE, FWCLOUD_BOUNCER_NAME,
+        IPSET_SETUP_SERVICE_CONTENT, IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
+        IPTABLES_V4_INPUT_BLOCKING_CHAIN, NFTABLES_V4_INPUT_BLOCKING_COUNTER,
+        NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
     };
     use crate::{
         crowdsec::{
@@ -2711,6 +2862,46 @@ mod tests {
             nftables_counter_validation_arguments("bridge", "filter", IPSET_V4_BLACKLIST),
             None
         );
+    }
+
+    #[test]
+    fn recognizes_only_the_dedicated_iptables_blocking_chain_rule() {
+        assert!(iptables_blocking_chain_is_compatible(
+            "-A FWC_CROWDSEC_V4_INPUT -m set --match-set crowdsec-blacklists src -j DROP\n",
+            IPTABLES_V4_INPUT_BLOCKING_CHAIN,
+            IPSET_V4_BLACKLIST,
+        ));
+        assert!(!iptables_blocking_chain_is_compatible(
+            "-A INPUT -m set --match-set crowdsec-blacklists src -j DROP\n",
+            IPTABLES_V4_INPUT_BLOCKING_CHAIN,
+            IPSET_V4_BLACKLIST,
+        ));
+    }
+
+    #[test]
+    fn recognizes_the_expected_named_nftables_counter() {
+        let counter = r#"{
+            "nftables": [{
+                "counter": {
+                    "family": "ip",
+                    "table": "filter",
+                    "name": "fwcloud_crowdsec_v4_input",
+                    "packets": 0,
+                    "bytes": 0
+                }
+            }]
+        }"#;
+
+        assert!(nftables_counter_is_compatible(
+            counter,
+            "ip",
+            NFTABLES_V4_INPUT_BLOCKING_COUNTER,
+        ));
+        assert!(!nftables_counter_is_compatible(
+            counter,
+            "ip6",
+            NFTABLES_V4_INPUT_BLOCKING_COUNTER,
+        ));
     }
 
     #[test]
