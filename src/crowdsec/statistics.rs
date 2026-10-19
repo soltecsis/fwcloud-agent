@@ -21,7 +21,11 @@
 */
 
 use serde::{Deserialize, Serialize};
-use std::{fs, io, path::Path};
+use std::{
+    fs, io,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 
 const API_CONFIG_FILE: &str = "crowdsec_firewall_bouncer_statistics.json";
 pub const DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_SAMPLING_INTERVAL: u64 = 30;
@@ -100,6 +104,30 @@ impl CrowdSecFirewallBouncerStatisticsConfig {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct CrowdSecFirewallBouncerStatisticsConfigStore {
+    configuration: Arc<Mutex<Option<CrowdSecFirewallBouncerStatisticsConfig>>>,
+}
+
+impl CrowdSecFirewallBouncerStatisticsConfigStore {
+    pub fn configuration(&self) -> io::Result<Option<CrowdSecFirewallBouncerStatisticsConfig>> {
+        self.configuration
+            .lock()
+            .map(|configuration| configuration.clone())
+            .map_err(|_| io::Error::other("CrowdSec Firewall Bouncer statistics configuration is unavailable"))
+    }
+
+    pub fn replace(
+        &self,
+        configuration: CrowdSecFirewallBouncerStatisticsConfig,
+    ) -> io::Result<()> {
+        self.configuration
+            .lock()
+            .map(|mut current| *current = Some(configuration))
+            .map_err(|_| io::Error::other("CrowdSec Firewall Bouncer statistics configuration is unavailable"))
     }
 }
 
@@ -235,5 +263,19 @@ mod tests {
             .validate()
             .is_err()
         );
+    }
+
+    #[test]
+    fn replaces_configuration_in_the_shared_store() {
+        let store = CrowdSecFirewallBouncerStatisticsConfigStore::default();
+        let config = CrowdSecFirewallBouncerStatisticsConfig {
+            enabled: true,
+            sampling_interval: 15,
+            cache_max_size: 1024,
+        };
+
+        store.replace(config.clone()).unwrap();
+
+        assert_eq!(store.configuration().unwrap(), Some(config));
     }
 }

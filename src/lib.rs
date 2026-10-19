@@ -42,7 +42,9 @@ use crate::workers::{
     openvpn_status_collector::{OpenVPNStCollector, OpenVPNStatusSamplingConfig},
     WorkersChannels,
 };
-use crowdsec::statistics::CrowdSecFirewallBouncerStatisticsConfig;
+use crowdsec::statistics::{
+    CrowdSecFirewallBouncerStatisticsConfig, CrowdSecFirewallBouncerStatisticsConfigStore,
+};
 use config::Config;
 
 pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Error> {
@@ -62,8 +64,10 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
     info!("Listening on: {}:{}", config.bind_ip, config.bind_port);
 
     OpenVPNStatusSamplingConfig::load_or_create(config.etc_dir)?;
+    let crowdsec_statistics_config = CrowdSecFirewallBouncerStatisticsConfigStore::default();
     match futures::executor::block_on(crowdsec::packages::crowdsec_package_is_installed()) {
-        Ok(true) => CrowdSecFirewallBouncerStatisticsConfig::load_or_create(config.etc_dir)?,
+        Ok(true) => crowdsec_statistics_config
+            .replace(CrowdSecFirewallBouncerStatisticsConfig::load_or_create(config.etc_dir)?)?,
         Ok(false) => (),
         Err(error) => warn!("Unable to determine whether CrowdSec is installed: {error}"),
     }
@@ -80,6 +84,7 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(cfg.clone()))
+            .app_data(web::Data::new(crowdsec_statistics_config.clone()))
             .app_data(web::Data::new(openvpn_st_collector.clone()))
             .app_data(web::Data::new(workers_channels.clone()))
             .wrap(middleware::Logger::default())

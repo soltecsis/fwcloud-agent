@@ -22,13 +22,13 @@
 
 use std::sync::Arc;
 
-use actix_web::{delete, get, post, web, HttpResponse};
+use actix_web::{delete, get, post, put, web, HttpResponse};
 use log::debug;
 
 use crate::{
     config::Config,
     crowdsec::{
-        alerts, bouncers, collections, console, decisions, install, lapi,
+        alerts, bouncers, collections, console, decisions, install, lapi, packages,
         models::{
             CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerRegisterRequest,
             CrowdSecBouncerReplicationRequest, CrowdSecBouncerUninstallRequest,
@@ -41,10 +41,69 @@ use crate::{
             CrowdSecRemoteMachineResumeRequest, CrowdSecUninstallRequest,
         },
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
+        statistics::{
+            CrowdSecFirewallBouncerStatisticsConfig,
+            CrowdSecFirewallBouncerStatisticsConfigStore,
+        },
         status, uninstall,
     },
     errors::Result,
 };
+
+#[get("/crowdsec/bouncer/statistics/sampling")]
+async fn crowdsec_bouncer_statistics_sampling(
+    cfg: web::Data<Arc<Config>>,
+    store: web::Data<CrowdSecFirewallBouncerStatisticsConfigStore>,
+) -> Result<HttpResponse> {
+    let configuration = crowdsec_bouncer_statistics_configuration(&cfg, &store).await?;
+    Ok(HttpResponse::Ok().json(configuration))
+}
+
+#[put("/crowdsec/bouncer/statistics/sampling")]
+async fn update_crowdsec_bouncer_statistics_sampling(
+    cfg: web::Data<Arc<Config>>,
+    store: web::Data<CrowdSecFirewallBouncerStatisticsConfigStore>,
+    configuration: web::Json<CrowdSecFirewallBouncerStatisticsConfig>,
+) -> Result<HttpResponse> {
+    configuration
+        .validate()
+        .map_err(|error| crate::errors::FwcError::BadRequest(error.to_string()))?;
+    ensure_crowdsec_statistics_available().await?;
+
+    let _guard = cfg.mutex.crowdsec.lock().await;
+    configuration.save(cfg.etc_dir)?;
+    store.replace(configuration.into_inner())?;
+
+    Ok(HttpResponse::Ok().finish())
+}
+
+async fn crowdsec_bouncer_statistics_configuration(
+    cfg: &web::Data<Arc<Config>>,
+    store: &web::Data<CrowdSecFirewallBouncerStatisticsConfigStore>,
+) -> Result<CrowdSecFirewallBouncerStatisticsConfig> {
+    ensure_crowdsec_statistics_available().await?;
+
+    if let Some(configuration) = store.configuration()? {
+        return Ok(configuration);
+    }
+
+    let _guard = cfg.mutex.crowdsec.lock().await;
+    let configuration = CrowdSecFirewallBouncerStatisticsConfig::load_or_create(cfg.etc_dir)?;
+    store.replace(configuration.clone())?;
+
+    Ok(configuration)
+}
+
+async fn ensure_crowdsec_statistics_available() -> Result<()> {
+    if packages::crowdsec_package_is_installed().await? {
+        Ok(())
+    } else {
+        Err(crate::errors::FwcError::crowdsec(
+            crate::crowdsec::errors::NOT_INSTALLED,
+            "CrowdSec is not installed",
+        ))
+    }
+}
 
 #[post("/crowdsec/transitions/preflight")]
 async fn preflight_crowdsec_transition(
