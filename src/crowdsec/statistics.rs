@@ -32,6 +32,7 @@ const API_CONFIG_FILE: &str = "crowdsec_firewall_bouncer_statistics.json";
 const CACHE_DIRECTORY: &str = "crowdsec";
 const CACHE_FILE: &str = "firewall_bouncer_statistics.jsonl";
 pub const DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_SAMPLING_INTERVAL: u64 = 30;
+pub const DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_REQUEST_MAX_SAMPLES: usize = 1000;
 pub const DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_CACHE_MAX_SIZE: usize = 10485760;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -39,7 +40,13 @@ pub const DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_CACHE_MAX_SIZE: usize = 1
 pub struct CrowdSecFirewallBouncerStatisticsConfig {
     pub enabled: bool,
     pub sampling_interval: u64,
+    #[serde(default = "default_request_max_samples")]
+    pub request_max_samples: usize,
     pub cache_max_size: usize,
+}
+
+const fn default_request_max_samples() -> usize {
+    DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_REQUEST_MAX_SAMPLES
 }
 
 impl Default for CrowdSecFirewallBouncerStatisticsConfig {
@@ -47,6 +54,7 @@ impl Default for CrowdSecFirewallBouncerStatisticsConfig {
         CrowdSecFirewallBouncerStatisticsConfig {
             enabled: false,
             sampling_interval: DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_SAMPLING_INTERVAL,
+            request_max_samples: DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_REQUEST_MAX_SAMPLES,
             cache_max_size: DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_CACHE_MAX_SIZE,
         }
     }
@@ -114,6 +122,13 @@ impl CrowdSecFirewallBouncerStatisticsConfig {
             ));
         }
 
+        if self.request_max_samples == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "CrowdSec Firewall Bouncer statistics request max samples must be a positive integer",
+            ));
+        }
+
         Ok(())
     }
 }
@@ -165,9 +180,23 @@ pub fn append_cached_sample(
 
 pub fn take_cached_samples(
     data_dir: &str,
+    request_max_samples: usize,
 ) -> io::Result<Vec<CrowdSecFirewallBouncerStatisticsSample>> {
-    let samples = cached_samples(data_dir)?;
-    clear_cached_samples(data_dir)?;
+    let mut samples = cached_samples(data_dir)?;
+    let remaining = samples.split_off(samples.len().min(request_max_samples));
+
+    if remaining.is_empty() {
+        clear_cached_samples(data_dir)?;
+    } else {
+        let lines = remaining
+            .iter()
+            .map(|sample| {
+                serde_json::to_string(sample)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        write_cached_lines(data_dir, &lines)?;
+    }
 
     Ok(samples)
 }
@@ -333,12 +362,14 @@ mod tests {
         let config: CrowdSecFirewallBouncerStatisticsConfig = serde_json::from_value(json!({
             "enabled": true,
             "sampling_interval": 30,
+            "request_max_samples": 1000,
             "cache_max_size": 1000
         }))
         .unwrap();
 
         assert_eq!(config.enabled, true);
         assert_eq!(config.sampling_interval, 30);
+        assert_eq!(config.request_max_samples, 1000);
         assert_eq!(config.cache_max_size, 1000);
     }
 
@@ -354,6 +385,7 @@ mod tests {
         let config = CrowdSecFirewallBouncerStatisticsConfig {
             enabled: false,
             sampling_interval: 15,
+            request_max_samples: 500,
             cache_max_size: 1024,
         };
         config.save(etc_dir).unwrap();
@@ -393,6 +425,7 @@ mod tests {
         assert!(CrowdSecFirewallBouncerStatisticsConfig {
             enabled: true,
             sampling_interval: 0,
+            request_max_samples: 1000,
             cache_max_size: 1024,
         }
         .validate()
@@ -400,6 +433,7 @@ mod tests {
         assert!(CrowdSecFirewallBouncerStatisticsConfig {
             enabled: true,
             sampling_interval: 30,
+            request_max_samples: 1000,
             cache_max_size: 0,
         }
         .validate()
@@ -412,6 +446,7 @@ mod tests {
         let config = CrowdSecFirewallBouncerStatisticsConfig {
             enabled: true,
             sampling_interval: 15,
+            request_max_samples: 500,
             cache_max_size: 1024,
         };
 
@@ -459,7 +494,7 @@ mod tests {
         append_cached_sample(data_dir, second.clone(), cache_max_size).unwrap();
 
         assert_eq!(cached_samples(data_dir).unwrap(), vec![second.clone()]);
-        assert_eq!(take_cached_samples(data_dir).unwrap(), vec![second]);
+        assert_eq!(take_cached_samples(data_dir, 1).unwrap(), vec![second]);
         assert!(cached_samples(data_dir).unwrap().is_empty());
 
         fs::remove_dir_all(root).unwrap();

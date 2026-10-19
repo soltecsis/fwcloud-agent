@@ -102,16 +102,16 @@ impl CrowdSecFirewallBouncerStatisticsCollector {
     pub fn take_samples(
         &self,
     ) -> std::io::Result<CrowdSecFirewallBouncerStatisticsSamplesResponse> {
-        if self.configuration.configuration()?.is_none() {
+        let Some(configuration) = self.configuration.configuration()? else {
             return Ok(CrowdSecFirewallBouncerStatisticsSamplesResponse {
                 state: CrowdSecFirewallBouncerStatisticsState::Unavailable,
                 samples: vec![],
             });
-        }
+        };
 
         Ok(CrowdSecFirewallBouncerStatisticsSamplesResponse {
             state: self.inner.lock().unwrap().state.clone(),
-            samples: take_cached_samples(&self.data_dir)?,
+            samples: take_cached_samples(&self.data_dir, configuration.request_max_samples)?,
         })
     }
 
