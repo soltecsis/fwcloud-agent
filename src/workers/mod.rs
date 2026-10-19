@@ -22,6 +22,7 @@
 
 use std::sync::mpsc::Sender;
 
+pub mod crowdsec_firewall_bouncer_statistics;
 pub mod openvpn_status_collector;
 
 #[derive(Clone)]

@@ -48,7 +48,15 @@ use crate::{
         status, uninstall,
     },
     errors::Result,
+    workers::crowdsec_firewall_bouncer_statistics::CrowdSecFirewallBouncerStatisticsCollector,
 };
+
+#[get("/crowdsec/bouncer/statistics")]
+async fn crowdsec_bouncer_statistics(
+    collector: web::Data<CrowdSecFirewallBouncerStatisticsCollector>,
+) -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok().json(collector.samples()))
+}
 
 #[get("/crowdsec/bouncer/statistics/sampling")]
 async fn crowdsec_bouncer_statistics_sampling(

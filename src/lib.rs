@@ -39,11 +39,12 @@ use std::net::TcpListener;
 use std::sync::Arc;
 
 use crate::workers::{
+    crowdsec_firewall_bouncer_statistics::CrowdSecFirewallBouncerStatisticsCollector,
     openvpn_status_collector::{OpenVPNStCollector, OpenVPNStatusSamplingConfig},
     WorkersChannels,
 };
-use crowdsec::statistics::CrowdSecFirewallBouncerStatisticsConfigStore;
 use config::Config;
+use crowdsec::statistics::CrowdSecFirewallBouncerStatisticsConfigStore;
 
 pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Error> {
     if config.enable_env_logger {
@@ -69,6 +70,9 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
 
     // Start workers threads.
     let openvpn_st_collector = OpenVPNStCollector::new(&cfg);
+    let crowdsec_statistics_collector =
+        CrowdSecFirewallBouncerStatisticsCollector::new(crowdsec_statistics_config.clone());
+    crowdsec_statistics_collector.start(cfg.clone());
     let workers_channels = WorkersChannels {
         openvpn_st_collector: openvpn_st_collector.start(cfg.clone()),
     };
@@ -77,6 +81,7 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
         App::new()
             .app_data(web::Data::new(cfg.clone()))
             .app_data(web::Data::new(crowdsec_statistics_config.clone()))
+            .app_data(web::Data::new(crowdsec_statistics_collector.clone()))
             .app_data(web::Data::new(openvpn_st_collector.clone()))
             .app_data(web::Data::new(workers_channels.clone()))
             .wrap(middleware::Logger::default())
