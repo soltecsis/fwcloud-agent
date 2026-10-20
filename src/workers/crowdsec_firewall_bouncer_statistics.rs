@@ -35,7 +35,8 @@ use crate::{
         bouncers,
         statistics::{
             append_cached_sample, cached_samples, take_cached_samples,
-            CrowdSecFirewallBouncerStatisticsConfigStore, CrowdSecFirewallBouncerStatisticsSample,
+            CrowdSecFirewallBouncerStatisticsConfig, CrowdSecFirewallBouncerStatisticsConfigStore,
+            CrowdSecFirewallBouncerStatisticsSample,
             CrowdSecFirewallBouncerStatisticsSamplesResponse,
             CrowdSecFirewallBouncerStatisticsState,
         },
@@ -115,6 +116,19 @@ impl CrowdSecFirewallBouncerStatisticsCollector {
         })
     }
 
+    pub fn reset_after_policy_load(&self) -> std::io::Result<()> {
+        if self.configuration.configuration()?.is_none() {
+            return Ok(());
+        }
+
+        self.start_new_policy_generation()?;
+        let mut collector = self.inner.lock().unwrap();
+        collector.next_sample_at = None;
+        collector.state = CrowdSecFirewallBouncerStatisticsState::Unavailable;
+
+        Ok(())
+    }
+
     pub fn start(&self, cfg: Arc<Config>) {
         let collector = self.clone();
 
@@ -125,12 +139,73 @@ impl CrowdSecFirewallBouncerStatisticsCollector {
                     thread_id::get()
                 );
 
+                collector.initialize(&cfg).await;
+
                 loop {
                     collector.collect(&cfg).await;
                     thread::sleep(Duration::from_secs(1));
                 }
             })
         });
+    }
+
+    async fn initialize(&self, cfg: &Config) {
+        let configuration = match CrowdSecFirewallBouncerStatisticsConfig::load(cfg.etc_dir) {
+            Ok(Some(configuration)) => {
+                if let Err(error) = self.configuration.replace(configuration.clone()) {
+                    error!("Loading CrowdSec Firewall Bouncer statistics configuration ({error})");
+                    self.set_unavailable();
+                    return;
+                }
+                configuration
+            }
+            Ok(None) => return,
+            Err(error) => {
+                error!("Loading CrowdSec Firewall Bouncer statistics configuration ({error})");
+                self.set_unavailable();
+                return;
+            }
+        };
+
+        let previous_sample = match cached_samples(&self.data_dir) {
+            Ok(samples) => samples.last().cloned(),
+            Err(error) => {
+                error!("Reading CrowdSec Firewall Bouncer statistics cache ({error})");
+                self.set_unavailable();
+                return;
+            }
+        };
+        let Some(previous_sample) = previous_sample else {
+            if configuration.enabled {
+                if let Err(error) = self.start_new_policy_generation() {
+                    error!("Starting a new CrowdSec Firewall Bouncer statistics generation ({error})");
+                    self.set_unavailable();
+                }
+            }
+            return;
+        };
+
+        self.set_policy_generation(previous_sample.policy_generation);
+
+        if !configuration.enabled {
+            return;
+        }
+
+        let counters = match self.read_counters(cfg).await {
+            Ok(counters) => counters,
+            Err(error) => {
+                debug!("CrowdSec Firewall Bouncer statistics are unavailable ({error})");
+                self.set_unavailable();
+                return;
+            }
+        };
+
+        if blocking_rule_counters_decreased(&previous_sample, &counters) {
+            if let Err(error) = self.start_new_policy_generation() {
+                error!("Starting a new CrowdSec Firewall Bouncer statistics generation ({error})");
+                self.set_unavailable();
+            }
+        }
     }
 
     async fn collect(&self, cfg: &Config) {
@@ -151,23 +226,7 @@ impl CrowdSecFirewallBouncerStatisticsCollector {
             return;
         }
 
-        let counters = {
-            debug!(
-                "Locking CrowdSec mutex for Firewall Bouncer statistics (thread id: {})",
-                thread_id::get()
-            );
-            let _guard = cfg.mutex.crowdsec.lock().await;
-            let result = async {
-                let backend = bouncers::active_backend().await?;
-                bouncers::collect_blocking_statistics(backend).await
-            }
-            .await;
-            debug!(
-                "Releasing CrowdSec mutex for Firewall Bouncer statistics (thread id: {})",
-                thread_id::get()
-            );
-            result
-        };
+        let counters = self.read_counters(cfg).await;
 
         match counters {
             Ok(counters) => {
@@ -193,6 +252,30 @@ impl CrowdSecFirewallBouncerStatisticsCollector {
         }
     }
 
+    async fn read_counters(
+        &self,
+        cfg: &Config,
+    ) -> crate::errors::Result<crate::crowdsec::statistics::CrowdSecFirewallBouncerBlockingCounters>
+    {
+        {
+            debug!(
+                "Locking CrowdSec mutex for Firewall Bouncer statistics (thread id: {})",
+                thread_id::get()
+            );
+            let _guard = cfg.mutex.crowdsec.lock().await;
+            let result = async {
+                let backend = bouncers::active_backend().await?;
+                bouncers::collect_blocking_statistics(backend).await
+            }
+            .await;
+            debug!(
+                "Releasing CrowdSec mutex for Firewall Bouncer statistics (thread id: {})",
+                thread_id::get()
+            );
+            result
+        }
+    }
+
     fn sampling_is_due(&self, sampling_interval: u64) -> bool {
         let mut collector = self.inner.lock().unwrap();
         let now = Instant::now();
@@ -212,6 +295,21 @@ impl CrowdSecFirewallBouncerStatisticsCollector {
         self.inner.lock().unwrap().policy_generation
     }
 
+    fn set_policy_generation(&self, policy_generation: u64) {
+        self.inner.lock().unwrap().policy_generation = policy_generation;
+    }
+
+    fn start_new_policy_generation(&self) -> std::io::Result<()> {
+        let current_generation = self.policy_generation();
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(std::io::Error::other)?
+            .as_millis() as u64;
+        self.set_policy_generation(timestamp.max(current_generation.saturating_add(1)));
+
+        Ok(())
+    }
+
     fn set_unavailable(&self) {
         self.inner.lock().unwrap().state = CrowdSecFirewallBouncerStatisticsState::Unavailable;
     }
@@ -228,6 +326,20 @@ impl CrowdSecFirewallBouncerStatisticsCollector {
             }
         }
     }
+}
+
+fn blocking_rule_counters_decreased(
+    previous: &CrowdSecFirewallBouncerStatisticsSample,
+    current: &crate::crowdsec::statistics::CrowdSecFirewallBouncerBlockingCounters,
+) -> bool {
+    previous.ipv4_input.packets > current.ipv4_input.packets
+        || previous.ipv4_input.bytes > current.ipv4_input.bytes
+        || previous.ipv4_forward.packets > current.ipv4_forward.packets
+        || previous.ipv4_forward.bytes > current.ipv4_forward.bytes
+        || previous.ipv6_input.packets > current.ipv6_input.packets
+        || previous.ipv6_input.bytes > current.ipv6_input.bytes
+        || previous.ipv6_forward.packets > current.ipv6_forward.packets
+        || previous.ipv6_forward.bytes > current.ipv6_forward.bytes
 }
 
 #[cfg(test)]
@@ -280,5 +392,63 @@ mod tests {
         assert_eq!(samples.samples[0].addresses[0].address, "192.0.2.2");
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn preserves_cached_samples_and_starts_a_new_policy_generation() {
+        let root = std::env::temp_dir().join(format!(
+            "fwcloud-crowdsec-statistics-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let configuration = CrowdSecFirewallBouncerStatisticsConfigStore::default();
+        configuration.replace(Default::default()).unwrap();
+        let collector =
+            CrowdSecFirewallBouncerStatisticsCollector::new(root.to_str().unwrap(), configuration);
+
+        collector.store_sample(sample("192.0.2.1"), 1024 * 1024);
+        collector.reset_after_policy_load().unwrap();
+
+        assert_eq!(collector.samples().samples.len(), 1);
+        assert_eq!(collector.samples().samples[0].policy_generation, 0);
+        assert!(collector.policy_generation() > 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn detects_decreased_blocking_rule_counters() {
+        let mut previous = sample("192.0.2.1");
+        previous.ipv4_input = CrowdSecFirewallBouncerCounter {
+            packets: 10,
+            bytes: 1000,
+        };
+        let current = CrowdSecFirewallBouncerBlockingCounters {
+            ipv4_input: CrowdSecFirewallBouncerCounter {
+                packets: 9,
+                bytes: 1000,
+            },
+            ..Default::default()
+        };
+
+        assert!(blocking_rule_counters_decreased(&previous, &current));
+    }
+
+    #[test]
+    fn accepts_increasing_blocking_rule_counters() {
+        let mut previous = sample("192.0.2.1");
+        previous.ipv6_forward = CrowdSecFirewallBouncerCounter {
+            packets: 10,
+            bytes: 1000,
+        };
+        let current = CrowdSecFirewallBouncerBlockingCounters {
+            ipv6_forward: CrowdSecFirewallBouncerCounter {
+                packets: 10,
+                bytes: 1001,
+            },
+            ..Default::default()
+        };
+
+        assert!(!blocking_rule_counters_decreased(&previous, &current));
     }
 }
