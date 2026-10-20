@@ -374,6 +374,22 @@ mod tests {
     }
 
     #[test]
+    fn defaults_the_batch_size_for_existing_sampling_configuration() {
+        let config: CrowdSecFirewallBouncerStatisticsConfig = serde_json::from_value(json!({
+            "enabled": false,
+            "sampling_interval": 30,
+            "cache_max_size": 1000
+        }))
+        .unwrap();
+
+        assert!(!config.enabled);
+        assert_eq!(
+            config.request_max_samples,
+            DEFAULT_CROWDSEC_FIREWALL_BOUNCER_STATISTICS_REQUEST_MAX_SAMPLES
+        );
+    }
+
+    #[test]
     fn loads_and_persists_sampling_configuration() {
         let root = std::env::temp_dir().join(format!(
             "fwcloud-crowdsec-statistics-config-{}",
@@ -426,6 +442,14 @@ mod tests {
             enabled: true,
             sampling_interval: 0,
             request_max_samples: 1000,
+            cache_max_size: 1024,
+        }
+        .validate()
+        .is_err());
+        assert!(CrowdSecFirewallBouncerStatisticsConfig {
+            enabled: true,
+            sampling_interval: 30,
+            request_max_samples: 0,
             cache_max_size: 1024,
         }
         .validate()
@@ -496,6 +520,45 @@ mod tests {
         assert_eq!(cached_samples(data_dir).unwrap(), vec![second.clone()]);
         assert_eq!(take_cached_samples(data_dir, 1).unwrap(), vec![second]);
         assert!(cached_samples(data_dir).unwrap().is_empty());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retains_the_cache_tail_after_consuming_a_batch() {
+        let root = std::env::temp_dir().join(format!(
+            "fwcloud-crowdsec-statistics-cache-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let data_dir = root.to_str().unwrap();
+        let first = CrowdSecFirewallBouncerStatisticsSample {
+            collected_at: "2026-10-19T10:00:00.000Z".to_string(),
+            policy_generation: 1,
+            ipv4_input: CrowdSecFirewallBouncerCounter::default(),
+            ipv4_forward: CrowdSecFirewallBouncerCounter::default(),
+            ipv6_input: CrowdSecFirewallBouncerCounter::default(),
+            ipv6_forward: CrowdSecFirewallBouncerCounter::default(),
+            addresses: vec![],
+        };
+        let second = CrowdSecFirewallBouncerStatisticsSample {
+            collected_at: "2026-10-19T10:00:01.000Z".to_string(),
+            ..first.clone()
+        };
+        let third = CrowdSecFirewallBouncerStatisticsSample {
+            collected_at: "2026-10-19T10:00:02.000Z".to_string(),
+            ..first.clone()
+        };
+
+        for sample in [first.clone(), second.clone(), third.clone()] {
+            append_cached_sample(data_dir, sample, 1024 * 1024).unwrap();
+        }
+
+        assert_eq!(
+            take_cached_samples(data_dir, 2).unwrap(),
+            vec![first, second]
+        );
+        assert_eq!(cached_samples(data_dir).unwrap(), vec![third]);
 
         fs::remove_dir_all(root).unwrap();
     }

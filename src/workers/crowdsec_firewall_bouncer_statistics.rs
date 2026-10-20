@@ -178,7 +178,9 @@ impl CrowdSecFirewallBouncerStatisticsCollector {
         let Some(previous_sample) = previous_sample else {
             if configuration.enabled {
                 if let Err(error) = self.start_new_policy_generation() {
-                    error!("Starting a new CrowdSec Firewall Bouncer statistics generation ({error})");
+                    error!(
+                        "Starting a new CrowdSec Firewall Bouncer statistics generation ({error})"
+                    );
                     self.set_unavailable();
                 }
             }
@@ -346,7 +348,8 @@ fn blocking_rule_counters_decreased(
 mod tests {
     use super::*;
     use crate::crowdsec::statistics::{
-        CrowdSecFirewallBouncerAddressCounter, CrowdSecFirewallBouncerCounter,
+        CrowdSecFirewallBouncerAddressCounter, CrowdSecFirewallBouncerBlockingCounters,
+        CrowdSecFirewallBouncerCounter,
     };
 
     fn sample(address: &str) -> CrowdSecFirewallBouncerStatisticsSample {
@@ -450,5 +453,33 @@ mod tests {
         };
 
         assert!(!blocking_rule_counters_decreased(&previous, &current));
+    }
+
+    #[test]
+    fn disabled_sampling_preserves_the_configuration_without_collecting_samples() {
+        let root = std::env::temp_dir().join(format!(
+            "fwcloud-crowdsec-statistics-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let configuration = CrowdSecFirewallBouncerStatisticsConfigStore::default();
+        let disabled = CrowdSecFirewallBouncerStatisticsConfig {
+            enabled: false,
+            sampling_interval: 15,
+            request_max_samples: 500,
+            cache_max_size: 1024,
+        };
+        configuration.replace(disabled.clone()).unwrap();
+        let collector = CrowdSecFirewallBouncerStatisticsCollector::new(
+            root.to_str().unwrap(),
+            configuration.clone(),
+        );
+
+        futures::executor::block_on(collector.collect(&crate::config::Config::new().unwrap()));
+
+        assert_eq!(configuration.configuration().unwrap(), Some(disabled));
+        assert!(collector.samples().samples.is_empty());
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
