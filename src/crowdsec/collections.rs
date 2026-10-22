@@ -22,12 +22,15 @@
 
 use std::{
     collections::BTreeSet,
+    io::Write,
+    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use serde::Deserialize;
 use tokio::{fs, process::Command, time::timeout};
+use uuid::Uuid;
 
 use crate::{
     crowdsec::{
@@ -48,6 +51,7 @@ use crate::{
 
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
+const CROWDSEC_COMMAND: &str = "/usr/bin/crowdsec";
 pub const ACQUISITION_DIRECTORY: &str = "/etc/crowdsec/acquis.d";
 const ACQUISITION_FILE: &str = "/etc/crowdsec/acquis.yaml";
 const CROWDSEC_CONFIG_PATH: &str = "/etc/crowdsec/config.yaml";
@@ -245,13 +249,118 @@ pub async fn update_managed_acquisition(
     let log_paths = validated_log_paths(log_paths)?;
     reject_conflicting_log_paths(&acquisition.file_path, &log_paths).await?;
     let contents = managed_acquisition_contents(collection, acquisition.label_type.as_deref(), &log_paths)?;
+    let previous_contents = fs::read(&acquisition.file_path).await?;
 
-    fs::write(&acquisition.file_path, contents).await?;
+    write_validate_and_reload_acquisition(
+        Path::new(&acquisition.file_path),
+        contents.as_bytes(),
+        &previous_contents,
+    )
+    .await?;
 
     Ok(CrowdSecCollectionAcquisition {
         log_paths,
         ..acquisition
     })
+}
+
+async fn write_validate_and_reload_acquisition(
+    path: &Path,
+    contents: &[u8],
+    previous_contents: &[u8],
+) -> Result<()> {
+    write_acquisition_atomically(path, contents)?;
+
+    if let Err(error) = validate_crowdsec_configuration().await {
+        return restore_acquisition_after_validation_failure(path, previous_contents, error);
+    }
+
+    if reload_crowdsec_service().await.is_ok() {
+        return Ok(());
+    }
+
+    match restore_acquisition_after_reload_failure(path, previous_contents).await {
+        Ok(()) => Err(FwcError::crowdsec(
+            COMMAND_FAILED,
+            "CrowdSec acquisition reload failed and the previous configuration was restored",
+        )),
+        Err(_) => Err(FwcError::crowdsec(
+            COMMAND_FAILED,
+            "CrowdSec acquisition reload failed and automatic recovery failed",
+        )),
+    }
+}
+
+fn restore_acquisition_after_validation_failure(
+    path: &Path,
+    previous_contents: &[u8],
+    validation_error: FwcError,
+) -> Result<()> {
+    write_acquisition_atomically(path, previous_contents).map_err(|_| {
+        FwcError::crowdsec(
+            COMMAND_FAILED,
+            "CrowdSec acquisition validation failed and the previous configuration could not be restored",
+        )
+    })?;
+
+    Err(validation_error)
+}
+
+async fn restore_acquisition_after_reload_failure(path: &Path, previous_contents: &[u8]) -> Result<()> {
+    write_acquisition_atomically(path, previous_contents)?;
+    reload_crowdsec_service().await
+}
+
+fn write_acquisition_atomically(path: &Path, contents: &[u8]) -> Result<()> {
+    let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        std::fs::File::open(path.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "CrowdSec acquisition directory is missing",
+            )
+        })?)?
+        .sync_all()?;
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+
+    result.map_err(|_: std::io::Error| {
+        FwcError::crowdsec(
+            COMMAND_FAILED,
+            "Unable to write CrowdSec acquisition configuration",
+        )
+    })
+}
+
+async fn validate_crowdsec_configuration() -> Result<()> {
+    let output = timeout(
+        SERVICE_COMMAND_TIMEOUT,
+        Command::new(CROWDSEC_COMMAND).arg("-t").output(),
+    )
+    .await
+    .map_err(|_| FwcError::crowdsec(OPERATION_TIMEOUT, "CrowdSec configuration validation timed out"))?
+    .map_err(|_| FwcError::crowdsec(COMMAND_FAILED, "Unable to validate CrowdSec configuration"))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            COLLECTION_INVALID,
+            "CrowdSec acquisition configuration validation failed",
+        ))
+    }
 }
 
 async fn reject_conflicting_log_paths(target_path: &str, log_paths: &[String]) -> Result<()> {
