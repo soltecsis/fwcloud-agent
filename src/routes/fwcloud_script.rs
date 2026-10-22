@@ -32,12 +32,17 @@ use crate::{
         bouncers,
         progress::{CrowdSecProgress, CrowdSecProgressMessageType},
     },
+    workers::crowdsec_firewall_bouncer_statistics::CrowdSecFirewallBouncerStatisticsCollector,
 };
 
 use crate::errors::Result;
 
 #[post("/fwcloud_script/upload")]
-async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+async fn upload_and_run(
+    payload: Multipart,
+    cfg: web::Data<Arc<Config>>,
+    statistics: web::Data<CrowdSecFirewallBouncerStatisticsCollector>,
+) -> Result<HttpResponse> {
     let res: HttpResponse;
 
     // Mutex scope start.
@@ -53,6 +58,7 @@ async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Resu
 
         let mut files = HttpFiles::new(cfg.tmp_dir, false);
         res = files.fwcloud_script(payload, &cfg).await?;
+        statistics.reset_after_policy_load()?;
         let _crowdsec_progress = CrowdSecProgress::from_request(&cfg, files.websocket_id())?;
 
         if let Some(backend) = files.crowdsec_backend()? {
