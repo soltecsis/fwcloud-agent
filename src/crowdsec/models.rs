@@ -511,6 +511,19 @@ pub struct CrowdSecCollectionAcquisition {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecCollectionAcquisitionQuery {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecCollectionAcquisitionUpdateRequest {
+    pub name: String,
+    pub log_paths: Vec<String>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecCollectionsQuery {

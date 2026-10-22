@@ -33,9 +33,10 @@ use crate::{
             CrowdSecAlertsQuery, CrowdSecBouncerInstallRequest, CrowdSecBouncerRegisterRequest,
             CrowdSecBouncerReplicationRequest, CrowdSecBouncerUninstallRequest,
             CrowdSecCentralLapiConfigureRequest, CrowdSecCollectionInstallRequest,
-            CrowdSecCollectionRemoveRequest, CrowdSecCollectionUpdateRequest,
-            CrowdSecCollectionsQuery, CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest,
-            CrowdSecDecisionsQuery, CrowdSecInstallMode, CrowdSecInstallRequest,
+            CrowdSecCollectionAcquisitionQuery, CrowdSecCollectionAcquisitionUpdateRequest,
+            CrowdSecCollectionRemoveRequest, CrowdSecCollectionUpdateRequest, CrowdSecCollectionsQuery,
+            CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
+            CrowdSecInstallMode, CrowdSecInstallRequest,
             CrowdSecLapiReplicationReadinessResponse, CrowdSecMachineReplicationRequest,
             CrowdSecRemoteMachineActivationRequest, CrowdSecRemoteMachineReauthenticationRequest,
             CrowdSecRemoteMachineResumeRequest, CrowdSecUninstallRequest,
@@ -431,6 +432,33 @@ async fn crowdsec_collections(
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         collections_result?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[get("/crowdsec/collections/acquisition")]
+async fn crowdsec_collection_acquisition(
+    cfg: web::Data<Arc<Config>>,
+    query: web::Query<CrowdSecCollectionAcquisitionQuery>,
+) -> Result<HttpResponse> {
+    let response = {
+        let _guard = cfg.mutex.crowdsec.lock().await;
+        collections::managed_acquisition(&query.name).await?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[put("/crowdsec/collections/acquisition")]
+async fn update_crowdsec_collection_acquisition(
+    cfg: web::Data<Arc<Config>>,
+    request: web::Json<CrowdSecCollectionAcquisitionUpdateRequest>,
+) -> Result<HttpResponse> {
+    let response = {
+        let _guard = cfg.mutex.crowdsec.lock().await;
+        crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
+        collections::update_managed_acquisition(&request.name, &request.log_paths).await?
     };
 
     Ok(HttpResponse::Ok().json(response))

@@ -22,6 +22,7 @@
 
 use std::{
     collections::BTreeSet,
+    path::Path,
     time::Duration,
 };
 
@@ -36,9 +37,10 @@ use crate::{
             OPERATION_TIMEOUT,
         },
         models::{
-            CrowdSecCollection, CrowdSecCollectionOperation, CrowdSecCollectionOperationResponse,
-            CrowdSecCollectionServiceReloadState, CrowdSecCollectionState,
-            CrowdSecCollectionsResponse,
+            CrowdSecCollection, CrowdSecCollectionAcquisition,
+            CrowdSecCollectionAcquisitionState, CrowdSecCollectionOperation,
+            CrowdSecCollectionOperationResponse, CrowdSecCollectionServiceReloadState,
+            CrowdSecCollectionState, CrowdSecCollectionsResponse,
         },
     },
     errors::{FwcError, Result},
@@ -47,6 +49,9 @@ use crate::{
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
 pub const ACQUISITION_DIRECTORY: &str = "/etc/crowdsec/acquis.d";
+const MANAGED_ACQUISITION_HEADER: &str = "# This acquisition file is managed by FWCloud.";
+const MANAGED_ACQUISITION_COLLECTION_PREFIX: &str = "# Collection: ";
+const MANAGED_ACQUISITION_LABEL_TYPE_PREFIX: &str = "# Parser type: ";
 
 pub async fn list(installed_only: bool) -> Result<CrowdSecCollectionsResponse> {
     let arguments = list_arguments(installed_only);
@@ -214,6 +219,38 @@ pub(crate) async fn ensure_managed_acquisition(collection: &str) -> Result<()> {
     Ok(())
 }
 
+pub async fn managed_acquisition(collection: &str) -> Result<CrowdSecCollectionAcquisition> {
+    let file_path = managed_acquisition_file_path(collection)?;
+    let contents = fs::read_to_string(&file_path).await.map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            FwcError::crowdsec(
+                COLLECTION_INVALID,
+                "FWCloud has no managed CrowdSec acquisition for this collection",
+            )
+        } else {
+            FwcError::from(error)
+        }
+    })?;
+
+    managed_acquisition_from_contents(collection, &file_path, &contents)
+}
+
+pub async fn update_managed_acquisition(
+    collection: &str,
+    log_paths: &[String],
+) -> Result<CrowdSecCollectionAcquisition> {
+    let acquisition = managed_acquisition(collection).await?;
+    let log_paths = validated_log_paths(log_paths)?;
+    let contents = managed_acquisition_contents(collection, acquisition.label_type.as_deref(), &log_paths)?;
+
+    fs::write(&acquisition.file_path, contents).await?;
+
+    Ok(CrowdSecCollectionAcquisition {
+        log_paths,
+        ..acquisition
+    })
+}
+
 fn managed_acquisition_file_path(collection: &str) -> Result<String> {
     Ok(format!(
         "{ACQUISITION_DIRECTORY}/{}",
@@ -249,11 +286,160 @@ fn detected_file_acquisition_label_types_from_json(
 
 fn managed_acquisition_initial_contents(collection: &str, label_type: &str) -> String {
     format!(
-        "# This acquisition file is managed by FWCloud.\n\
-         # Collection: {collection}\n\
-         # Parser type: {label_type}\n\
-         # Add log paths from FWCloud before enabling this acquisition.\n"
+        "{}# Add log paths from FWCloud before enabling this acquisition.\n",
+        managed_acquisition_metadata_contents(collection, label_type)
     )
+}
+
+fn managed_acquisition_metadata_contents(collection: &str, label_type: &str) -> String {
+    format!(
+        "{MANAGED_ACQUISITION_HEADER}\n\
+         {MANAGED_ACQUISITION_COLLECTION_PREFIX}{collection}\n\
+         {MANAGED_ACQUISITION_LABEL_TYPE_PREFIX}{label_type}\n"
+    )
+}
+
+fn managed_acquisition_contents(
+    collection: &str,
+    label_type: Option<&str>,
+    log_paths: &[String],
+) -> Result<String> {
+    let label_type = label_type.ok_or_else(|| {
+        FwcError::crowdsec(
+            COLLECTION_INVALID,
+            "FWCloud managed CrowdSec acquisition has no parser type",
+        )
+    })?;
+    let mut contents = if log_paths.is_empty() {
+        managed_acquisition_initial_contents(collection, label_type)
+    } else {
+        managed_acquisition_metadata_contents(collection, label_type)
+    };
+
+    if !log_paths.is_empty() {
+        contents.push_str("\nsource: file\nfilenames:\n");
+        for log_path in log_paths {
+            contents.push_str("  - ");
+            contents.push_str(&yaml_string(log_path)?);
+            contents.push('\n');
+        }
+        contents.push_str("labels:\n  type: ");
+        contents.push_str(&yaml_string(label_type)?);
+        contents.push('\n');
+    }
+
+    Ok(contents)
+}
+
+fn yaml_string(value: &str) -> Result<String> {
+    serde_json::to_string(value).map_err(|_| {
+        FwcError::crowdsec(
+            COMMAND_FAILED,
+            "Unable to serialize CrowdSec acquisition configuration",
+        )
+    })
+}
+
+fn managed_acquisition_from_contents(
+    collection: &str,
+    file_path: &str,
+    contents: &str,
+) -> Result<CrowdSecCollectionAcquisition> {
+    let mut managed = false;
+    let mut managed_collection = None;
+    let mut label_type = None;
+
+    for line in contents.lines() {
+        if line == MANAGED_ACQUISITION_HEADER {
+            managed = true;
+        } else if let Some(value) = line.strip_prefix(MANAGED_ACQUISITION_COLLECTION_PREFIX) {
+            managed_collection = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix(MANAGED_ACQUISITION_LABEL_TYPE_PREFIX) {
+            label_type = Some(value.to_string());
+        }
+    }
+
+    if !managed || managed_collection.as_deref() != Some(collection) {
+        return Err(FwcError::crowdsec(
+            COLLECTION_INVALID,
+            "CrowdSec acquisition is not managed by FWCloud",
+        ));
+    }
+
+    Ok(CrowdSecCollectionAcquisition {
+        collection: collection.to_string(),
+        file_path: file_path.to_string(),
+        state: CrowdSecCollectionAcquisitionState::Ready,
+        label_type,
+        candidate_label_types: vec![],
+        log_paths: log_paths_from_managed_acquisition(contents),
+        message: "CrowdSec acquisition is managed by FWCloud".to_string(),
+    })
+}
+
+fn log_paths_from_managed_acquisition(contents: &str) -> Vec<String> {
+    let mut filenames_indent = None;
+    let mut log_paths = Vec::new();
+
+    for line in contents.lines() {
+        if line.trim_start().starts_with('#') || line.trim().is_empty() {
+            continue;
+        }
+
+        let indent = line.len() - line.trim_start().len();
+        if line.trim() == "filenames:" {
+            filenames_indent = Some(indent);
+            continue;
+        }
+
+        let Some(filenames_indent_value) = filenames_indent else {
+            continue;
+        };
+        if indent <= filenames_indent_value {
+            filenames_indent = None;
+            continue;
+        }
+
+        let value = line.trim_start().strip_prefix("- ");
+        if let Some(value) = value.and_then(yaml_string_value) {
+            log_paths.push(value);
+        }
+    }
+
+    log_paths
+}
+
+fn yaml_string_value(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.starts_with('"') {
+        serde_json::from_str(value).ok()
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn validated_log_paths(log_paths: &[String]) -> Result<Vec<String>> {
+    let mut validated = Vec::with_capacity(log_paths.len());
+
+    for log_path in log_paths {
+        let valid = !log_path.is_empty()
+            && log_path == log_path.trim()
+            && log_path.len() <= 1024
+            && !log_path.chars().any(char::is_control)
+            && Path::new(log_path).is_absolute();
+        if !valid {
+            return Err(FwcError::crowdsec(
+                COLLECTION_INVALID,
+                "Invalid CrowdSec acquisition log path",
+            ));
+        }
+
+        if !validated.contains(log_path) {
+            validated.push(log_path.to_string());
+        }
+    }
+
+    Ok(validated)
 }
 
 #[derive(Deserialize)]
@@ -513,8 +699,9 @@ mod tests {
     use super::{
         collection_command_error, collection_from_json, collection_operation_response,
         collection_service_reload_state_from_result, detected_file_acquisition_label_types_from_json,
-        list_arguments, managed_acquisition_file_name, managed_acquisition_initial_contents,
-        validate_collection_name,
+        list_arguments, managed_acquisition_contents, managed_acquisition_file_name,
+        managed_acquisition_from_contents, managed_acquisition_initial_contents,
+        validated_log_paths, validate_collection_name,
     };
     use crate::{
         crowdsec::{
@@ -713,6 +900,42 @@ mod tests {
              # Collection: crowdsecurity/nginx\n\
              # Parser type: nginx\n\
              # Add log paths from FWCloud before enabling this acquisition.\n"
+        );
+    }
+
+    #[test]
+    fn reads_only_fwcloud_managed_acquisition_log_paths() {
+        let contents = managed_acquisition_contents(
+            "crowdsecurity/nginx",
+            Some("nginx"),
+            &["/var/log/nginx/access.log".to_string()],
+        )
+        .unwrap();
+        let acquisition = managed_acquisition_from_contents(
+            "crowdsecurity/nginx",
+            "/etc/crowdsec/acquis.d/crowdsecurity-nginx.yaml",
+            &contents,
+        )
+        .unwrap();
+
+        assert_eq!(acquisition.label_type.as_deref(), Some("nginx"));
+        assert_eq!(
+            acquisition.log_paths,
+            vec!["/var/log/nginx/access.log".to_string()]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_or_duplicate_managed_acquisition_log_paths() {
+        assert!(validated_log_paths(&["relative.log".to_string()]).is_err());
+        assert!(validated_log_paths(&["/var/log/access.log\n".to_string()]).is_err());
+        assert_eq!(
+            validated_log_paths(&[
+                "/var/log/nginx/access.log".to_string(),
+                "/var/log/nginx/access.log".to_string(),
+            ])
+            .unwrap(),
+            vec!["/var/log/nginx/access.log".to_string()]
         );
     }
 
