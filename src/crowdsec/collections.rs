@@ -20,9 +20,13 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use std::time::Duration;
+use std::{
+    collections::BTreeSet,
+    time::Duration,
+};
 
-use tokio::{process::Command, time::timeout};
+use serde::Deserialize;
+use tokio::{fs, process::Command, time::timeout};
 
 use crate::{
     crowdsec::{
@@ -62,6 +66,7 @@ pub async fn install(name: &str) -> Result<CrowdSecCollectionOperationResponse> 
 
     reject_tainted_collection(&collection)?;
     if collection.state == CrowdSecCollectionState::Installed {
+        ensure_managed_acquisition(name).await?;
         return Ok(CrowdSecCollectionOperationResponse {
             operation: CrowdSecCollectionOperation::Install,
             collection: Some(name.to_string()),
@@ -74,6 +79,7 @@ pub async fn install(name: &str) -> Result<CrowdSecCollectionOperationResponse> 
     }
 
     execute_collection_command(&["collections", "install", name]).await?;
+    ensure_managed_acquisition(name).await?;
     let service_reload = collection_service_reload_state().await;
 
     Ok(CrowdSecCollectionOperationResponse {
@@ -182,10 +188,120 @@ fn collection_operation_response(
     }
 }
 
-#[allow(dead_code)] // Used by the managed acquisition workflow introduced incrementally below.
 pub(crate) fn managed_acquisition_file_name(collection: &str) -> Result<String> {
     validate_collection_name(collection)?;
     Ok(format!("{}.yaml", collection.replace('/', "-")))
+}
+
+pub(crate) async fn ensure_managed_acquisition(collection: &str) -> Result<()> {
+    let label_types = detected_file_acquisition_label_types(collection).await?;
+    if label_types.len() != 1 {
+        return Ok(());
+    }
+
+    let file_path = managed_acquisition_file_path(collection)?;
+    if fs::try_exists(&file_path).await? {
+        return Ok(());
+    }
+
+    fs::create_dir_all(ACQUISITION_DIRECTORY).await?;
+    fs::write(
+        &file_path,
+        managed_acquisition_initial_contents(collection, &label_types[0]),
+    )
+    .await?;
+
+    Ok(())
+}
+
+fn managed_acquisition_file_path(collection: &str) -> Result<String> {
+    Ok(format!(
+        "{ACQUISITION_DIRECTORY}/{}",
+        managed_acquisition_file_name(collection)?
+    ))
+}
+
+async fn detected_file_acquisition_label_types(collection: &str) -> Result<Vec<String>> {
+    let output = CrowdSecCommand::cscli(&["setup", "detect"])?.execute().await?;
+    detected_file_acquisition_label_types_from_json(output.stdout(), collection)
+}
+
+fn detected_file_acquisition_label_types_from_json(
+    output: &str,
+    collection: &str,
+) -> Result<Vec<String>> {
+    let setup = serde_json::from_str::<CrowdSecSetupDetection>(output).map_err(|_| {
+        FwcError::crowdsec(
+            COMMAND_FAILED,
+            "Unable to read CrowdSec service detection results",
+        )
+    })?;
+
+    let label_types = setup
+        .setup
+        .into_iter()
+        .filter(|service| service.installs_collection(collection))
+        .filter_map(|service| service.file_label_type())
+        .collect::<BTreeSet<_>>();
+
+    Ok(label_types.into_iter().collect())
+}
+
+fn managed_acquisition_initial_contents(collection: &str, label_type: &str) -> String {
+    format!(
+        "# This acquisition file is managed by FWCloud.\n\
+         # Collection: {collection}\n\
+         # Parser type: {label_type}\n\
+         # Add log paths from FWCloud before enabling this acquisition.\n"
+    )
+}
+
+#[derive(Deserialize)]
+struct CrowdSecSetupDetection {
+    #[serde(default)]
+    setup: Vec<CrowdSecDetectedService>,
+}
+
+#[derive(Deserialize)]
+struct CrowdSecDetectedService {
+    #[serde(default)]
+    install: CrowdSecDetectedInstallation,
+    datasource: Option<CrowdSecDetectedDatasource>,
+}
+
+impl CrowdSecDetectedService {
+    fn installs_collection(&self, collection: &str) -> bool {
+        self.install
+            .collections
+            .iter()
+            .any(|candidate| candidate == collection)
+    }
+
+    fn file_label_type(&self) -> Option<String> {
+        let datasource = self.datasource.as_ref()?;
+        (datasource.source == "file")
+            .then(|| datasource.labels.as_ref()?.label_type.clone())
+            .flatten()
+            .filter(|label_type| !label_type.is_empty())
+    }
+}
+
+#[derive(Default, Deserialize)]
+struct CrowdSecDetectedInstallation {
+    #[serde(default)]
+    collections: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct CrowdSecDetectedDatasource {
+    source: String,
+    labels: Option<CrowdSecDetectedLabels>,
+}
+
+#[derive(Deserialize)]
+struct CrowdSecDetectedLabels {
+    #[serde(rename = "type")]
+    label_type: Option<String>,
 }
 
 fn list_arguments(installed_only: bool) -> &'static [&'static str] {
@@ -396,7 +512,8 @@ mod tests {
 
     use super::{
         collection_command_error, collection_from_json, collection_operation_response,
-        collection_service_reload_state_from_result, list_arguments, managed_acquisition_file_name,
+        collection_service_reload_state_from_result, detected_file_acquisition_label_types_from_json,
+        list_arguments, managed_acquisition_file_name, managed_acquisition_initial_contents,
         validate_collection_name,
     };
     use crate::{
@@ -547,6 +664,55 @@ mod tests {
         assert_eq!(
             managed_acquisition_file_name("crowdsecurity/nginx").unwrap(),
             "crowdsecurity-nginx.yaml"
+        );
+    }
+
+    #[test]
+    fn detects_only_file_acquisitions_for_the_requested_collection() {
+        let setup = json!({
+            "setup": [
+                {
+                    "install": { "collections": ["crowdsecurity/nginx"] },
+                    "datasource": {
+                        "source": "file",
+                        "labels": { "type": "nginx" }
+                    }
+                },
+                {
+                    "install": { "collections": ["crowdsecurity/sshd"] },
+                    "datasource": {
+                        "source": "file",
+                        "labels": { "type": "syslog" }
+                    }
+                },
+                {
+                    "install": { "collections": ["crowdsecurity/nginx"] },
+                    "datasource": {
+                        "source": "journalctl",
+                        "labels": { "type": "nginx" }
+                    }
+                }
+            ]
+        });
+
+        assert_eq!(
+            detected_file_acquisition_label_types_from_json(
+                &serde_json::to_string(&setup).unwrap(),
+                "crowdsecurity/nginx"
+            )
+            .unwrap(),
+            vec!["nginx"]
+        );
+    }
+
+    #[test]
+    fn creates_comment_only_managed_acquisition_contents() {
+        assert_eq!(
+            managed_acquisition_initial_contents("crowdsecurity/nginx", "nginx"),
+            "# This acquisition file is managed by FWCloud.\n\
+             # Collection: crowdsecurity/nginx\n\
+             # Parser type: nginx\n\
+             # Add log paths from FWCloud before enabling this acquisition.\n"
         );
     }
 

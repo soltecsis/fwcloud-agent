@@ -29,6 +29,7 @@ use crate::{
     crowdsec::{
         bouncers,
         command::CrowdSecCommand,
+        collections,
         errors::{COMMAND_FAILED, OPERATION_TIMEOUT},
         models::{
             CrowdSecDataRetention, CrowdSecFirewallBackend, CrowdSecInstallResponse,
@@ -137,6 +138,7 @@ pub(crate) async fn update_hub() -> Result<()> {
 pub(crate) async fn install_default_collections(progress: Option<&CrowdSecProgress>) -> Result<()> {
     for collection in ["crowdsecurity/linux", "crowdsecurity/sshd"] {
         if collection_is_installed(collection).await? {
+            collections::ensure_managed_acquisition(collection).await?;
             debug!(
                 "CrowdSec default collection is already installed; preserving its local state: {}",
                 collection
@@ -156,6 +158,7 @@ pub(crate) async fn install_default_collections(progress: Option<&CrowdSecProgre
         CrowdSecCommand::cscli(&["collections", "install", collection])?
             .execute()
             .await?;
+        collections::ensure_managed_acquisition(collection).await?;
         emit_success(
             progress,
             &format!("CrowdSec collection installed: {collection}"),
