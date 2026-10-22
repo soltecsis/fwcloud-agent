@@ -2497,14 +2497,40 @@ async fn has_unmanaged_crowdsec_firewall_rules() -> Result<bool> {
 fn firewall_rules_contain_unmanaged_crowdsec(rules: &str) -> bool {
     rules.lines().any(|line| {
         let normalized = line.to_ascii_lowercase();
-        normalized.contains("crowdsec") && !is_fwcloud_blacklist_rule(&normalized)
+        normalized.contains("crowdsec") && !is_fwcloud_managed_firewall_rule(&normalized)
     })
 }
 
-fn is_fwcloud_blacklist_rule(rule: &str) -> bool {
+fn is_fwcloud_managed_firewall_rule(rule: &str) -> bool {
+    is_legacy_fwcloud_blacklist_rule(rule) || is_fwcloud_iptables_blocking_chain_rule(rule)
+}
+
+fn is_legacy_fwcloud_blacklist_rule(rule: &str) -> bool {
     (rule.starts_with("-a input ") || rule.starts_with("-a forward "))
         && (rule.contains("--match-set crowdsec-blacklists ")
             || rule.contains("--match-set crowdsec6-blacklists "))
+}
+
+fn is_fwcloud_iptables_blocking_chain_rule(rule: &str) -> bool {
+    let chains = [
+        (IPTABLES_V4_INPUT_BLOCKING_CHAIN, IPSET_V4_BLACKLIST),
+        (IPTABLES_V4_FORWARD_BLOCKING_CHAIN, IPSET_V4_BLACKLIST),
+        (IPTABLES_V6_INPUT_BLOCKING_CHAIN, IPSET_V6_BLACKLIST),
+        (IPTABLES_V6_FORWARD_BLOCKING_CHAIN, IPSET_V6_BLACKLIST),
+    ];
+
+    chains.iter().any(|(chain, blacklist)| {
+        let chain = chain.to_ascii_lowercase();
+        let blacklist = blacklist.to_ascii_lowercase();
+
+        rule.starts_with(&format!(":{chain} "))
+            || ((rule.starts_with("-a input ") || rule.starts_with("-a forward "))
+                && rule.contains(&format!("-j {chain}")))
+            || (rule.starts_with(&format!("-a {chain} "))
+                && ((rule.contains(&format!("--match-set {blacklist} src"))
+                    && rule.contains("-j drop"))
+                    || rule.ends_with("-j return")))
+    })
 }
 
 async fn reconcile_legacy_bouncer_resources(progress: Option<&CrowdSecProgress>) -> Result<bool> {
@@ -3473,7 +3499,23 @@ mod tests {
 
     #[test]
     fn identifies_unmanaged_crowdsec_firewall_rules() {
-        let fwcloud_rules = "-A INPUT -m set --match-set crowdsec-blacklists src -j DROP\n-A FORWARD -m set --match-set crowdsec6-blacklists src -j DROP\n";
+        let fwcloud_rules = r#":FWC_CROWDSEC_V4_FORWARD - [0:0]
+:FWC_CROWDSEC_V4_INPUT - [0:0]
+-A INPUT -m comment --comment "CrowdSec firewall bouncer compatibility." -j FWC_CROWDSEC_V4_INPUT
+-A FORWARD -m comment --comment "CrowdSec firewall bouncer compatibility." -j FWC_CROWDSEC_V4_FORWARD
+-A FWC_CROWDSEC_V4_FORWARD -m set --match-set crowdsec-blacklists src -j DROP
+-A FWC_CROWDSEC_V4_FORWARD -j RETURN
+-A FWC_CROWDSEC_V4_INPUT -m set --match-set crowdsec-blacklists src -j DROP
+-A FWC_CROWDSEC_V4_INPUT -j RETURN
+:FWC_CROWDSEC_V6_FORWARD - [0:0]
+:FWC_CROWDSEC_V6_INPUT - [0:0]
+-A INPUT -m comment --comment "CrowdSec firewall bouncer compatibility." -j FWC_CROWDSEC_V6_INPUT
+-A FORWARD -m comment --comment "CrowdSec firewall bouncer compatibility." -j FWC_CROWDSEC_V6_FORWARD
+-A FWC_CROWDSEC_V6_FORWARD -m set --match-set crowdsec6-blacklists src -j DROP
+-A FWC_CROWDSEC_V6_FORWARD -j RETURN
+-A FWC_CROWDSEC_V6_INPUT -m set --match-set crowdsec6-blacklists src -j DROP
+-A FWC_CROWDSEC_V6_INPUT -j RETURN
+"#;
         let unmanaged_rules = "-N CROWDSEC\n-A INPUT -j CROWDSEC\n";
 
         assert!(!firewall_rules_contain_unmanaged_crowdsec(fwcloud_rules));
