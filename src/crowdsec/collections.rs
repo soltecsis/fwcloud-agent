@@ -22,7 +22,7 @@
 
 use std::{
     collections::BTreeSet,
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -49,6 +49,8 @@ use crate::{
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
 pub const ACQUISITION_DIRECTORY: &str = "/etc/crowdsec/acquis.d";
+const ACQUISITION_FILE: &str = "/etc/crowdsec/acquis.yaml";
+const CROWDSEC_CONFIG_PATH: &str = "/etc/crowdsec/config.yaml";
 const MANAGED_ACQUISITION_HEADER: &str = "# This acquisition file is managed by FWCloud.";
 const MANAGED_ACQUISITION_COLLECTION_PREFIX: &str = "# Collection: ";
 const MANAGED_ACQUISITION_LABEL_TYPE_PREFIX: &str = "# Parser type: ";
@@ -241,6 +243,7 @@ pub async fn update_managed_acquisition(
 ) -> Result<CrowdSecCollectionAcquisition> {
     let acquisition = managed_acquisition(collection).await?;
     let log_paths = validated_log_paths(log_paths)?;
+    reject_conflicting_log_paths(&acquisition.file_path, &log_paths).await?;
     let contents = managed_acquisition_contents(collection, acquisition.label_type.as_deref(), &log_paths)?;
 
     fs::write(&acquisition.file_path, contents).await?;
@@ -249,6 +252,98 @@ pub async fn update_managed_acquisition(
         log_paths,
         ..acquisition
     })
+}
+
+async fn reject_conflicting_log_paths(target_path: &str, log_paths: &[String]) -> Result<()> {
+    for acquisition_file in effective_acquisition_files().await? {
+        if acquisition_file == Path::new(target_path) {
+            continue;
+        }
+
+        let contents = fs::read_to_string(&acquisition_file).await?;
+        if let Some(path) = conflicting_log_path(log_paths, &contents) {
+            return Err(FwcError::CrowdSecCollectionAcquisitionPathConflict {
+                path,
+                conflicting_file_path: acquisition_file.display().to_string(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+async fn effective_acquisition_files() -> Result<Vec<PathBuf>> {
+    let (acquisition_file, acquisition_directory) = configured_acquisition_locations().await?;
+    let mut files = BTreeSet::new();
+
+    if fs::try_exists(&acquisition_file).await? {
+        files.insert(acquisition_file);
+    }
+
+    if !fs::try_exists(&acquisition_directory).await? {
+        return Ok(files.into_iter().collect());
+    }
+
+    let mut entries = fs::read_dir(acquisition_directory).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let file_type = entry.file_type().await?;
+        let path = entry.path();
+        let is_acquisition_file = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| matches!(extension, "yaml" | "yml"));
+
+        if is_acquisition_file && (file_type.is_file() || file_type.is_symlink()) {
+            files.insert(path);
+        }
+    }
+
+    Ok(files.into_iter().collect())
+}
+
+async fn configured_acquisition_locations() -> Result<(PathBuf, PathBuf)> {
+    let contents = match fs::read_to_string(CROWDSEC_CONFIG_PATH).await {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(FwcError::from(error)),
+    };
+
+    Ok((
+        crowdsec_configuration_path(&contents, "acquisition_path")
+            .unwrap_or_else(|| PathBuf::from(ACQUISITION_FILE)),
+        crowdsec_configuration_path(&contents, "acquisition_dir")
+            .unwrap_or_else(|| PathBuf::from(ACQUISITION_DIRECTORY)),
+    ))
+}
+
+fn crowdsec_configuration_path(contents: &str, key: &str) -> Option<PathBuf> {
+    contents.lines().find_map(|line| {
+        let line = line.trim();
+        if line.starts_with('#') {
+            return None;
+        }
+
+        let (candidate, value) = line.split_once(':')?;
+        if candidate.trim() != key {
+            return None;
+        }
+
+        let value = value.trim();
+        let value = if value.starts_with('"') {
+            serde_json::from_str::<String>(value).ok()?
+        } else {
+            value.trim_matches('\'').to_string()
+        };
+        Path::new(&value).is_absolute().then_some(PathBuf::from(value))
+    })
+}
+
+fn conflicting_log_path(log_paths: &[String], contents: &str) -> Option<String> {
+    let declared_paths = log_paths_from_acquisition(contents);
+    log_paths
+        .iter()
+        .find(|log_path| declared_paths.contains(log_path))
+        .cloned()
 }
 
 fn managed_acquisition_file_path(collection: &str) -> Result<String> {
@@ -372,12 +467,12 @@ fn managed_acquisition_from_contents(
         state: CrowdSecCollectionAcquisitionState::Ready,
         label_type,
         candidate_label_types: vec![],
-        log_paths: log_paths_from_managed_acquisition(contents),
+        log_paths: log_paths_from_acquisition(contents),
         message: "CrowdSec acquisition is managed by FWCloud".to_string(),
     })
 }
 
-fn log_paths_from_managed_acquisition(contents: &str) -> Vec<String> {
+fn log_paths_from_acquisition(contents: &str) -> Vec<String> {
     let mut filenames_indent = None;
     let mut log_paths = Vec::new();
 
@@ -699,7 +794,8 @@ mod tests {
     use super::{
         collection_command_error, collection_from_json, collection_operation_response,
         collection_service_reload_state_from_result, detected_file_acquisition_label_types_from_json,
-        list_arguments, managed_acquisition_contents, managed_acquisition_file_name,
+        conflicting_log_path, crowdsec_configuration_path, list_arguments,
+        managed_acquisition_contents, managed_acquisition_file_name,
         managed_acquisition_from_contents, managed_acquisition_initial_contents,
         validated_log_paths, validate_collection_name,
     };
@@ -936,6 +1032,33 @@ mod tests {
             ])
             .unwrap(),
             vec!["/var/log/nginx/access.log".to_string()]
+        );
+    }
+
+    #[test]
+    fn detects_log_path_conflicts_in_external_acquisitions() {
+        let contents = "source: file\nfilenames:\n  - /var/log/nginx/access.log\n";
+
+        assert_eq!(
+            conflicting_log_path(&["/var/log/nginx/access.log".to_string()], contents),
+            Some("/var/log/nginx/access.log".to_string())
+        );
+    }
+
+    #[test]
+    fn reads_configured_acquisition_locations() {
+        let configuration = r#"crowdsec_service:
+  acquisition_path: /srv/acquis.yaml
+  acquisition_dir: "/srv/acquis.d"
+"#;
+
+        assert_eq!(
+            crowdsec_configuration_path(configuration, "acquisition_path"),
+            Some("/srv/acquis.yaml".into())
+        );
+        assert_eq!(
+            crowdsec_configuration_path(configuration, "acquisition_dir"),
+            Some("/srv/acquis.d".into())
         );
     }
 
