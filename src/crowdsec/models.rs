@@ -491,6 +491,26 @@ pub struct CrowdSecCollectionsResponse {
     pub collections: Vec<CrowdSecCollection>,
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrowdSecCollectionAcquisitionState {
+    Ready,
+    AutomaticConfigurationUnavailable,
+    ManualReviewRequired,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecCollectionAcquisition {
+    pub collection: String,
+    pub file_path: String,
+    pub state: CrowdSecCollectionAcquisitionState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_type: Option<String>,
+    pub candidate_label_types: Vec<String>,
+    pub log_paths: Vec<String>,
+    pub message: String,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrowdSecCollectionsQuery {
@@ -535,6 +555,8 @@ pub struct CrowdSecCollectionOperationResponse {
     pub collection: Option<String>,
     pub processed_collections: Vec<String>,
     pub skipped_collections: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acquisition: Option<CrowdSecCollectionAcquisition>,
     pub service_reload: CrowdSecCollectionServiceReloadState,
     pub message: String,
 }

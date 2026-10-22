@@ -42,6 +42,7 @@ use crate::{
 
 const SERVICE_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const SYSTEMCTL_COMMAND: &str = "/usr/bin/systemctl";
+pub const ACQUISITION_DIRECTORY: &str = "/etc/crowdsec/acquis.d";
 
 pub async fn list(installed_only: bool) -> Result<CrowdSecCollectionsResponse> {
     let arguments = list_arguments(installed_only);
@@ -66,6 +67,7 @@ pub async fn install(name: &str) -> Result<CrowdSecCollectionOperationResponse> 
             collection: Some(name.to_string()),
             processed_collections: vec![],
             skipped_collections: vec![name.to_string()],
+            acquisition: None,
             service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
             message: "CrowdSec collection is already installed".to_string(),
         });
@@ -79,6 +81,7 @@ pub async fn install(name: &str) -> Result<CrowdSecCollectionOperationResponse> 
         collection: Some(name.to_string()),
         processed_collections: vec![name.to_string()],
         skipped_collections: vec![],
+        acquisition: None,
         message: collection_operation_message("CrowdSec collection is installed", &service_reload),
         service_reload,
     })
@@ -96,6 +99,7 @@ pub async fn remove(name: &str) -> Result<CrowdSecCollectionOperationResponse> {
             collection: Some(name.to_string()),
             processed_collections: vec![],
             skipped_collections: vec![name.to_string()],
+            acquisition: None,
             service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
             message: "CrowdSec collection is already absent".to_string(),
         });
@@ -109,6 +113,7 @@ pub async fn remove(name: &str) -> Result<CrowdSecCollectionOperationResponse> {
         collection: Some(name.to_string()),
         processed_collections: vec![name.to_string()],
         skipped_collections: vec![],
+        acquisition: None,
         message: collection_operation_message("CrowdSec collection is removed", &service_reload),
         service_reload,
     })
@@ -152,6 +157,7 @@ pub async fn update() -> Result<CrowdSecCollectionOperationResponse> {
         collection: None,
         processed_collections,
         skipped_collections,
+        acquisition: None,
         service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
         message: "CrowdSec Hub index and installed collections are updated".to_string(),
     })
@@ -170,9 +176,16 @@ fn collection_operation_response(
         collection,
         processed_collections,
         skipped_collections,
+        acquisition: None,
         message: collection_operation_message(completed_mutation, &service_reload),
         service_reload,
     }
+}
+
+#[allow(dead_code)] // Used by the managed acquisition workflow introduced incrementally below.
+pub(crate) fn managed_acquisition_file_name(collection: &str) -> Result<String> {
+    validate_collection_name(collection)?;
+    Ok(format!("{}.yaml", collection.replace('/', "-")))
 }
 
 fn list_arguments(installed_only: bool) -> &'static [&'static str] {
@@ -383,7 +396,8 @@ mod tests {
 
     use super::{
         collection_command_error, collection_from_json, collection_operation_response,
-        collection_service_reload_state_from_result, list_arguments, validate_collection_name,
+        collection_service_reload_state_from_result, list_arguments, managed_acquisition_file_name,
+        validate_collection_name,
     };
     use crate::{
         crowdsec::{
@@ -512,6 +526,7 @@ mod tests {
             collection: None,
             processed_collections: vec!["crowdsecurity/sshd".to_string()],
             skipped_collections: vec![],
+            acquisition: None,
             service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
             message: "CrowdSec Hub index and installed collections are updated".to_string(),
         };
@@ -525,6 +540,14 @@ mod tests {
         assert_eq!(response["service_reload"], json!("reloaded"));
         assert!(response.get("api_key").is_none());
         assert!(response.get("enrollment_key").is_none());
+    }
+
+    #[test]
+    fn normalizes_managed_acquisition_file_names() {
+        assert_eq!(
+            managed_acquisition_file_name("crowdsecurity/nginx").unwrap(),
+            "crowdsecurity-nginx.yaml"
+        );
     }
 
     #[test]
