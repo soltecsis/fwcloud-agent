@@ -97,6 +97,12 @@ pub enum FwcError {
         message: &'static str,
     },
 
+    #[error("CrowdSec acquisition path '{path}' is already declared in '{conflicting_file_path}'")]
+    CrowdSecCollectionAcquisitionPathConflict {
+        path: String,
+        conflicting_file_path: String,
+    },
+
     #[error(transparent)]
     Validation(#[from] validator::ValidationErrors),
 
@@ -116,6 +122,7 @@ pub enum FwcError {
 impl ResponseError for FwcError {
     fn status_code(&self) -> StatusCode {
         match self {
+            FwcError::CrowdSecCollectionAcquisitionPathConflict { .. } => StatusCode::CONFLICT,
             FwcError::CrowdSec { code, .. }
                 if *code == crate::crowdsec::errors::TRANSITION_UNSUPPORTED =>
             {
@@ -179,6 +186,16 @@ impl ResponseError for FwcError {
 
         error!("{}", self);
         let body = match self {
+            FwcError::CrowdSecCollectionAcquisitionPathConflict {
+                path,
+                conflicting_file_path,
+            } => serde_json::json!({
+                "code": crate::crowdsec::errors::COLLECTION_ACQUISITION_PATH_CONFLICT,
+                "message": "CrowdSec acquisition path is already declared in another acquisition file",
+                "path": path,
+                "conflicting_file_path": conflicting_file_path,
+            })
+            .to_string(),
             FwcError::CrowdSec { code, message } => {
                 serde_json::json!({ "code": code, "message": message }).to_string()
             }

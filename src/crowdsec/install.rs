@@ -29,8 +29,10 @@ use crate::{
     crowdsec::{
         bouncers,
         command::CrowdSecCommand,
+        collections,
         errors::{COMMAND_FAILED, OPERATION_TIMEOUT},
         models::{
+            CrowdSecCollectionAcquisition, CrowdSecCollectionAcquisitionState,
             CrowdSecDataRetention, CrowdSecFirewallBackend, CrowdSecInstallResponse,
             CrowdSecInstallStep, CrowdSecStepResult, CrowdSecStepStatus,
         },
@@ -137,6 +139,8 @@ pub(crate) async fn update_hub() -> Result<()> {
 pub(crate) async fn install_default_collections(progress: Option<&CrowdSecProgress>) -> Result<()> {
     for collection in ["crowdsecurity/linux", "crowdsecurity/sshd"] {
         if collection_is_installed(collection).await? {
+            let acquisition = collections::ensure_managed_acquisition(collection).await?;
+            emit_acquisition_warning(progress, &acquisition);
             debug!(
                 "CrowdSec default collection is already installed; preserving its local state: {}",
                 collection
@@ -156,6 +160,8 @@ pub(crate) async fn install_default_collections(progress: Option<&CrowdSecProgre
         CrowdSecCommand::cscli(&["collections", "install", collection])?
             .execute()
             .await?;
+        let acquisition = collections::ensure_managed_acquisition(collection).await?;
+        emit_acquisition_warning(progress, &acquisition);
         emit_success(
             progress,
             &format!("CrowdSec collection installed: {collection}"),
@@ -163,6 +169,29 @@ pub(crate) async fn install_default_collections(progress: Option<&CrowdSecProgre
     }
 
     Ok(())
+}
+
+fn emit_acquisition_warning(
+    progress: Option<&CrowdSecProgress>,
+    acquisition: &CrowdSecCollectionAcquisition,
+) {
+    match acquisition.state {
+        CrowdSecCollectionAcquisitionState::AutomaticConfigurationUnavailable => emit_warning(
+            progress,
+            &format!(
+                "CrowdSec acquisition cannot be configured automatically for collection: {}",
+                acquisition.collection
+            ),
+        ),
+        CrowdSecCollectionAcquisitionState::ManualReviewRequired => emit_warning(
+            progress,
+            &format!(
+                "CrowdSec acquisition requires manual parser review for collection: {}",
+                acquisition.collection
+            ),
+        ),
+        CrowdSecCollectionAcquisitionState::Ready => {}
+    }
 }
 
 fn emit_progress(progress: Option<&CrowdSecProgress>, message: &str) {
