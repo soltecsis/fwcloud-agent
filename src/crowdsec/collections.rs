@@ -21,7 +21,7 @@
 */
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     io::Write,
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
@@ -55,6 +55,7 @@ const CROWDSEC_COMMAND: &str = "/usr/bin/crowdsec";
 pub const ACQUISITION_DIRECTORY: &str = "/etc/crowdsec/acquis.d";
 const ACQUISITION_FILE: &str = "/etc/crowdsec/acquis.yaml";
 const CROWDSEC_CONFIG_PATH: &str = "/etc/crowdsec/config.yaml";
+const DETECT_CONFIGURATION_PATH: &str = "/var/lib/crowdsec/data/detect.yaml";
 const MANAGED_ACQUISITION_HEADER: &str = "# This acquisition file is managed by FWCloud.";
 const MANAGED_ACQUISITION_COLLECTION_PREFIX: &str = "# Collection: ";
 const MANAGED_ACQUISITION_LABEL_TYPE_PREFIX: &str = "# Parser type: ";
@@ -538,26 +539,33 @@ fn managed_acquisition_file_path(collection: &str) -> Result<String> {
 }
 
 async fn detected_file_acquisition_label_types(collection: &str) -> Result<Vec<String>> {
-    let output = CrowdSecCommand::cscli(&["setup", "detect"])?.execute().await?;
-    detected_file_acquisition_label_types_from_json(output.stdout(), collection)
+    let contents = fs::read_to_string(DETECT_CONFIGURATION_PATH)
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                COMMAND_FAILED,
+                "Unable to read CrowdSec service detection configuration",
+            )
+        })?;
+    detected_file_acquisition_label_types_from_yaml(&contents, collection)
 }
 
-fn detected_file_acquisition_label_types_from_json(
-    output: &str,
+fn detected_file_acquisition_label_types_from_yaml(
+    contents: &str,
     collection: &str,
 ) -> Result<Vec<String>> {
-    let setup = serde_json::from_str::<CrowdSecSetupDetection>(output).map_err(|_| {
+    let catalog = serde_yaml::from_str::<CrowdSecDetectionCatalog>(contents).map_err(|_| {
         FwcError::crowdsec(
             COMMAND_FAILED,
-            "Unable to read CrowdSec service detection results",
+            "Unable to parse CrowdSec service detection configuration",
         )
     })?;
 
-    let label_types = setup
-        .setup
-        .into_iter()
-        .filter(|service| service.installs_collection(collection))
-        .filter_map(|service| service.file_label_type())
+    let label_types = catalog
+        .detect
+        .into_values()
+        .filter(|plan| plan.includes_collection(collection))
+        .filter_map(|plan| plan.file_label_type())
         .collect::<BTreeSet<_>>();
 
     Ok(label_types.into_iter().collect())
@@ -753,28 +761,28 @@ fn validated_log_paths(log_paths: &[String]) -> Result<Vec<String>> {
 }
 
 #[derive(Deserialize)]
-struct CrowdSecSetupDetection {
+struct CrowdSecDetectionCatalog {
     #[serde(default)]
-    setup: Vec<CrowdSecDetectedService>,
+    detect: BTreeMap<String, CrowdSecDetectionPlan>,
 }
 
 #[derive(Deserialize)]
-struct CrowdSecDetectedService {
+struct CrowdSecDetectionPlan {
     #[serde(default)]
-    install: CrowdSecDetectedInstallation,
-    datasource: Option<CrowdSecDetectedDatasource>,
+    hub_spec: CrowdSecDetectionHubSpec,
+    acquisition_spec: Option<CrowdSecDetectionAcquisitionSpec>,
 }
 
-impl CrowdSecDetectedService {
-    fn installs_collection(&self, collection: &str) -> bool {
-        self.install
+impl CrowdSecDetectionPlan {
+    fn includes_collection(&self, collection: &str) -> bool {
+        self.hub_spec
             .collections
             .iter()
             .any(|candidate| candidate == collection)
     }
 
     fn file_label_type(&self) -> Option<String> {
-        let datasource = self.datasource.as_ref()?;
+        let datasource = self.acquisition_spec.as_ref()?.datasource.as_ref()?;
         (datasource.source == "file")
             .then(|| datasource.labels.as_ref()?.label_type.clone())
             .flatten()
@@ -783,9 +791,14 @@ impl CrowdSecDetectedService {
 }
 
 #[derive(Default, Deserialize)]
-struct CrowdSecDetectedInstallation {
+struct CrowdSecDetectionHubSpec {
     #[serde(default)]
     collections: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct CrowdSecDetectionAcquisitionSpec {
+    datasource: Option<CrowdSecDetectedDatasource>,
 }
 
 #[derive(Deserialize)]
@@ -1008,7 +1021,7 @@ mod tests {
 
     use super::{
         collection_command_error, collection_from_json, collection_operation_response,
-        collection_service_reload_state_from_result, detected_file_acquisition_label_types_from_json,
+        collection_service_reload_state_from_result, detected_file_acquisition_label_types_from_yaml,
         conflicting_log_path, crowdsec_configuration_path, list_arguments,
         managed_acquisition_contents, managed_acquisition_file_name,
         managed_acquisition_from_contents, managed_acquisition_initial_contents,
@@ -1168,39 +1181,41 @@ mod tests {
     }
 
     #[test]
-    fn detects_only_file_acquisitions_for_the_requested_collection() {
-        let setup = json!({
-            "setup": [
-                {
-                    "install": { "collections": ["crowdsecurity/nginx"] },
-                    "datasource": {
-                        "source": "file",
-                        "labels": { "type": "nginx" }
-                    }
-                },
-                {
-                    "install": { "collections": ["crowdsecurity/sshd"] },
-                    "datasource": {
-                        "source": "file",
-                        "labels": { "type": "syslog" }
-                    }
-                },
-                {
-                    "install": { "collections": ["crowdsecurity/nginx"] },
-                    "datasource": {
-                        "source": "journalctl",
-                        "labels": { "type": "nginx" }
-                    }
-                }
-            ]
-        });
+    fn reads_only_file_acquisitions_for_the_requested_collection_from_detect_catalog() {
+        let catalog = r#"
+detect:
+  nginx-file:
+    hub_spec:
+      collections:
+        - crowdsecurity/nginx
+    acquisition_spec:
+      datasource:
+        source: file
+        labels:
+          type: nginx
+  sshd-file:
+    hub_spec:
+      collections:
+        - crowdsecurity/sshd
+    acquisition_spec:
+      datasource:
+        source: file
+        labels:
+          type: syslog
+  nginx-journal:
+    hub_spec:
+      collections:
+        - crowdsecurity/nginx
+    acquisition_spec:
+      datasource:
+        source: journalctl
+        labels:
+          type: nginx
+"#;
 
         assert_eq!(
-            detected_file_acquisition_label_types_from_json(
-                &serde_json::to_string(&setup).unwrap(),
-                "crowdsecurity/nginx"
-            )
-            .unwrap(),
+            detected_file_acquisition_label_types_from_yaml(catalog, "crowdsecurity/nginx")
+                .unwrap(),
             vec!["nginx"]
         );
     }
