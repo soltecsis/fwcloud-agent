@@ -114,18 +114,28 @@ pub async fn remove(name: &str) -> Result<CrowdSecCollectionOperationResponse> {
     reject_tainted_collection(&collection)?;
 
     if collection.state == CrowdSecCollectionState::Available {
+        let acquisition_removed = remove_managed_acquisition(name).await?;
+        let service_reload = if acquisition_removed {
+            collection_service_reload_state().await
+        } else {
+            CrowdSecCollectionServiceReloadState::Reloaded
+        };
         return Ok(CrowdSecCollectionOperationResponse {
             operation: CrowdSecCollectionOperation::Remove,
             collection: Some(name.to_string()),
             processed_collections: vec![],
             skipped_collections: vec![name.to_string()],
             acquisition: None,
-            service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
-            message: "CrowdSec collection is already absent".to_string(),
+            message: collection_operation_message(
+                "CrowdSec collection is already absent",
+                &service_reload,
+            ),
+            service_reload,
         });
     }
 
     execute_collection_command(&["collections", "remove", name]).await?;
+    remove_managed_acquisition(name).await?;
     let service_reload = collection_service_reload_state().await;
 
     Ok(CrowdSecCollectionOperationResponse {
@@ -243,6 +253,22 @@ async fn write_initial_managed_acquisition(file_path: &str, contents: &str) -> R
     fs::create_dir_all(ACQUISITION_DIRECTORY).await?;
     fs::write(file_path, contents).await?;
     Ok(())
+}
+
+async fn remove_managed_acquisition(collection: &str) -> Result<bool> {
+    let file_path = managed_acquisition_file_path(collection)?;
+    let contents = match fs::read_to_string(&file_path).await {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(FwcError::from(error)),
+    };
+
+    if managed_acquisition_from_contents(collection, &file_path, &contents).is_err() {
+        return Ok(false);
+    }
+
+    fs::remove_file(file_path).await?;
+    Ok(true)
 }
 
 fn automatic_configuration_unavailable(
