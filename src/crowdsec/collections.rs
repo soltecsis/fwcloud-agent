@@ -256,7 +256,7 @@ fn automatic_configuration_unavailable(
         label_type: None,
         candidate_label_types: vec![],
         log_paths: vec![],
-        message: "No compatible file-based CrowdSec acquisition was detected automatically"
+        message: "No compatible file-based CrowdSec acquisition is defined in the service detection catalog"
             .to_string(),
     }
 }
@@ -289,7 +289,7 @@ fn manual_review_required(
         label_type: None,
         candidate_label_types,
         log_paths: vec![],
-        message: "Several compatible CrowdSec parser types were detected and require manual review"
+        message: "Several compatible CrowdSec parser types are defined in the service detection catalog and require manual review"
             .to_string(),
     }
 }
