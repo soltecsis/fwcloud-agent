@@ -370,6 +370,46 @@ pub async fn update_managed_acquisition(
     })
 }
 
+pub async fn select_managed_acquisition_parser(
+    collection: &str,
+    label_type: &str,
+) -> Result<CrowdSecCollectionAcquisition> {
+    validate_collection_name(collection)?;
+    validate_acquisition_label_type(label_type)?;
+
+    ensure_managed_acquisition(collection).await?;
+    let acquisition = managed_acquisition(collection).await?;
+    if acquisition.state != CrowdSecCollectionAcquisitionState::ManualReviewRequired {
+        return Err(FwcError::crowdsec(
+            COLLECTION_INVALID,
+            "CrowdSec acquisition parser selection is only available during manual review",
+        ));
+    }
+
+    if !acquisition
+        .candidate_label_types
+        .iter()
+        .any(|candidate| candidate == label_type)
+    {
+        return Err(FwcError::crowdsec(
+            COLLECTION_INVALID,
+            "Selected CrowdSec acquisition parser is not a configured candidate",
+        ));
+    }
+
+    write_initial_managed_acquisition(
+        &acquisition.file_path,
+        &managed_acquisition_initial_contents(collection, label_type),
+    )
+    .await?;
+
+    Ok(ready_managed_acquisition(
+        collection,
+        &acquisition.file_path,
+        label_type,
+    ))
+}
+
 async fn write_validate_and_reload_acquisition(
     path: &Path,
     contents: &[u8],
@@ -663,6 +703,21 @@ fn managed_acquisition_contents(
     }
 
     Ok(contents)
+}
+
+fn validate_acquisition_label_type(label_type: &str) -> Result<()> {
+    if label_type.is_empty()
+        || label_type != label_type.trim()
+        || label_type.len() > 128
+        || label_type.chars().any(char::is_control)
+    {
+        return Err(FwcError::crowdsec(
+            COLLECTION_INVALID,
+            "Invalid CrowdSec acquisition parser type",
+        ));
+    }
+
+    Ok(())
 }
 
 fn yaml_string(value: &str) -> Result<String> {
