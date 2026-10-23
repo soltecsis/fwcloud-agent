@@ -257,6 +257,10 @@ async fn write_initial_managed_acquisition(file_path: &str, contents: &str) -> R
 
 async fn remove_managed_acquisition(collection: &str) -> Result<bool> {
     let file_path = managed_acquisition_file_path(collection)?;
+    remove_managed_acquisition_at(collection, &file_path).await
+}
+
+async fn remove_managed_acquisition_at(collection: &str, file_path: &str) -> Result<bool> {
     let contents = match fs::read_to_string(&file_path).await {
         Ok(contents) => contents,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -1044,6 +1048,7 @@ fn string_value(values: &serde_json::Map<String, serde_json::Value>, key: &str) 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use uuid::Uuid;
 
     use super::{
         collection_command_error, collection_from_json, collection_operation_response,
@@ -1052,7 +1057,7 @@ mod tests {
         managed_acquisition_contents, managed_acquisition_file_name,
         managed_acquisition_from_contents, managed_acquisition_initial_contents,
         manual_review_managed_acquisition_contents, automatic_configuration_unavailable,
-        validated_log_paths, validate_collection_name,
+        remove_managed_acquisition_at, validated_log_paths, validate_collection_name,
     };
     use crate::{
         crowdsec::{
@@ -1247,6 +1252,55 @@ detect:
     }
 
     #[test]
+    fn preserves_catalog_parser_ambiguity_and_ignores_unsupported_sources() {
+        let catalog = r#"
+detect:
+  nginx-file:
+    hub_spec:
+      collections: [crowdsecurity/nginx]
+    acquisition_spec:
+      datasource:
+        source: file
+        labels: { type: nginx }
+  openresty-file:
+    hub_spec:
+      collections: [crowdsecurity/nginx]
+    acquisition_spec:
+      datasource:
+        source: file
+        labels: { type: openresty }
+  nginx-container:
+    hub_spec:
+      collections: [crowdsecurity/nginx]
+    acquisition_spec:
+      datasource:
+        source: docker
+        labels: { type: nginx }
+"#;
+
+        assert_eq!(
+            detected_file_acquisition_label_types_from_yaml(catalog, "crowdsecurity/nginx")
+                .unwrap(),
+            vec!["nginx", "openresty"]
+        );
+        assert!(detected_file_acquisition_label_types_from_yaml(
+            catalog,
+            "crowdsecurity/sshd"
+        )
+        .unwrap()
+        .is_empty());
+    }
+
+    #[test]
+    fn rejects_an_invalid_service_detection_catalog() {
+        assert!(detected_file_acquisition_label_types_from_yaml(
+            "detect: [not-a-map]",
+            "crowdsecurity/nginx"
+        )
+        .is_err());
+    }
+
+    #[test]
     fn creates_comment_only_managed_acquisition_contents() {
         assert_eq!(
             managed_acquisition_initial_contents("crowdsecurity/nginx", "nginx"),
@@ -1294,6 +1348,41 @@ detect:
         );
         assert!(acquisition.label_type.is_none());
         assert!(!contents.contains("source: file"));
+    }
+
+    #[tokio::test]
+    async fn removes_only_the_matching_fwcloud_managed_acquisition() {
+        let root = std::env::temp_dir().join(format!(
+            "fwcloud-crowdsec-acquisition-test-{}",
+            Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("crowdsecurity-nginx.yaml");
+        let path_string = path.to_string_lossy().to_string();
+
+        std::fs::write(
+            &path,
+            managed_acquisition_contents(
+                "crowdsecurity/nginx",
+                Some("nginx"),
+                &["/var/log/nginx/access.log".to_string()],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(remove_managed_acquisition_at("crowdsecurity/nginx", &path_string)
+            .await
+            .unwrap());
+        assert!(!path.exists());
+
+        std::fs::write(&path, "source: file\nfilenames:\n  - /var/log/nginx/access.log\n")
+            .unwrap();
+        assert!(!remove_managed_acquisition_at("crowdsecurity/nginx", &path_string)
+            .await
+            .unwrap());
+        assert!(path.exists());
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
