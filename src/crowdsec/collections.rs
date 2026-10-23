@@ -379,6 +379,21 @@ pub async fn select_managed_acquisition_parser(
 
     ensure_managed_acquisition(collection).await?;
     let acquisition = managed_acquisition(collection).await?;
+    let contents = selected_managed_acquisition_contents(&acquisition, label_type)?;
+
+    write_initial_managed_acquisition(&acquisition.file_path, &contents).await?;
+
+    Ok(ready_managed_acquisition(
+        collection,
+        &acquisition.file_path,
+        label_type,
+    ))
+}
+
+fn selected_managed_acquisition_contents(
+    acquisition: &CrowdSecCollectionAcquisition,
+    label_type: &str,
+) -> Result<String> {
     if acquisition.state != CrowdSecCollectionAcquisitionState::ManualReviewRequired {
         return Err(FwcError::crowdsec(
             COLLECTION_INVALID,
@@ -397,15 +412,8 @@ pub async fn select_managed_acquisition_parser(
         ));
     }
 
-    write_initial_managed_acquisition(
-        &acquisition.file_path,
-        &managed_acquisition_initial_contents(collection, label_type),
-    )
-    .await?;
-
-    Ok(ready_managed_acquisition(
-        collection,
-        &acquisition.file_path,
+    Ok(managed_acquisition_initial_contents(
+        &acquisition.collection,
         label_type,
     ))
 }
@@ -1112,7 +1120,8 @@ mod tests {
         managed_acquisition_contents, managed_acquisition_file_name,
         managed_acquisition_from_contents, managed_acquisition_initial_contents,
         manual_review_managed_acquisition_contents, automatic_configuration_unavailable,
-        remove_managed_acquisition_at, validated_log_paths, validate_collection_name,
+        manual_review_required, ready_managed_acquisition, remove_managed_acquisition_at,
+        selected_managed_acquisition_contents, validated_log_paths, validate_collection_name,
     };
     use crate::{
         crowdsec::{
@@ -1403,6 +1412,58 @@ detect:
         );
         assert!(acquisition.label_type.is_none());
         assert!(!contents.contains("source: file"));
+    }
+
+    #[test]
+    fn selects_a_manual_review_parser_and_discards_other_candidates() {
+        let acquisition = managed_acquisition_from_contents(
+            "crowdsecurity/nginx",
+            "/etc/crowdsec/acquis.d/crowdsecurity-nginx.yaml",
+            &manual_review_managed_acquisition_contents(
+                "crowdsecurity/nginx",
+                &["nginx".to_string(), "openresty".to_string()],
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            selected_managed_acquisition_contents(&acquisition, "nginx").unwrap(),
+            managed_acquisition_initial_contents("crowdsecurity/nginx", "nginx")
+        );
+    }
+
+    #[test]
+    fn rejects_a_parser_that_is_not_a_manual_review_candidate() {
+        let acquisition = manual_review_required(
+            "crowdsecurity/nginx",
+            "/etc/crowdsec/acquis.d/crowdsecurity-nginx.yaml",
+            vec!["nginx".to_string()],
+        );
+
+        assert!(matches!(
+            selected_managed_acquisition_contents(&acquisition, "openresty"),
+            Err(FwcError::CrowdSec {
+                code: COLLECTION_INVALID,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn rejects_selecting_a_parser_after_the_acquisition_is_ready() {
+        let acquisition = ready_managed_acquisition(
+            "crowdsecurity/nginx",
+            "/etc/crowdsec/acquis.d/crowdsecurity-nginx.yaml",
+            "nginx",
+        );
+
+        assert!(matches!(
+            selected_managed_acquisition_contents(&acquisition, "nginx"),
+            Err(FwcError::CrowdSec {
+                code: COLLECTION_INVALID,
+                ..
+            })
+        ));
     }
 
     #[tokio::test]
