@@ -58,6 +58,8 @@ const CROWDSEC_CONFIG_PATH: &str = "/etc/crowdsec/config.yaml";
 const MANAGED_ACQUISITION_HEADER: &str = "# This acquisition file is managed by FWCloud.";
 const MANAGED_ACQUISITION_COLLECTION_PREFIX: &str = "# Collection: ";
 const MANAGED_ACQUISITION_LABEL_TYPE_PREFIX: &str = "# Parser type: ";
+const MANAGED_ACQUISITION_MANUAL_REVIEW: &str = "# Manual review is required before configuring this acquisition.";
+const MANAGED_ACQUISITION_CANDIDATE_LABEL_TYPE_PREFIX: &str = "# Candidate parser type: ";
 
 pub async fn list(installed_only: bool) -> Result<CrowdSecCollectionsResponse> {
     let arguments = list_arguments(installed_only);
@@ -77,20 +79,20 @@ pub async fn install(name: &str) -> Result<CrowdSecCollectionOperationResponse> 
 
     reject_tainted_collection(&collection)?;
     if collection.state == CrowdSecCollectionState::Installed {
-        ensure_managed_acquisition(name).await?;
+        let acquisition = ensure_managed_acquisition(name).await?;
         return Ok(CrowdSecCollectionOperationResponse {
             operation: CrowdSecCollectionOperation::Install,
             collection: Some(name.to_string()),
             processed_collections: vec![],
             skipped_collections: vec![name.to_string()],
-            acquisition: None,
+            acquisition: Some(acquisition),
             service_reload: CrowdSecCollectionServiceReloadState::Reloaded,
             message: "CrowdSec collection is already installed".to_string(),
         });
     }
 
     execute_collection_command(&["collections", "install", name]).await?;
-    ensure_managed_acquisition(name).await?;
+    let acquisition = ensure_managed_acquisition(name).await?;
     let service_reload = collection_service_reload_state().await;
 
     Ok(CrowdSecCollectionOperationResponse {
@@ -98,7 +100,7 @@ pub async fn install(name: &str) -> Result<CrowdSecCollectionOperationResponse> 
         collection: Some(name.to_string()),
         processed_collections: vec![name.to_string()],
         skipped_collections: vec![],
-        acquisition: None,
+        acquisition: Some(acquisition),
         message: collection_operation_message("CrowdSec collection is installed", &service_reload),
         service_reload,
     })
@@ -204,48 +206,121 @@ pub(crate) fn managed_acquisition_file_name(collection: &str) -> Result<String> 
     Ok(format!("{}.yaml", collection.replace('/', "-")))
 }
 
-pub(crate) async fn ensure_managed_acquisition(collection: &str) -> Result<()> {
-    let label_types = detected_file_acquisition_label_types(collection).await?;
-    if label_types.len() != 1 {
-        return Ok(());
-    }
-
+pub(crate) async fn ensure_managed_acquisition(
+    collection: &str,
+) -> Result<CrowdSecCollectionAcquisition> {
     let file_path = managed_acquisition_file_path(collection)?;
-    if fs::try_exists(&file_path).await? {
-        return Ok(());
+    match fs::read_to_string(&file_path).await {
+        Ok(contents) => return managed_acquisition_from_contents(collection, &file_path, &contents),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(FwcError::from(error)),
     }
 
-    fs::create_dir_all(ACQUISITION_DIRECTORY).await?;
-    fs::write(
-        &file_path,
-        managed_acquisition_initial_contents(collection, &label_types[0]),
-    )
-    .await?;
+    let label_types = detected_file_acquisition_label_types(collection).await?;
+    match label_types.as_slice() {
+        [] => Ok(automatic_configuration_unavailable(collection, &file_path)),
+        [label_type] => {
+            write_initial_managed_acquisition(
+                &file_path,
+                &managed_acquisition_initial_contents(collection, label_type),
+            )
+            .await?;
+            Ok(ready_managed_acquisition(collection, &file_path, label_type))
+        }
+        _ => {
+            write_initial_managed_acquisition(
+                &file_path,
+                &manual_review_managed_acquisition_contents(collection, &label_types),
+            )
+            .await?;
+            Ok(manual_review_required(collection, &file_path, label_types))
+        }
+    }
+}
 
+async fn write_initial_managed_acquisition(file_path: &str, contents: &str) -> Result<()> {
+    fs::create_dir_all(ACQUISITION_DIRECTORY).await?;
+    fs::write(file_path, contents).await?;
     Ok(())
+}
+
+fn automatic_configuration_unavailable(
+    collection: &str,
+    file_path: &str,
+) -> CrowdSecCollectionAcquisition {
+    CrowdSecCollectionAcquisition {
+        collection: collection.to_string(),
+        file_path: file_path.to_string(),
+        state: CrowdSecCollectionAcquisitionState::AutomaticConfigurationUnavailable,
+        label_type: None,
+        candidate_label_types: vec![],
+        log_paths: vec![],
+        message: "No compatible file-based CrowdSec acquisition was detected automatically"
+            .to_string(),
+    }
+}
+
+fn ready_managed_acquisition(
+    collection: &str,
+    file_path: &str,
+    label_type: &str,
+) -> CrowdSecCollectionAcquisition {
+    CrowdSecCollectionAcquisition {
+        collection: collection.to_string(),
+        file_path: file_path.to_string(),
+        state: CrowdSecCollectionAcquisitionState::Ready,
+        label_type: Some(label_type.to_string()),
+        candidate_label_types: vec![],
+        log_paths: vec![],
+        message: "CrowdSec acquisition is managed by FWCloud".to_string(),
+    }
+}
+
+fn manual_review_required(
+    collection: &str,
+    file_path: &str,
+    candidate_label_types: Vec<String>,
+) -> CrowdSecCollectionAcquisition {
+    CrowdSecCollectionAcquisition {
+        collection: collection.to_string(),
+        file_path: file_path.to_string(),
+        state: CrowdSecCollectionAcquisitionState::ManualReviewRequired,
+        label_type: None,
+        candidate_label_types,
+        log_paths: vec![],
+        message: "Several compatible CrowdSec parser types were detected and require manual review"
+            .to_string(),
+    }
 }
 
 pub async fn managed_acquisition(collection: &str) -> Result<CrowdSecCollectionAcquisition> {
     let file_path = managed_acquisition_file_path(collection)?;
-    let contents = fs::read_to_string(&file_path).await.map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            FwcError::crowdsec(
-                COLLECTION_INVALID,
-                "FWCloud has no managed CrowdSec acquisition for this collection",
-            )
-        } else {
-            FwcError::from(error)
+    match fs::read_to_string(&file_path).await {
+        Ok(contents) => managed_acquisition_from_contents(collection, &file_path, &contents),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let label_types = detected_file_acquisition_label_types(collection).await?;
+            Ok(match label_types.as_slice() {
+                [] => automatic_configuration_unavailable(collection, &file_path),
+                [label_type] => ready_managed_acquisition(collection, &file_path, label_type),
+                _ => manual_review_required(collection, &file_path, label_types),
+            })
         }
-    })?;
-
-    managed_acquisition_from_contents(collection, &file_path, &contents)
+        Err(error) => Err(FwcError::from(error)),
+    }
 }
 
 pub async fn update_managed_acquisition(
     collection: &str,
     log_paths: &[String],
 ) -> Result<CrowdSecCollectionAcquisition> {
+    ensure_managed_acquisition(collection).await?;
     let acquisition = managed_acquisition(collection).await?;
+    if acquisition.state != CrowdSecCollectionAcquisitionState::Ready {
+        return Err(FwcError::crowdsec(
+            COLLECTION_INVALID,
+            "CrowdSec acquisition cannot be configured automatically",
+        ));
+    }
     let log_paths = validated_log_paths(log_paths)?;
     reject_conflicting_log_paths(&acquisition.file_path, &log_paths).await?;
     let contents = managed_acquisition_contents(collection, acquisition.label_type.as_deref(), &log_paths)?;
@@ -495,6 +570,23 @@ fn managed_acquisition_initial_contents(collection: &str, label_type: &str) -> S
     )
 }
 
+fn manual_review_managed_acquisition_contents(
+    collection: &str,
+    candidate_label_types: &[String],
+) -> String {
+    let mut contents = format!(
+        "{MANAGED_ACQUISITION_HEADER}\n\
+         {MANAGED_ACQUISITION_COLLECTION_PREFIX}{collection}\n\
+         {MANAGED_ACQUISITION_MANUAL_REVIEW}\n"
+    );
+    for label_type in candidate_label_types {
+        contents.push_str(MANAGED_ACQUISITION_CANDIDATE_LABEL_TYPE_PREFIX);
+        contents.push_str(label_type);
+        contents.push('\n');
+    }
+    contents
+}
+
 fn managed_acquisition_metadata_contents(collection: &str, label_type: &str) -> String {
     format!(
         "{MANAGED_ACQUISITION_HEADER}\n\
@@ -552,6 +644,8 @@ fn managed_acquisition_from_contents(
     let mut managed = false;
     let mut managed_collection = None;
     let mut label_type = None;
+    let mut manual_review = false;
+    let mut candidate_label_types = BTreeSet::new();
 
     for line in contents.lines() {
         if line == MANAGED_ACQUISITION_HEADER {
@@ -560,6 +654,11 @@ fn managed_acquisition_from_contents(
             managed_collection = Some(value.to_string());
         } else if let Some(value) = line.strip_prefix(MANAGED_ACQUISITION_LABEL_TYPE_PREFIX) {
             label_type = Some(value.to_string());
+        } else if line == MANAGED_ACQUISITION_MANUAL_REVIEW {
+            manual_review = true;
+        } else if let Some(value) = line.strip_prefix(MANAGED_ACQUISITION_CANDIDATE_LABEL_TYPE_PREFIX)
+        {
+            candidate_label_types.insert(value.to_string());
         }
     }
 
@@ -570,15 +669,22 @@ fn managed_acquisition_from_contents(
         ));
     }
 
-    Ok(CrowdSecCollectionAcquisition {
-        collection: collection.to_string(),
-        file_path: file_path.to_string(),
-        state: CrowdSecCollectionAcquisitionState::Ready,
-        label_type,
-        candidate_label_types: vec![],
-        log_paths: log_paths_from_acquisition(contents),
-        message: "CrowdSec acquisition is managed by FWCloud".to_string(),
-    })
+    if manual_review {
+        return Ok(manual_review_required(
+            collection,
+            file_path,
+            candidate_label_types.into_iter().collect(),
+        ));
+    }
+
+    match label_type {
+        Some(label_type) => {
+            let mut acquisition = ready_managed_acquisition(collection, file_path, &label_type);
+            acquisition.log_paths = log_paths_from_acquisition(contents);
+            Ok(acquisition)
+        }
+        None => Ok(automatic_configuration_unavailable(collection, file_path)),
+    }
 }
 
 fn log_paths_from_acquisition(contents: &str) -> Vec<String> {
@@ -906,6 +1012,7 @@ mod tests {
         conflicting_log_path, crowdsec_configuration_path, list_arguments,
         managed_acquisition_contents, managed_acquisition_file_name,
         managed_acquisition_from_contents, managed_acquisition_initial_contents,
+        manual_review_managed_acquisition_contents, automatic_configuration_unavailable,
         validated_log_paths, validate_collection_name,
     };
     use crate::{
@@ -913,7 +1020,8 @@ mod tests {
             errors::{COLLECTION_CONFLICT, COLLECTION_INVALID, COLLECTION_TAINTED},
             models::{
                 CrowdSecCollectionOperation, CrowdSecCollectionOperationResponse,
-                CrowdSecCollectionServiceReloadState, CrowdSecCollectionState,
+                CrowdSecCollectionAcquisitionState, CrowdSecCollectionServiceReloadState,
+                CrowdSecCollectionState,
             },
         },
         errors::FwcError,
@@ -1106,6 +1214,45 @@ mod tests {
              # Parser type: nginx\n\
              # Add log paths from FWCloud before enabling this acquisition.\n"
         );
+    }
+
+    #[test]
+    fn reports_automatic_configuration_unavailable_without_file_detection() {
+        let acquisition = automatic_configuration_unavailable(
+            "crowdsecurity/sshd",
+            "/etc/crowdsec/acquis.d/crowdsecurity-sshd.yaml",
+        );
+
+        assert_eq!(
+            acquisition.state,
+            CrowdSecCollectionAcquisitionState::AutomaticConfigurationUnavailable
+        );
+        assert!(acquisition.label_type.is_none());
+    }
+
+    #[test]
+    fn keeps_ambiguous_file_detections_inactive_for_manual_review() {
+        let contents = manual_review_managed_acquisition_contents(
+            "crowdsecurity/nginx",
+            &["nginx".to_string(), "openresty".to_string()],
+        );
+        let acquisition = managed_acquisition_from_contents(
+            "crowdsecurity/nginx",
+            "/etc/crowdsec/acquis.d/crowdsecurity-nginx.yaml",
+            &contents,
+        )
+        .unwrap();
+
+        assert_eq!(
+            acquisition.state,
+            CrowdSecCollectionAcquisitionState::ManualReviewRequired
+        );
+        assert_eq!(
+            acquisition.candidate_label_types,
+            vec!["nginx".to_string(), "openresty".to_string()]
+        );
+        assert!(acquisition.label_type.is_none());
+        assert!(!contents.contains("source: file"));
     }
 
     #[test]
