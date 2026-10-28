@@ -97,6 +97,9 @@ pub enum FwcError {
         message: &'static str,
     },
 
+    #[error("{message}")]
+    CrowdSecCommandFailed { message: String },
+
     #[error("CrowdSec acquisition path '{path}' is already declared in '{conflicting_file_path}'")]
     CrowdSecCollectionAcquisitionPathConflict {
         path: String,
@@ -199,6 +202,11 @@ impl ResponseError for FwcError {
             FwcError::CrowdSec { code, message } => {
                 serde_json::json!({ "code": code, "message": message }).to_string()
             }
+            FwcError::CrowdSecCommandFailed { message } => serde_json::json!({
+                "code": crate::crowdsec::errors::COMMAND_FAILED,
+                "message": message,
+            })
+            .to_string(),
             _ => serde_json::json!({ "message": self.to_string() }).to_string(),
         };
         resp.set_body(BoxBody::new(body))
@@ -208,5 +216,11 @@ impl ResponseError for FwcError {
 impl FwcError {
     pub fn crowdsec(code: &'static str, message: &'static str) -> Self {
         Self::CrowdSec { code, message }
+    }
+
+    pub fn crowdsec_command_failed(message: impl Into<String>) -> Self {
+        Self::CrowdSecCommandFailed {
+            message: message.into(),
+        }
     }
 }
