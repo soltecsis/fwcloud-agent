@@ -728,11 +728,44 @@ async fn run_command_with_environment(
             redact_sensitive_text(&String::from_utf8_lossy(&output.stdout)),
             redact_sensitive_text(&String::from_utf8_lossy(&output.stderr)),
         );
-        Err(FwcError::crowdsec(
-            COMMAND_FAILED,
-            "CrowdSec package command failed",
+        Err(FwcError::crowdsec_command_failed(
+            package_command_failure_message(
+                &String::from_utf8_lossy(&output.stdout),
+                &String::from_utf8_lossy(&output.stderr),
+            ),
         ))
     }
+}
+
+fn package_command_failure_message(stdout: &str, stderr: &str) -> String {
+    let diagnostics = redact_sensitive_text(&format!("{stdout}\n{stderr}"));
+    let capi_registration_error = diagnostics
+        .lines()
+        .find(|line| line.contains("cscli capi register") && line.contains("http "));
+
+    if let Some(error) = capi_registration_error {
+        if let Some(status) = error
+            .split("http ")
+            .nth(1)
+            .and_then(|value| value.split(':').next())
+        {
+            return format!(
+                "CrowdSec package installation failed during automatic CAPI registration: HTTP {}",
+                status.trim(),
+            );
+        }
+    }
+
+    if diagnostics
+        .lines()
+        .any(|line| line.contains("cscli capi register"))
+    {
+        return "CrowdSec package installation failed during automatic CAPI registration"
+            .to_string();
+    }
+
+    "CrowdSec package installation failed; check the package manager output above for details"
+        .to_string()
 }
 
 async fn run_command_allow_failure(
@@ -878,8 +911,8 @@ mod tests {
 
     use super::{
         apt_bouncer_package_arguments, apt_package_state, is_package_manager_command,
-        package_manager_for_os_release, package_removal_message, stream_command_output,
-        validate_rpm_repository_configuration, PackageManager, PackageState,
+        package_command_failure_message, package_manager_for_os_release, package_removal_message,
+        stream_command_output, validate_rpm_repository_configuration, PackageManager, PackageState,
         CROWDSEC_APT_REPOSITORY, CROWDSEC_REMOVABLE_PACKAGES, CROWDSEC_RPM_REPOSITORY_CONFIG_URL,
         FIREWALL_BOUNCER_REMOVABLE_PACKAGES,
     };
@@ -1036,6 +1069,27 @@ mod tests {
                 "--yes",
                 "crowdsec-firewall-bouncer-nftables",
             ]
+        );
+    }
+
+    #[test]
+    fn reports_capi_registration_rejection_from_package_output() {
+        let message = package_command_failure_message(
+            "Error: cscli capi register: api client register ('https://api.crowdsec.net/'): api register (https://api.crowdsec.net/) http 403 Forbidden: API error: Forbidden",
+            "",
+        );
+
+        assert_eq!(
+            message,
+            "CrowdSec package installation failed during automatic CAPI registration: HTTP 403 Forbidden"
+        );
+    }
+
+    #[test]
+    fn keeps_package_failure_diagnostics_generic_when_no_safe_cause_is_available() {
+        assert_eq!(
+            package_command_failure_message("package command failed", ""),
+            "CrowdSec package installation failed; check the package manager output above for details"
         );
     }
 

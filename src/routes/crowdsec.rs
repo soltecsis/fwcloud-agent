@@ -992,7 +992,10 @@ async fn install_crowdsec(
                 match install_result {
                     Ok(response) => HttpResponse::Ok().json(response),
                     Err(error) => {
-                        emit_progress_error(&progress, "CrowdSec installation failed");
+                        emit_progress_error(
+                            &progress,
+                            &format!("CrowdSec installation failed: {error}"),
+                        );
                         return Err(error);
                     }
                 }
