@@ -145,7 +145,7 @@ pub(crate) async fn install_default_collections(progress: Option<&CrowdSecProgre
                 "CrowdSec default collection is already installed; preserving its local state: {}",
                 collection
             );
-            emit_warning(
+            emit_progress(
                 progress,
                 &format!("CrowdSec collection is already installed: {collection}"),
             );
@@ -299,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn installation_progress_messages_are_published_without_secrets() {
+    fn already_installed_collection_progress_is_information() {
         let map = Arc::new(Mutex::new(HashMap::new()));
         let id = Uuid::new_v4();
         let data = Arc::new(Mutex::new(WsData {
@@ -312,7 +312,7 @@ mod tests {
 
         emit_progress(
             Some(&progress),
-            "Installing CrowdSec collection: crowdsecurity/sshd",
+            "CrowdSec collection is already installed: crowdsecurity/sshd",
         );
 
         let message =
@@ -321,7 +321,7 @@ mod tests {
         assert_eq!(message.message_type, CrowdSecProgressMessageType::Info);
         assert_eq!(
             message.message,
-            "Installing CrowdSec collection: crowdsecurity/sshd"
+            "CrowdSec collection is already installed: crowdsecurity/sshd"
         );
     }
 }

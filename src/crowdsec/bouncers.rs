@@ -772,7 +772,7 @@ async fn install_iptables_bouncer(
     if package_installed {
         emit_success(progress, "CrowdSec Firewall Bouncer package is installed");
     } else {
-        emit_warning(
+        emit_success(
             progress,
             "CrowdSec Firewall Bouncer package is already installed",
         );
@@ -886,7 +886,7 @@ async fn install_nftables_bouncer(
             "CrowdSec NFTables Firewall Bouncer package is installed",
         );
     } else {
-        emit_warning(
+        emit_success(
             progress,
             "CrowdSec NFTables Firewall Bouncer package is already installed",
         );
@@ -1016,17 +1016,30 @@ fn emit_reconciliation_skipped(progress: Option<&CrowdSecProgress>) {
     emit_progress(progress, BOUNCER_RECONCILIATION_SKIPPED_MESSAGE);
 }
 
-fn emit_backend_startup_configuration_cleanup(progress: Option<&CrowdSecProgress>, removed: bool) {
+fn emit_backend_startup_configuration_cleanup(
+    progress: Option<&CrowdSecProgress>,
+    removed: bool,
+    already_absent_is_informational: bool,
+) {
     emit_progress(
         progress,
         BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVAL_MESSAGE,
     );
-    emit_boolean_result(
-        progress,
-        removed,
-        BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVED_MESSAGE,
-        BOUNCER_BACKEND_STARTUP_CONFIGURATION_ABSENT_MESSAGE,
-    );
+    if already_absent_is_informational {
+        emit_informational_boolean_result(
+            progress,
+            removed,
+            BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVED_MESSAGE,
+            BOUNCER_BACKEND_STARTUP_CONFIGURATION_ABSENT_MESSAGE,
+        );
+    } else {
+        emit_boolean_result(
+            progress,
+            removed,
+            BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVED_MESSAGE,
+            BOUNCER_BACKEND_STARTUP_CONFIGURATION_ABSENT_MESSAGE,
+        );
+    }
 }
 
 pub async fn uninstall() -> Result<CrowdSecBouncerUninstallResponse> {
@@ -1036,7 +1049,7 @@ pub async fn uninstall() -> Result<CrowdSecBouncerUninstallResponse> {
 pub async fn uninstall_with_progress(
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecBouncerUninstallResponse> {
-    uninstall_with_options(progress, false).await
+    uninstall_with_options(progress, false, false).await
 }
 
 /// Removes only the local Firewall Bouncer remediation. The caller must
@@ -1075,12 +1088,13 @@ pub async fn disable_local_remediation_with_progress(
 pub async fn uninstall_for_crowdsec_with_progress(
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecBouncerUninstallResponse> {
-    uninstall_with_options(progress, true).await
+    uninstall_with_options(progress, true, true).await
 }
 
 async fn uninstall_with_options(
     progress: Option<&CrowdSecProgress>,
     remove_packages: bool,
+    already_absent_is_informational: bool,
 ) -> Result<CrowdSecBouncerUninstallResponse> {
     let backend = configured_backend()
         .await?
@@ -1091,11 +1105,12 @@ async fn uninstall_with_options(
 
     emit_progress(progress, "Stopping CrowdSec Firewall Bouncer service");
     let service_disabled = disable_systemd_service(FIREWALL_BOUNCER_SERVICE).await?;
-    emit_boolean_result(
+    emit_bouncer_cleanup_result(
         progress,
         service_disabled,
         "CrowdSec Firewall Bouncer service is disabled and stopped",
         "CrowdSec Firewall Bouncer service is already absent",
+        already_absent_is_informational,
     );
     remove_bouncer_package_transition_drop_in().await?;
     emit_progress(
@@ -1103,11 +1118,12 @@ async fn uninstall_with_options(
         "Removing FWCloud CrowdSec Firewall Bouncer registration",
     );
     let registration_removed = remove_bouncer_registration().await?;
-    emit_boolean_result(
+    emit_bouncer_cleanup_result(
         progress,
         registration_removed,
         "FWCloud CrowdSec Firewall Bouncer registration is removed",
         "FWCloud CrowdSec Firewall Bouncer registration is already absent",
+        already_absent_is_informational,
     );
     if remove_packages {
         emit_progress(
@@ -1116,11 +1132,12 @@ async fn uninstall_with_options(
         );
         let packages_removed =
             packages::uninstall_firewall_bouncer_packages_with_progress(progress).await?;
-        emit_boolean_result(
+        emit_bouncer_cleanup_result(
             progress,
             packages_removed,
             "CrowdSec Firewall Bouncer packages are removed",
             "CrowdSec Firewall Bouncer packages are already absent",
+            already_absent_is_informational,
         );
     }
     emit_progress(
@@ -1128,30 +1145,37 @@ async fn uninstall_with_options(
         "Removing FWCloud CrowdSec Firewall Bouncer configuration",
     );
     let configuration_removed = remove_bouncer_configuration().await?;
-    emit_boolean_result(
+    emit_bouncer_cleanup_result(
         progress,
         configuration_removed,
         "FWCloud CrowdSec Firewall Bouncer configuration is removed",
         "FWCloud CrowdSec Firewall Bouncer configuration is already absent",
+        already_absent_is_informational,
     );
     let backend_startup_configuration_removed = remove_nftables_bouncer_drop_in().await?;
-    emit_backend_startup_configuration_cleanup(progress, backend_startup_configuration_removed);
+    emit_backend_startup_configuration_cleanup(
+        progress,
+        backend_startup_configuration_removed,
+        already_absent_is_informational,
+    );
     let pending_backend_removed = remove_managed_file(BOUNCER_PENDING_BACKEND_PATH).await?;
-    emit_boolean_result(
+    emit_bouncer_cleanup_result(
         progress,
         pending_backend_removed,
         "Pending CrowdSec Firewall Bouncer backend is removed",
         "Pending CrowdSec Firewall Bouncer backend is already absent",
+        already_absent_is_informational,
     );
     let (ipset_setup_step, blacklist_sets_step) = match backend {
         CrowdSecFirewallBackend::Iptables => {
             emit_progress(progress, "Removing FWCloud CrowdSec IPSet boot service");
             let ipset_service_removed = remove_ipset_setup_service().await?;
-            emit_boolean_result(
+            emit_bouncer_cleanup_result(
                 progress,
                 ipset_service_removed,
                 "FWCloud CrowdSec IPSet boot service is removed",
                 "FWCloud CrowdSec IPSet boot service is already absent",
+                already_absent_is_informational,
             );
             emit_warning(
                 progress,
@@ -1237,6 +1261,33 @@ fn emit_boolean_result(
         emit_success(progress, success_message);
     } else {
         emit_warning(progress, warning_message);
+    }
+}
+
+fn emit_informational_boolean_result(
+    progress: Option<&CrowdSecProgress>,
+    completed: bool,
+    success_message: &str,
+    absent_message: &str,
+) {
+    if completed {
+        emit_success(progress, success_message);
+    } else {
+        emit_progress(progress, absent_message);
+    }
+}
+
+fn emit_bouncer_cleanup_result(
+    progress: Option<&CrowdSecProgress>,
+    completed: bool,
+    success_message: &str,
+    absent_message: &str,
+    already_absent_is_informational: bool,
+) {
+    if already_absent_is_informational {
+        emit_informational_boolean_result(progress, completed, success_message, absent_message);
+    } else {
+        emit_boolean_result(progress, completed, success_message, absent_message);
     }
 }
 
@@ -2555,14 +2606,23 @@ async fn reconcile_legacy_bouncer_resources(progress: Option<&CrowdSecProgress>)
         "Removing legacy CrowdSec Firewall Bouncer resources",
     );
     let resources_removed = cleanup_legacy_bouncer_resources().await?;
-    emit_boolean_result(
-        progress,
-        resources_removed,
-        "Legacy CrowdSec Firewall Bouncer resources are removed",
-        "No legacy CrowdSec Firewall Bouncer resources were found",
-    );
+    emit_legacy_bouncer_resources_result(progress, resources_removed);
 
     Ok(resources_removed)
+}
+
+fn emit_legacy_bouncer_resources_result(
+    progress: Option<&CrowdSecProgress>,
+    resources_removed: bool,
+) {
+    emit_success(
+        progress,
+        if resources_removed {
+            "Legacy CrowdSec Firewall Bouncer resources are removed"
+        } else {
+            "No legacy CrowdSec Firewall Bouncer resources were found"
+        },
+    );
 }
 
 async fn validate_bouncer_integration(
@@ -3079,8 +3139,10 @@ mod tests {
     use super::{
         bouncer_api_url_from_contents, bouncer_reconciliation_action, bouncer_register_response,
         bouncers_from_json, configuration_backend, configuration_is_fwcloud_managed,
-        configuration_is_set_only, emit_backend_startup_configuration_cleanup, emit_boolean_result,
-        emit_reconciliation_skipped, firewall_rules_contain_unmanaged_crowdsec, integration_status,
+        configuration_is_set_only, emit_backend_startup_configuration_cleanup,
+        emit_bouncer_cleanup_result, emit_reconciliation_skipped,
+        emit_legacy_bouncer_resources_result, firewall_rules_contain_unmanaged_crowdsec,
+        integration_status,
         legacy_bouncer_ipset_names, legacy_bouncer_jump_chains, local_api_enabled_in_configuration,
         iptables_blocking_chain_is_compatible, nftables_blacklist_set_is_compatible,
         nftables_bouncer_service_action, nftables_counter_is_compatible,
@@ -3658,7 +3720,7 @@ mod tests {
     }
 
     #[test]
-    fn bouncer_uninstall_progress_classifies_completed_and_absent_resources() {
+    fn bouncer_cleanup_progress_classifies_expected_absence_as_information() {
         let map = Arc::new(Mutex::new(HashMap::new()));
         let id = Uuid::new_v4();
         let data = Arc::new(Mutex::new(WsData {
@@ -3669,14 +3731,63 @@ mod tests {
         map.lock().unwrap().insert(id, Arc::clone(&data));
         let progress = CrowdSecProgress::from_ws_map(map, Some(id)).unwrap();
 
-        emit_boolean_result(Some(&progress), true, "Bouncer removed", "Bouncer absent");
-        emit_boolean_result(Some(&progress), false, "Bouncer removed", "Bouncer absent");
+        emit_bouncer_cleanup_result(
+            Some(&progress),
+            true,
+            "Bouncer removed",
+            "Bouncer absent",
+            false,
+        );
+        emit_bouncer_cleanup_result(
+            Some(&progress),
+            false,
+            "Bouncer removed",
+            "Bouncer absent",
+            false,
+        );
+        emit_bouncer_cleanup_result(
+            Some(&progress),
+            false,
+            "Bouncer removed",
+            "Bouncer absent",
+            true,
+        );
 
         let data = data.lock().unwrap();
         let completed = serde_json::from_str::<CrowdSecProgressMessage>(&data.lines[0]).unwrap();
         let absent = serde_json::from_str::<CrowdSecProgressMessage>(&data.lines[1]).unwrap();
+        let expected_absent =
+            serde_json::from_str::<CrowdSecProgressMessage>(&data.lines[2]).unwrap();
         assert_eq!(completed.message_type, CrowdSecProgressMessageType::Success);
         assert_eq!(absent.message_type, CrowdSecProgressMessageType::Warning);
+        assert_eq!(
+            expected_absent.message_type,
+            CrowdSecProgressMessageType::Info
+        );
+    }
+
+    #[test]
+    fn missing_legacy_bouncer_resources_are_reported_as_success() {
+        let map = Arc::new(Mutex::new(HashMap::new()));
+        let id = Uuid::new_v4();
+        let data = Arc::new(Mutex::new(WsData {
+            created_at: SystemTime::now(),
+            lines: Vec::new(),
+            finished: false,
+        }));
+        map.lock().unwrap().insert(id, Arc::clone(&data));
+        let progress = CrowdSecProgress::from_ws_map(map, Some(id)).unwrap();
+
+        emit_legacy_bouncer_resources_result(Some(&progress), false);
+
+        let message =
+            serde_json::from_str::<CrowdSecProgressMessage>(&data.lock().unwrap().lines[0])
+                .unwrap();
+        assert_eq!(message.message_type, CrowdSecProgressMessageType::Success);
+        assert_eq!(
+            message.message,
+            "No legacy CrowdSec Firewall Bouncer resources were found"
+        );
     }
 
     #[test]
@@ -3722,7 +3833,7 @@ mod tests {
         map.lock().unwrap().insert(id, Arc::clone(&data));
         let progress = CrowdSecProgress::from_ws_map(map, Some(id)).unwrap();
 
-        emit_backend_startup_configuration_cleanup(Some(&progress), false);
+        emit_backend_startup_configuration_cleanup(Some(&progress), false, false);
 
         let data = data.lock().unwrap();
         let start = serde_json::from_str::<CrowdSecProgressMessage>(&data.lines[0]).unwrap();
