@@ -39,7 +39,8 @@ use crate::{
             CrowdSecCollectionsQuery,
             CrowdSecConsoleEnrollRequest, CrowdSecDecisionsFlushRequest, CrowdSecDecisionsQuery,
             CrowdSecInstallMode, CrowdSecInstallRequest,
-            CrowdSecLapiReplicationReadinessResponse, CrowdSecMachineReplicationRequest,
+            CrowdSecLapiConnectivityCheckRequest, CrowdSecLapiReplicationReadinessResponse,
+            CrowdSecMachineReplicationRequest,
             CrowdSecRemoteMachineActivationRequest, CrowdSecRemoteMachineReauthenticationRequest,
             CrowdSecRemoteMachineResumeRequest, CrowdSecUninstallRequest,
         },
@@ -741,6 +742,15 @@ async fn crowdsec_lapi_machines(cfg: web::Data<Arc<Config>>) -> Result<HttpRespo
     };
 
     Ok(HttpResponse::Ok().json(response))
+}
+
+#[post("/crowdsec/lapi/connectivity")]
+async fn check_crowdsec_lapi_connectivity(
+    request: web::Json<CrowdSecLapiConnectivityCheckRequest>,
+) -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok().json(
+        lapi::check_remote_lapi_connectivity(&request.lapi_url).await,
+    ))
 }
 
 #[post("/crowdsec/machines/{name}/credentials/export")]

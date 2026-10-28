@@ -66,6 +66,21 @@ pub struct CrowdSecInstallRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct CrowdSecLapiConnectivityCheckRequest {
+    pub lapi_url: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecLapiConnectivityCheckResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lapi_url: Option<String>,
+    pub reachable: bool,
+    pub error_code: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CrowdSecUninstallRequest {
     pub confirm: bool,
     pub ws_id: Option<Uuid>,
@@ -731,6 +746,7 @@ mod tests {
         CrowdSecBouncerReplicationResponse, CrowdSecBouncerUninstallStep,
         CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecFirewallBackend,
         CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecInstallStep,
+        CrowdSecLapiConnectivityCheckRequest, CrowdSecLapiConnectivityCheckResponse,
         CrowdSecMachineReplicationAction, CrowdSecMachineReplicationRequest,
         CrowdSecMachineReplicationResponse, CrowdSecMachineState, CrowdSecOperationRequest,
         CrowdSecPackageStatus, CrowdSecRemoteMachineActivationRequest,
@@ -867,6 +883,36 @@ mod tests {
         );
 
         assert!(request.is_err());
+    }
+
+    #[test]
+    fn lapi_connectivity_check_request_requires_only_a_lapi_url() {
+        let request = serde_json::from_str::<CrowdSecLapiConnectivityCheckRequest>(
+            r#"{"lapi_url":"http://192.0.2.10:8080"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(request.lapi_url, "http://192.0.2.10:8080");
+        assert!(serde_json::from_str::<CrowdSecLapiConnectivityCheckRequest>(r#"{}"#).is_err());
+        assert!(serde_json::from_str::<CrowdSecLapiConnectivityCheckRequest>(
+            r#"{"lapi_url":"http://192.0.2.10:8080","machine_name":"unexpected"}"#,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn lapi_connectivity_check_response_hides_an_invalid_url() {
+        let response = serde_json::to_value(CrowdSecLapiConnectivityCheckResponse {
+            lapi_url: None,
+            reachable: false,
+            error_code: Some("CROWDSEC_LAPI_INVALID".to_string()),
+            message: "CrowdSec Local API URL is invalid".to_string(),
+        })
+        .unwrap();
+
+        assert!(response.get("lapi_url").is_none());
+        assert_eq!(response["reachable"], false);
+        assert_eq!(response["error_code"], "CROWDSEC_LAPI_INVALID");
     }
 
     #[test]
