@@ -986,7 +986,6 @@ async fn install_crowdsec(
     request: web::Json<CrowdSecInstallRequest>,
 ) -> Result<HttpResponse> {
     let progress = CrowdSecProgress::from_request(&cfg, request.ws_id)?;
-    let local_remediation = matches!(request.mode, CrowdSecInstallMode::Lapi);
     let response = {
         debug!("Locking CrowdSec mutex (thread id: {})", thread_id::get());
         let mutex = Arc::clone(&cfg.mutex.crowdsec);
@@ -994,13 +993,13 @@ async fn install_crowdsec(
         crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
-        let response = match request.mode {
+        let (response, bouncer_statistics_available) = match request.mode {
             CrowdSecInstallMode::Lapi => {
                 let install_result =
                     install::install_with_backend_and_progress(request.backend, Some(&progress))
                         .await;
                 match install_result {
-                    Ok(response) => HttpResponse::Ok().json(response),
+                    Ok(response) => (HttpResponse::Ok().json(response), true),
                     Err(error) => {
                         emit_progress_error(
                             &progress,
@@ -1022,7 +1021,10 @@ async fn install_crowdsec(
                 )
                 .await;
                 match install_result {
-                    Ok(response) => HttpResponse::Ok().json(response),
+                    Ok(response) => {
+                        let bouncer_statistics_available = response.bouncer_configured;
+                        (HttpResponse::Ok().json(response), bouncer_statistics_available)
+                    }
                     Err(error) => {
                         emit_progress_error(&progress, "CrowdSec machine installation failed");
                         return Err(error);
@@ -1031,8 +1033,12 @@ async fn install_crowdsec(
             }
         };
 
-        synchronize_crowdsec_bouncer_statistics_configuration(&cfg, &store, local_remediation)
-            .await?;
+        synchronize_crowdsec_bouncer_statistics_configuration(
+            &cfg,
+            &store,
+            bouncer_statistics_available,
+        )
+        .await?;
 
         debug!("Releasing CrowdSec mutex (thread id: {})", thread_id::get());
         response
@@ -1044,9 +1050,9 @@ async fn install_crowdsec(
 async fn synchronize_crowdsec_bouncer_statistics_configuration(
     cfg: &web::Data<Arc<Config>>,
     store: &web::Data<CrowdSecFirewallBouncerStatisticsConfigStore>,
-    local_remediation: bool,
+    bouncer_statistics_available: bool,
 ) -> Result<()> {
-    if local_remediation && bouncers::configured_backend().await?.is_some() {
+    if bouncer_statistics_available && bouncers::configured_backend().await?.is_some() {
         let configuration = CrowdSecFirewallBouncerStatisticsConfig::load_or_create(cfg.etc_dir)?;
         store.replace(configuration)?;
     } else {
