@@ -755,7 +755,8 @@ mod tests {
         CrowdSecMachineReplicationAction, CrowdSecMachineReplicationRequest,
         CrowdSecMachineReplicationResponse, CrowdSecMachineState, CrowdSecOperationRequest,
         CrowdSecPackageStatus, CrowdSecRemoteMachineActivationRequest,
-        CrowdSecRemoteMachineInstallState, CrowdSecRemoteMachineReauthenticationRequest,
+        CrowdSecRemoteMachineInstallResponse, CrowdSecRemoteMachineInstallState,
+        CrowdSecRemoteMachineReauthenticationRequest,
         CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
     };
 
@@ -969,6 +970,27 @@ mod tests {
             .unwrap(),
             "connectivity_confirmation_required",
         );
+    }
+
+    #[test]
+    fn remote_machine_install_response_reports_pending_validation_with_configured_bouncer() {
+        let response = serde_json::to_value(CrowdSecRemoteMachineInstallResponse {
+            machine_name: "fwcloud-web-01".to_string(),
+            lapi_url: "http://192.0.2.10:8080/".to_string(),
+            state: CrowdSecMachineState::Pending,
+            installation_state: CrowdSecRemoteMachineInstallState::PendingValidation,
+            connectivity_error_code: None,
+            local_remediation: true,
+            bouncer_configured: true,
+            message: "CrowdSec machine is registered and awaits central validation; local Firewall Bouncer is configured".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(response["state"], "pending");
+        assert_eq!(response["installation_state"], "pending_validation");
+        assert_eq!(response["local_remediation"], true);
+        assert_eq!(response["bouncer_configured"], true);
+        assert!(response.get("bouncer_api_key").is_none());
     }
 
     #[test]
