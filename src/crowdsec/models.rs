@@ -60,6 +60,9 @@ pub struct CrowdSecInstallRequest {
     pub machine_name: Option<String>,
     pub lapi_url: Option<String>,
     #[serde(default)]
+    pub local_remediation: bool,
+    pub bouncer_api_key: Option<String>,
+    #[serde(default)]
     pub continue_without_lapi_connectivity: bool,
     pub ws_id: Option<Uuid>,
 }
@@ -342,6 +345,8 @@ pub struct CrowdSecRemoteMachineInstallResponse {
     pub state: CrowdSecMachineState,
     pub installation_state: CrowdSecRemoteMachineInstallState,
     pub connectivity_error_code: Option<String>,
+    pub local_remediation: bool,
+    pub bouncer_configured: bool,
     pub message: String,
 }
 
@@ -874,6 +879,21 @@ mod tests {
         .unwrap();
 
         assert!(request.continue_without_lapi_connectivity);
+    }
+
+    #[test]
+    fn crowdsec_machine_install_request_accepts_manual_bouncer_configuration() {
+        let request = serde_json::from_str::<CrowdSecInstallRequest>(
+            r#"{"mode":"machine","machine_name":"fwcloud-web-01","local_remediation":true,"backend":"nftables","bouncer_api_key":"machine-bouncer-key"}"#,
+        )
+        .unwrap();
+
+        assert!(request.local_remediation);
+        assert_eq!(request.backend, CrowdSecFirewallBackend::Nftables);
+        assert_eq!(
+            request.bouncer_api_key.as_deref(),
+            Some("machine-bouncer-key")
+        );
     }
 
     #[test]

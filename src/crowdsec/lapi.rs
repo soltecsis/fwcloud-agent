@@ -455,6 +455,9 @@ pub async fn remove_machine(name: &str) -> Result<CrowdSecMachineRemoveResponse>
 pub async fn install_remote_machine(
     machine_name: &str,
     lapi_url: &str,
+    _local_remediation: bool,
+    _backend: CrowdSecFirewallBackend,
+    _bouncer_api_key: Option<&str>,
     continue_without_lapi_connectivity: bool,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecRemoteMachineInstallResponse> {
@@ -481,6 +484,8 @@ pub async fn install_remote_machine(
                     installation_state:
                         CrowdSecRemoteMachineInstallState::ConnectivityConfirmationRequired,
                     connectivity_error_code: Some(error_code.to_string()),
+                    local_remediation: false,
+                    bouncer_configured: false,
                     message: message.to_string(),
                 });
             }
@@ -555,6 +560,8 @@ pub async fn install_remote_machine(
             state: CrowdSecMachineState::Pending,
             installation_state: CrowdSecRemoteMachineInstallState::PendingConnectivity,
             connectivity_error_code: Some(error_code.to_string()),
+            local_remediation: false,
+            bouncer_configured: false,
             message: message.to_string(),
         });
     }
@@ -585,6 +592,8 @@ pub async fn install_remote_machine(
         state: CrowdSecMachineState::Pending,
         installation_state: CrowdSecRemoteMachineInstallState::PendingValidation,
         connectivity_error_code: None,
+        local_remediation: false,
+        bouncer_configured: false,
         message: "CrowdSec machine is registered and awaits central validation".to_string(),
     })
 }
@@ -719,6 +728,8 @@ pub async fn reauthenticate_remote_machine(
         state: CrowdSecMachineState::Pending,
         installation_state: CrowdSecRemoteMachineInstallState::PendingValidation,
         connectivity_error_code: None,
+        local_remediation: false,
+        bouncer_configured: false,
         message: "CrowdSec machine is registered and awaits central validation".to_string(),
     })
 }
