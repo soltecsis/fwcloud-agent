@@ -455,14 +455,26 @@ pub async fn remove_machine(name: &str) -> Result<CrowdSecMachineRemoveResponse>
 pub async fn install_remote_machine(
     machine_name: &str,
     lapi_url: &str,
-    _local_remediation: bool,
-    _backend: CrowdSecFirewallBackend,
-    _bouncer_api_key: Option<&str>,
+    local_remediation: bool,
+    backend: CrowdSecFirewallBackend,
+    bouncer_api_key: Option<&str>,
     continue_without_lapi_connectivity: bool,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecRemoteMachineInstallResponse> {
     validate_machine_name(machine_name)?;
     let lapi_url = remote_lapi_url(lapi_url)?;
+    let bouncer_api_key = if local_remediation {
+        Some(bouncer_api_key.filter(|api_key| !api_key.is_empty()).ok_or_else(
+            || {
+                FwcError::crowdsec(
+                    crate::crowdsec::errors::BOUNCER_INVALID,
+                    "CrowdSec Firewall Bouncer API key is required for local remediation",
+                )
+            },
+        )?)
+    } else {
+        None
+    };
 
     emit_progress(progress, "Checking central CrowdSec Local API connectivity");
     let connectivity_error_code = match ensure_remote_lapi_reachable(&lapi_url).await {
@@ -484,7 +496,7 @@ pub async fn install_remote_machine(
                     installation_state:
                         CrowdSecRemoteMachineInstallState::ConnectivityConfirmationRequired,
                     connectivity_error_code: Some(error_code.to_string()),
-                    local_remediation: false,
+                    local_remediation,
                     bouncer_configured: false,
                     message: message.to_string(),
                 });
@@ -560,7 +572,7 @@ pub async fn install_remote_machine(
             state: CrowdSecMachineState::Pending,
             installation_state: CrowdSecRemoteMachineInstallState::PendingConnectivity,
             connectivity_error_code: Some(error_code.to_string()),
-            local_remediation: false,
+            local_remediation,
             bouncer_configured: false,
             message: message.to_string(),
         });
@@ -586,15 +598,35 @@ pub async fn install_remote_machine(
         "CrowdSec machine is registered and pending central validation",
     );
 
+    let bouncer_configured = if let Some(bouncer_api_key) = bouncer_api_key {
+        emit_progress(progress, "Configuring local CrowdSec Firewall Bouncer");
+        bouncers::install_with_remote_lapi_and_progress(
+            backend,
+            lapi_url.as_str(),
+            bouncer_api_key,
+            progress,
+        )
+        .await?;
+        emit_success(progress, "Local CrowdSec Firewall Bouncer is configured");
+        true
+    } else {
+        false
+    };
+
     Ok(CrowdSecRemoteMachineInstallResponse {
         machine_name: machine_name.to_string(),
         lapi_url: lapi_url.to_string(),
         state: CrowdSecMachineState::Pending,
         installation_state: CrowdSecRemoteMachineInstallState::PendingValidation,
         connectivity_error_code: None,
-        local_remediation: false,
-        bouncer_configured: false,
-        message: "CrowdSec machine is registered and awaits central validation".to_string(),
+        local_remediation,
+        bouncer_configured,
+        message: if bouncer_configured {
+            "CrowdSec machine is registered and awaits central validation; local Firewall Bouncer is configured"
+                .to_string()
+        } else {
+            "CrowdSec machine is registered and awaits central validation".to_string()
+        },
     })
 }
 
