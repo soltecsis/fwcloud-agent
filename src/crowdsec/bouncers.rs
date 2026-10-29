@@ -599,12 +599,7 @@ pub async fn install_with_remote_lapi_and_progress(
     api_key: &str,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecBouncerInstallResponse> {
-    if !valid_api_key(api_key) {
-        return Err(FwcError::crowdsec(
-            BOUNCER_INVALID,
-            "Invalid CrowdSec Firewall Bouncer API key",
-        ));
-    }
+    validate_api_key(api_key)?;
 
     fs::create_dir_all(BOUNCER_CONFIG_DIRECTORY)
         .await
@@ -3047,6 +3042,17 @@ fn valid_api_key(api_key: &str) -> bool {
         && !api_key.contains('\r')
 }
 
+pub fn validate_api_key(api_key: &str) -> Result<()> {
+    if valid_api_key(api_key) {
+        Ok(())
+    } else {
+        Err(FwcError::crowdsec(
+            BOUNCER_INVALID,
+            "Invalid CrowdSec Firewall Bouncer API key",
+        ))
+    }
+}
+
 fn write_bouncer_configuration(contents: &str) -> Result<()> {
     let temporary_path = format!("{}.tmp", BOUNCER_CONFIG_PATH);
     let _ = std_fs::remove_file(&temporary_path);
@@ -3151,7 +3157,8 @@ mod tests {
         parse_iptables_blocking_chain_counter, parse_nftables_address_counters,
         parse_nftables_counter, pending_backend_contents, pending_backend_from_contents,
         pending_policy_status, reject_fwcloud_bouncer, select_active_backend,
-        set_only_configuration_contents, validate_bouncer_name, BouncerConfigurationState,
+        set_only_configuration_contents, validate_api_key, validate_bouncer_name,
+        BouncerConfigurationState,
         BouncerReconciliationAction, CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig,
         CrowdSecBouncersResponse, CrowdSecFirewallBackend, CrowdSecIpSetStatus,
         CrowdSecNftablesSetOnlyConfig, NftablesBouncerServiceAction,
@@ -3654,6 +3661,22 @@ mod tests {
 
         for name in ["", "invalid name", "invalid/name", "invalid\nname"] {
             let error = validate_bouncer_name(name).unwrap_err();
+            assert!(matches!(
+                error,
+                FwcError::CrowdSec {
+                    code: BOUNCER_INVALID,
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn validates_bouncer_api_keys() {
+        assert!(validate_api_key("valid-api-key").is_ok());
+
+        for api_key in ["", "invalid\nkey", "invalid\rkey", &"a".repeat(513)] {
+            let error = validate_api_key(api_key).unwrap_err();
             assert!(matches!(
                 error,
                 FwcError::CrowdSec {

@@ -464,14 +464,14 @@ pub async fn install_remote_machine(
     validate_machine_name(machine_name)?;
     let lapi_url = remote_lapi_url(lapi_url)?;
     let bouncer_api_key = if local_remediation {
-        Some(bouncer_api_key.filter(|api_key| !api_key.is_empty()).ok_or_else(
-            || {
-                FwcError::crowdsec(
-                    crate::crowdsec::errors::BOUNCER_INVALID,
-                    "CrowdSec Firewall Bouncer API key is required for local remediation",
-                )
-            },
-        )?)
+        let api_key = bouncer_api_key.filter(|api_key| !api_key.is_empty()).ok_or_else(|| {
+            FwcError::crowdsec(
+                crate::crowdsec::errors::BOUNCER_INVALID,
+                "CrowdSec Firewall Bouncer API key is required for local remediation",
+            )
+        })?;
+        bouncers::validate_api_key(api_key)?;
+        Some(api_key)
     } else {
         None
     };
