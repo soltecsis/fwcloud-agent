@@ -36,7 +36,7 @@ use tokio::{
     task,
     time::{sleep, timeout},
 };
-use url::Url;
+use url::{Host, Url};
 use uuid::Uuid;
 
 use crate::{
@@ -1061,7 +1061,25 @@ pub(crate) fn remote_lapi_url(value: &str) -> Result<Url> {
         return Err(invalid_remote_lapi_error());
     }
 
+    if remote_lapi_host_is_loopback(url.host().expect("validated host")) {
+        return Err(invalid_remote_lapi_error());
+    }
+
     Ok(url)
+}
+
+fn remote_lapi_host_is_loopback(host: Host<&str>) -> bool {
+    match host {
+        Host::Domain(host) => matches!(
+            host.trim_end_matches('.').to_ascii_lowercase().as_str(),
+            "localhost" | "localhost.localdomain" | "ip6-localhost" | "ip6-loopback" | "loopback" | "lo"
+        ),
+        Host::Ipv4(address) => address.is_loopback(),
+        Host::Ipv6(address) => address.is_loopback()
+            || address
+                .to_ipv4_mapped()
+                .is_some_and(|mapped| mapped.is_loopback()),
+    }
 }
 
 pub(crate) async fn ensure_remote_lapi_reachable(url: &Url) -> Result<()> {
@@ -1521,7 +1539,7 @@ fn with_trailing_newline(lines: Vec<String>, trailing_newline: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{io::ErrorKind, net::TcpListener, os::unix::fs::PermissionsExt};
+    use std::{io::ErrorKind, os::unix::fs::PermissionsExt};
 
     use super::{
         central_lapi_configuration, central_lapi_listen_uri, check_remote_lapi_connectivity,
@@ -1735,17 +1753,18 @@ mod tests {
         assert!(remote_lapi_url("http://192.0.2.10:8080/api").is_err());
     }
 
-    #[tokio::test]
-    async fn checks_a_reachable_remote_lapi_without_changing_crowdsec() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let lapi_url = format!("http://{}", listener.local_addr().unwrap());
-
-        let response = check_remote_lapi_connectivity(&lapi_url).await;
-
-        assert!(response.reachable);
-        assert_eq!(response.lapi_url, Some(format!("{lapi_url}/")));
-        assert_eq!(response.error_code, None);
-        assert_eq!(response.message, "CrowdSec Local API is reachable");
+    #[test]
+    fn rejects_loopback_remote_lapi_urls() {
+        for lapi_url in [
+            "http://127.0.0.1:8080",
+            "https://[::1]:8443",
+            "https://[::ffff:127.0.0.1]:8443",
+            "http://localhost:8080",
+            "http://localhost.localdomain.:8080",
+            "http://ip6-localhost:8080",
+        ] {
+            assert!(remote_lapi_url(lapi_url).is_err(), "{}", lapi_url);
+        }
     }
 
     #[tokio::test]
