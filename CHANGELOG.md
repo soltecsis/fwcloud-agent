@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## Added
+- CrowdSec plugin, including controlled installation and removal of the engine, its default collections, and the FWCloud Firewall Bouncer.
+- CrowdSec API calls for status, Console enrollment, decisions, alerts, collections, acquisitions, Machines, Local API servers, and Bouncers management.
+- CrowdSec Local API and Machine installation modes, role transitions, direct TCP connectivity checks, manual Machine activation, and reauthentication.
+- CrowdSec Machine and Bouncer credentials replication across cluster Local API nodes.
+- CrowdSec Firewall Bouncer support for IPTables and NFTables backends, FWCloud-managed blacklist resources, and reconciliation after firewall policy deployment.
+- CrowdSec collection acquisitions management, including parser detection and selection, editable log paths, duplicate-path validation, and managed acquisition file removal.
+- CrowdSec Firewall Bouncer blocking statistics collection, sampling configuration, cache persistence, policy generations, and duplicate-sample suppression.
+- CrowdSec Console enrollment state, Local API and Central API health, Bouncer health warnings, and bounded status counters.
+- CrowdSec installation, uninstallation, and reconciliation progress streamed through WebSocket messages.
+- CrowdSec service management through the agent systemctl API.
+- Dynamic CrowdSec RPM repository configuration according to the target distribution.
+
+## Changed
+- Updated Rust packages to the latest version.
+
 
 ## [2.2.3] - 2026-08-26
 ## Fixed
