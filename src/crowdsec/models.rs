@@ -60,8 +60,26 @@ pub struct CrowdSecInstallRequest {
     pub machine_name: Option<String>,
     pub lapi_url: Option<String>,
     #[serde(default)]
+    pub local_remediation: bool,
+    pub bouncer_api_key: Option<String>,
+    #[serde(default)]
     pub continue_without_lapi_connectivity: bool,
     pub ws_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrowdSecLapiConnectivityCheckRequest {
+    pub lapi_url: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CrowdSecLapiConnectivityCheckResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lapi_url: Option<String>,
+    pub reachable: bool,
+    pub error_code: Option<String>,
+    pub message: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -327,6 +345,8 @@ pub struct CrowdSecRemoteMachineInstallResponse {
     pub state: CrowdSecMachineState,
     pub installation_state: CrowdSecRemoteMachineInstallState,
     pub connectivity_error_code: Option<String>,
+    pub local_remediation: bool,
+    pub bouncer_configured: bool,
     pub message: String,
 }
 
@@ -731,10 +751,12 @@ mod tests {
         CrowdSecBouncerReplicationResponse, CrowdSecBouncerUninstallStep,
         CrowdSecCapabilitiesResponse, CrowdSecDataRetention, CrowdSecFirewallBackend,
         CrowdSecInstallMode, CrowdSecInstallRequest, CrowdSecInstallStep,
+        CrowdSecLapiConnectivityCheckRequest, CrowdSecLapiConnectivityCheckResponse,
         CrowdSecMachineReplicationAction, CrowdSecMachineReplicationRequest,
         CrowdSecMachineReplicationResponse, CrowdSecMachineState, CrowdSecOperationRequest,
         CrowdSecPackageStatus, CrowdSecRemoteMachineActivationRequest,
-        CrowdSecRemoteMachineInstallState, CrowdSecRemoteMachineReauthenticationRequest,
+        CrowdSecRemoteMachineInstallResponse, CrowdSecRemoteMachineInstallState,
+        CrowdSecRemoteMachineReauthenticationRequest,
         CrowdSecStepResult, CrowdSecStepStatus, CrowdSecUninstallResponse, CrowdSecUninstallStep,
     };
 
@@ -861,12 +883,57 @@ mod tests {
     }
 
     #[test]
+    fn crowdsec_machine_install_request_accepts_manual_bouncer_configuration() {
+        let request = serde_json::from_str::<CrowdSecInstallRequest>(
+            r#"{"mode":"machine","machine_name":"fwcloud-web-01","local_remediation":true,"backend":"nftables","bouncer_api_key":"machine-bouncer-key"}"#,
+        )
+        .unwrap();
+
+        assert!(request.local_remediation);
+        assert_eq!(request.backend, CrowdSecFirewallBackend::Nftables);
+        assert_eq!(
+            request.bouncer_api_key.as_deref(),
+            Some("machine-bouncer-key")
+        );
+    }
+
+    #[test]
     fn crowdsec_machine_install_request_rejects_legacy_preflight_fields() {
         let request = serde_json::from_str::<CrowdSecInstallRequest>(
             r#"{"mode":"machine","machine_name":"fwcloud-web-01","lapi_url":"http://192.0.2.10:8080","preflight_token":"obsolete"}"#,
         );
 
         assert!(request.is_err());
+    }
+
+    #[test]
+    fn lapi_connectivity_check_request_requires_only_a_lapi_url() {
+        let request = serde_json::from_str::<CrowdSecLapiConnectivityCheckRequest>(
+            r#"{"lapi_url":"http://192.0.2.10:8080"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(request.lapi_url, "http://192.0.2.10:8080");
+        assert!(serde_json::from_str::<CrowdSecLapiConnectivityCheckRequest>(r#"{}"#).is_err());
+        assert!(serde_json::from_str::<CrowdSecLapiConnectivityCheckRequest>(
+            r#"{"lapi_url":"http://192.0.2.10:8080","machine_name":"unexpected"}"#,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn lapi_connectivity_check_response_hides_an_invalid_url() {
+        let response = serde_json::to_value(CrowdSecLapiConnectivityCheckResponse {
+            lapi_url: None,
+            reachable: false,
+            error_code: Some("CROWDSEC_LAPI_INVALID".to_string()),
+            message: "CrowdSec Local API URL is invalid".to_string(),
+        })
+        .unwrap();
+
+        assert!(response.get("lapi_url").is_none());
+        assert_eq!(response["reachable"], false);
+        assert_eq!(response["error_code"], "CROWDSEC_LAPI_INVALID");
     }
 
     #[test]
@@ -903,6 +970,27 @@ mod tests {
             .unwrap(),
             "connectivity_confirmation_required",
         );
+    }
+
+    #[test]
+    fn remote_machine_install_response_reports_pending_validation_with_configured_bouncer() {
+        let response = serde_json::to_value(CrowdSecRemoteMachineInstallResponse {
+            machine_name: "fwcloud-web-01".to_string(),
+            lapi_url: "http://192.0.2.10:8080/".to_string(),
+            state: CrowdSecMachineState::Pending,
+            installation_state: CrowdSecRemoteMachineInstallState::PendingValidation,
+            connectivity_error_code: None,
+            local_remediation: true,
+            bouncer_configured: true,
+            message: "CrowdSec machine is registered and awaits central validation; local Firewall Bouncer is configured".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(response["state"], "pending");
+        assert_eq!(response["installation_state"], "pending_validation");
+        assert_eq!(response["local_remediation"], true);
+        assert_eq!(response["bouncer_configured"], true);
+        assert!(response.get("bouncer_api_key").is_none());
     }
 
     #[test]

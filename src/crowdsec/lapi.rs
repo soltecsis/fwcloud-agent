@@ -36,7 +36,7 @@ use tokio::{
     task,
     time::{sleep, timeout},
 };
-use url::Url;
+use url::{Host, Url};
 use uuid::Uuid;
 
 use crate::{
@@ -52,7 +52,8 @@ use crate::{
         install,
         models::{
             CrowdSecCentralLapiConfigureResponse, CrowdSecFirewallBackend,
-            CrowdSecLapiReplicationReadinessResponse, CrowdSecMachine,
+            CrowdSecLapiConnectivityCheckResponse, CrowdSecLapiReplicationReadinessResponse,
+            CrowdSecMachine,
             CrowdSecMachineCredentialsExportResponse, CrowdSecMachineRemoveResponse,
             CrowdSecMachineReplicationAction, CrowdSecMachineReplicationResponse,
             CrowdSecMachineState, CrowdSecMachineValidationResponse, CrowdSecMachinesResponse,
@@ -454,11 +455,26 @@ pub async fn remove_machine(name: &str) -> Result<CrowdSecMachineRemoveResponse>
 pub async fn install_remote_machine(
     machine_name: &str,
     lapi_url: &str,
+    local_remediation: bool,
+    backend: CrowdSecFirewallBackend,
+    bouncer_api_key: Option<&str>,
     continue_without_lapi_connectivity: bool,
     progress: Option<&CrowdSecProgress>,
 ) -> Result<CrowdSecRemoteMachineInstallResponse> {
     validate_machine_name(machine_name)?;
     let lapi_url = remote_lapi_url(lapi_url)?;
+    let bouncer_api_key = if local_remediation {
+        let api_key = bouncer_api_key.filter(|api_key| !api_key.is_empty()).ok_or_else(|| {
+            FwcError::crowdsec(
+                crate::crowdsec::errors::BOUNCER_INVALID,
+                "CrowdSec Firewall Bouncer API key is required for local remediation",
+            )
+        })?;
+        bouncers::validate_api_key(api_key)?;
+        Some(api_key)
+    } else {
+        None
+    };
 
     emit_progress(progress, "Checking central CrowdSec Local API connectivity");
     let connectivity_error_code = match ensure_remote_lapi_reachable(&lapi_url).await {
@@ -480,6 +496,8 @@ pub async fn install_remote_machine(
                     installation_state:
                         CrowdSecRemoteMachineInstallState::ConnectivityConfirmationRequired,
                     connectivity_error_code: Some(error_code.to_string()),
+                    local_remediation,
+                    bouncer_configured: false,
                     message: message.to_string(),
                 });
             }
@@ -554,6 +572,8 @@ pub async fn install_remote_machine(
             state: CrowdSecMachineState::Pending,
             installation_state: CrowdSecRemoteMachineInstallState::PendingConnectivity,
             connectivity_error_code: Some(error_code.to_string()),
+            local_remediation,
+            bouncer_configured: false,
             message: message.to_string(),
         });
     }
@@ -578,14 +598,56 @@ pub async fn install_remote_machine(
         "CrowdSec machine is registered and pending central validation",
     );
 
+    let bouncer_configured = if let Some(bouncer_api_key) = bouncer_api_key {
+        emit_progress(progress, "Configuring local CrowdSec Firewall Bouncer");
+        bouncers::install_with_remote_lapi_and_progress(
+            backend,
+            lapi_url.as_str(),
+            bouncer_api_key,
+            progress,
+        )
+        .await?;
+        emit_success(progress, "Local CrowdSec Firewall Bouncer is configured");
+        true
+    } else {
+        false
+    };
+
     Ok(CrowdSecRemoteMachineInstallResponse {
         machine_name: machine_name.to_string(),
         lapi_url: lapi_url.to_string(),
         state: CrowdSecMachineState::Pending,
         installation_state: CrowdSecRemoteMachineInstallState::PendingValidation,
         connectivity_error_code: None,
-        message: "CrowdSec machine is registered and awaits central validation".to_string(),
+        local_remediation,
+        bouncer_configured,
+        message: if bouncer_configured {
+            "CrowdSec machine is registered and awaits central validation; local Firewall Bouncer is configured"
+                .to_string()
+        } else {
+            "CrowdSec machine is registered and awaits central validation".to_string()
+        },
     })
+}
+
+pub async fn check_remote_lapi_connectivity(
+    lapi_url: &str,
+) -> CrowdSecLapiConnectivityCheckResponse {
+    let lapi_url = match remote_lapi_url(lapi_url) {
+        Ok(lapi_url) => lapi_url,
+        Err(error) => return remote_lapi_connectivity_check_error(None, &error),
+    };
+    let normalized_lapi_url = lapi_url.to_string();
+
+    match ensure_remote_lapi_reachable(&lapi_url).await {
+        Ok(()) => CrowdSecLapiConnectivityCheckResponse {
+            lapi_url: Some(normalized_lapi_url),
+            reachable: true,
+            error_code: None,
+            message: "CrowdSec Local API is reachable".to_string(),
+        },
+        Err(error) => remote_lapi_connectivity_check_error(Some(normalized_lapi_url), &error),
+    }
 }
 
 pub async fn activate_remote_machine(
@@ -698,6 +760,8 @@ pub async fn reauthenticate_remote_machine(
         state: CrowdSecMachineState::Pending,
         installation_state: CrowdSecRemoteMachineInstallState::PendingValidation,
         connectivity_error_code: None,
+        local_remediation: false,
+        bouncer_configured: false,
         message: "CrowdSec machine is registered and awaits central validation".to_string(),
     })
 }
@@ -997,7 +1061,25 @@ pub(crate) fn remote_lapi_url(value: &str) -> Result<Url> {
         return Err(invalid_remote_lapi_error());
     }
 
+    if remote_lapi_host_is_loopback(url.host().expect("validated host")) {
+        return Err(invalid_remote_lapi_error());
+    }
+
     Ok(url)
+}
+
+fn remote_lapi_host_is_loopback(host: Host<&str>) -> bool {
+    match host {
+        Host::Domain(host) => matches!(
+            host.trim_end_matches('.').to_ascii_lowercase().as_str(),
+            "localhost" | "localhost.localdomain" | "ip6-localhost" | "ip6-loopback" | "loopback" | "lo"
+        ),
+        Host::Ipv4(address) => address.is_loopback(),
+        Host::Ipv6(address) => address.is_loopback()
+            || address
+                .to_ipv4_mapped()
+                .is_some_and(|mapped| mapped.is_loopback()),
+    }
 }
 
 pub(crate) async fn ensure_remote_lapi_reachable(url: &Url) -> Result<()> {
@@ -1075,6 +1157,38 @@ fn remote_lapi_connectivity_error_code(error: &FwcError) -> Option<&'static str>
             Some(*code)
         }
         _ => None,
+    }
+}
+
+fn remote_lapi_connectivity_check_error(
+    lapi_url: Option<String>,
+    error: &FwcError,
+) -> CrowdSecLapiConnectivityCheckResponse {
+    let error_code = match error {
+        FwcError::CrowdSec { code, .. }
+            if matches!(
+                *code,
+                LAPI_INVALID
+                    | LAPI_HOST_UNRESOLVABLE
+                    | LAPI_CONNECTION_REFUSED
+                    | LAPI_CONNECTION_TIMEOUT
+                    | LAPI_CONNECTION_FAILED
+            ) => *code,
+        _ => LAPI_UNREACHABLE,
+    };
+    let message = match error_code {
+        LAPI_INVALID => "CrowdSec Local API URL is invalid",
+        LAPI_HOST_UNRESOLVABLE => "CrowdSec Local API host cannot be resolved",
+        LAPI_CONNECTION_REFUSED => "CrowdSec Local API connection was refused",
+        LAPI_CONNECTION_TIMEOUT => "CrowdSec Local API connection timed out",
+        _ => "CrowdSec Local API is unreachable",
+    };
+
+    CrowdSecLapiConnectivityCheckResponse {
+        lapi_url,
+        reachable: false,
+        error_code: Some(error_code.to_string()),
+        message: message.to_string(),
     }
 }
 
@@ -1428,10 +1542,11 @@ mod tests {
     use std::{io::ErrorKind, os::unix::fs::PermissionsExt};
 
     use super::{
-        central_lapi_configuration, central_lapi_listen_uri, finish_machine_replication_command,
-        machine_credentials_from_contents, machine_from_json, machine_has_loopback_address,
-        machine_reauthentication_required_message, machine_replication_plan, machines_from_json,
-        remote_lapi_connection_error, remote_lapi_connectivity_error_code,
+        central_lapi_configuration, central_lapi_listen_uri, check_remote_lapi_connectivity,
+        finish_machine_replication_command, machine_credentials_from_contents, machine_from_json,
+        machine_has_loopback_address, machine_reauthentication_required_message,
+        machine_replication_plan, machines_from_json, remote_lapi_connection_error,
+        remote_lapi_connectivity_check_error, remote_lapi_connectivity_error_code,
         remote_lapi_socket_address, remote_lapi_url, remote_machine_configuration,
         remove_listener_backup_at, remove_temporary_replication_credentials_file,
         restore_listener_backup_at, temporary_replication_credentials_file, validate_listen_uri,
@@ -1442,7 +1557,7 @@ mod tests {
         crowdsec::{
             errors::{
                 COMMAND_FAILED, LAPI_CONNECTION_FAILED, LAPI_CONNECTION_REFUSED,
-                LAPI_CONNECTION_TIMEOUT,
+                LAPI_CONNECTION_TIMEOUT, LAPI_INVALID,
             },
             models::{CrowdSecMachine, CrowdSecMachineState},
         },
@@ -1639,6 +1754,30 @@ mod tests {
     }
 
     #[test]
+    fn rejects_loopback_remote_lapi_urls() {
+        for lapi_url in [
+            "http://127.0.0.1:8080",
+            "https://[::1]:8443",
+            "https://[::ffff:127.0.0.1]:8443",
+            "http://localhost:8080",
+            "http://localhost.localdomain.:8080",
+            "http://ip6-localhost:8080",
+        ] {
+            assert!(remote_lapi_url(lapi_url).is_err(), "{}", lapi_url);
+        }
+    }
+
+    #[tokio::test]
+    async fn does_not_echo_an_invalid_remote_lapi_url() {
+        let response = check_remote_lapi_connectivity("http://user:secret@127.0.0.1:8080").await;
+
+        assert!(!response.reachable);
+        assert_eq!(response.lapi_url, None);
+        assert_eq!(response.error_code.as_deref(), Some(LAPI_INVALID));
+        assert_eq!(response.message, "CrowdSec Local API URL is invalid");
+    }
+
+    #[test]
     fn resolves_a_remote_lapi_ip_address_without_connecting() {
         let address = remote_lapi_socket_address("192.0.2.10", 8080).unwrap();
 
@@ -1658,6 +1797,38 @@ mod tests {
         assert_eq!(
             crowdsec_error_code(remote_lapi_connection_error(ErrorKind::ConnectionReset)),
             LAPI_CONNECTION_FAILED,
+        );
+    }
+
+    #[test]
+    fn returns_safe_connectivity_check_responses_for_connection_failures() {
+        let lapi_url = Some("http://192.0.2.10:8080".to_string());
+        let refused = remote_lapi_connectivity_check_error(
+            lapi_url.clone(),
+            &remote_lapi_connection_error(ErrorKind::ConnectionRefused),
+        );
+        let timed_out = remote_lapi_connectivity_check_error(
+            lapi_url,
+            &remote_lapi_connection_error(ErrorKind::TimedOut),
+        );
+
+        assert!(!refused.reachable);
+        assert_eq!(
+            refused.error_code.as_deref(),
+            Some(LAPI_CONNECTION_REFUSED)
+        );
+        assert_eq!(
+            refused.message,
+            "CrowdSec Local API connection was refused"
+        );
+        assert!(!timed_out.reachable);
+        assert_eq!(
+            timed_out.error_code.as_deref(),
+            Some(LAPI_CONNECTION_TIMEOUT)
+        );
+        assert_eq!(
+            timed_out.message,
+            "CrowdSec Local API connection timed out"
         );
     }
 
