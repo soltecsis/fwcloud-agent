@@ -107,7 +107,7 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 [dependencies]
 actix = "0.13.5"
 actix-web-actors = "4.3.1"
-actix-web = { version = "4.15.0", features = ["openssl"] }
+actix-web = { version = "4.15.0", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "compress-zstd", "cookies", "unicode", "compat", "ws", "openssl"] }
 actix-service = "2.0.3"
 actix-multipart = "0.8.1"
 tokio = { version = "1.53.1", features = ["full"] }
