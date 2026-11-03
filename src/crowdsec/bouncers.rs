@@ -2979,7 +2979,7 @@ fn bouncer_api_url_from_contents(configuration: &str) -> Result<String> {
                 "Existing CrowdSec Firewall Bouncer configuration has no valid Local API URL",
             )
         })?;
-    lapi::remote_lapi_url(&lapi_url)?;
+    lapi::lapi_url(&lapi_url)?;
     Ok(lapi_url)
 }
 
@@ -3369,6 +3369,29 @@ mod tests {
             "http://192.0.2.10:8080"
         );
         assert!(bouncer_api_url_from_contents("# Managed by FWCloud\napi_key: secret\n").is_err());
+    }
+
+    #[test]
+    fn reads_a_local_lapi_url_from_managed_bouncer_configurations() {
+        let iptables_configuration = set_only_configuration_contents(
+            &CrowdSecBouncerSetOnlyConfig::default(),
+            "http://127.0.0.1:8080/",
+            "secret",
+        );
+        let nftables_configuration = nftables_set_only_configuration_contents(
+            &CrowdSecNftablesSetOnlyConfig::default(),
+            "http://127.0.0.1:8080/",
+            "secret",
+        );
+
+        assert_eq!(
+            bouncer_api_url_from_contents(&iptables_configuration).unwrap(),
+            "http://127.0.0.1:8080/"
+        );
+        assert_eq!(
+            bouncer_api_url_from_contents(&nftables_configuration).unwrap(),
+            "http://127.0.0.1:8080/"
+        );
     }
 
     #[test]

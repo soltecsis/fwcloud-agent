@@ -1047,7 +1047,7 @@ fn validate_listen_uri(listen_uri: &str) -> Result<()> {
     }
 }
 
-pub(crate) fn remote_lapi_url(value: &str) -> Result<Url> {
+pub(crate) fn lapi_url(value: &str) -> Result<Url> {
     let url = Url::parse(value).map_err(|_| invalid_remote_lapi_error())?;
     if !matches!(url.scheme(), "http" | "https")
         || url.port().is_none()
@@ -1060,6 +1060,12 @@ pub(crate) fn remote_lapi_url(value: &str) -> Result<Url> {
     {
         return Err(invalid_remote_lapi_error());
     }
+
+    Ok(url)
+}
+
+pub(crate) fn remote_lapi_url(value: &str) -> Result<Url> {
+    let url = lapi_url(value)?;
 
     if remote_lapi_host_is_loopback(url.host().expect("validated host")) {
         return Err(invalid_remote_lapi_error());
@@ -1545,7 +1551,7 @@ mod tests {
         central_lapi_configuration, central_lapi_listen_uri, check_remote_lapi_connectivity,
         finish_machine_replication_command, machine_credentials_from_contents, machine_from_json,
         machine_has_loopback_address, machine_reauthentication_required_message,
-        machine_replication_plan, machines_from_json, remote_lapi_connection_error,
+        machine_replication_plan, machines_from_json, lapi_url, remote_lapi_connection_error,
         remote_lapi_connectivity_check_error, remote_lapi_connectivity_error_code,
         remote_lapi_socket_address, remote_lapi_url, remote_machine_configuration,
         remove_listener_backup_at, remove_temporary_replication_credentials_file,
@@ -1751,6 +1757,14 @@ mod tests {
         assert!(remote_lapi_url("http://lapi.example.test:8080").is_ok());
         assert!(remote_lapi_url("http://192.0.2.10").is_err());
         assert!(remote_lapi_url("http://192.0.2.10:8080/api").is_err());
+    }
+
+    #[test]
+    fn validates_a_local_lapi_url_with_a_host_and_port() {
+        assert!(lapi_url("http://127.0.0.1:8080").is_ok());
+        assert!(lapi_url("https://[::1]:8443").is_ok());
+        assert!(lapi_url("http://127.0.0.1").is_err());
+        assert!(lapi_url("http://127.0.0.1:8080/api").is_err());
     }
 
     #[test]
