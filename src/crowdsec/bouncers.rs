@@ -23,6 +23,7 @@
 use std::{
     fs::{self as std_fs, OpenOptions},
     io::Write,
+    net::IpAddr,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::Path,
     time::Duration,
@@ -377,7 +378,6 @@ pub async fn managed_bouncer_name() -> Result<String> {
 
 pub async fn register(name: &str) -> Result<CrowdSecBouncerRegisterResponse> {
     validate_bouncer_name(name)?;
-    reject_fwcloud_bouncer(name, "The FWCloud bouncer name is reserved")?;
 
     if list()
         .await?
@@ -401,7 +401,6 @@ pub async fn register(name: &str) -> Result<CrowdSecBouncerRegisterResponse> {
 
 pub async fn replicate(name: &str, api_key: &str) -> Result<CrowdSecBouncerReplicationResponse> {
     validate_bouncer_name(name)?;
-    reject_fwcloud_bouncer(name, "The FWCloud bouncer name is reserved")?;
     if !valid_api_key(api_key) {
         return Err(FwcError::crowdsec(
             BOUNCER_INVALID,
@@ -446,19 +445,14 @@ pub async fn replicate(name: &str, api_key: &str) -> Result<CrowdSecBouncerRepli
 pub async fn remove(name: &str) -> Result<CrowdSecBouncerRemoveResponse> {
     validate_bouncer_name(name)?;
 
-    if !list()
-        .await?
-        .bouncers
+    let bouncers = list().await?.bouncers;
+    let bouncer = bouncers
         .iter()
-        .any(|bouncer| bouncer.name == name)
-    {
-        return Err(FwcError::crowdsec(
-            BOUNCER_NOT_FOUND,
-            "CrowdSec bouncer is not registered",
-        ));
-    }
-
-    reject_fwcloud_bouncer(name, "Use the FWCloud local bouncer uninstall operation")?;
+        .find(|bouncer| bouncer.name == name)
+        .ok_or_else(|| {
+            FwcError::crowdsec(BOUNCER_NOT_FOUND, "CrowdSec bouncer is not registered")
+        })?;
+    reject_local_bouncer(bouncer)?;
 
     debug!("Removing CrowdSec bouncer: {}", name);
     CrowdSecCommand::cscli(&["bouncers", "delete", name])?
@@ -484,6 +478,8 @@ fn bouncer_from_json(value: &Value) -> Option<CrowdSecBouncer> {
     Some(CrowdSecBouncer {
         name: value_as_string(value.get("name"))?,
         bouncer_type: optional_string(value.get("type")),
+        ip_address: optional_string(value.get("ip_address")),
+        os: optional_string(value.get("os")),
         revoked: value
             .get("revoked")
             .and_then(Value::as_bool)
@@ -520,12 +516,34 @@ fn validate_bouncer_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn reject_fwcloud_bouncer(name: &str, message: &'static str) -> Result<()> {
-    if name == FWCLOUD_BOUNCER_NAME {
-        Err(FwcError::crowdsec(BOUNCER_CONFLICT, message))
-    } else {
-        Ok(())
+fn reject_local_bouncer(bouncer: &CrowdSecBouncer) -> Result<()> {
+    if bouncer_has_loopback_address(bouncer) {
+        return Err(FwcError::crowdsec(
+            BOUNCER_CONFLICT,
+            "Use the FWCloud local bouncer uninstall operation",
+        ));
     }
+
+    Ok(())
+}
+
+fn bouncer_has_loopback_address(bouncer: &CrowdSecBouncer) -> bool {
+    let Some(address) = bouncer.ip_address.as_deref() else {
+        return false;
+    };
+    let normalized = address
+        .trim()
+        .trim_matches(|character| character == '[' || character == ']')
+        .to_ascii_lowercase();
+
+    normalized
+        .parse::<IpAddr>()
+        .map(|address| address.is_loopback())
+        .unwrap_or(false)
+        || matches!(
+            normalized.as_str(),
+            "localhost" | "localhost.localdomain" | "lo" | "loopback"
+        )
 }
 
 fn bouncer_register_response(name: &str, output: &str) -> Result<CrowdSecBouncerRegisterResponse> {
@@ -3234,7 +3252,7 @@ mod tests {
         non_selected_firewall_backend, parse_ipset_address_counters,
         parse_iptables_blocking_chain_counter, parse_nftables_address_counters,
         parse_nftables_counter, pending_backend_contents, pending_backend_from_contents,
-        pending_policy_status, reject_fwcloud_bouncer, select_active_backend,
+        pending_policy_status, reject_local_bouncer, select_active_backend,
         set_only_configuration_contents, validate_api_key, validate_bouncer_name,
         BouncerConfigurationState,
         BouncerReconciliationAction, CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig,
@@ -3244,8 +3262,8 @@ mod tests {
         BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVAL_MESSAGE, BOUNCER_CONFIG_PATH,
         BOUNCER_NFTABLES_DROP_IN_CONTENT, BOUNCER_NFTABLES_DROP_IN_PATH,
         BOUNCER_PACKAGE_TRANSITION_DROP_IN_CONTENT, BOUNCER_PACKAGE_TRANSITION_DROP_IN_PATH,
-        BOUNCER_RECONCILIATION_SKIPPED_MESSAGE, FWCLOUD_BOUNCER_NAME,
-        IPSET_SETUP_SERVICE_CONTENT, IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
+        BOUNCER_RECONCILIATION_SKIPPED_MESSAGE, IPSET_SETUP_SERVICE_CONTENT,
+        IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
         IPTABLES_V4_INPUT_BLOCKING_CHAIN, NFTABLES_V4_INPUT_BLOCKING_COUNTER,
         NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
     };
@@ -3789,12 +3807,12 @@ mod tests {
     }
 
     #[test]
-    fn protects_the_fwcloud_bouncer_from_generic_operations() {
-        let error = reject_fwcloud_bouncer(
-            FWCLOUD_BOUNCER_NAME,
-            "Use the FWCloud local bouncer uninstall operation",
-        )
-        .unwrap_err();
+    fn protects_loopback_bouncers_from_generic_removal() {
+        let bouncers = bouncers_from_json(&serde_json::json!([
+            {"name":"local", "ip_address":"127.0.0.1"},
+            {"name":"remote", "ip_address":"192.0.2.10"}
+        ]));
+        let error = reject_local_bouncer(&bouncers[0]).unwrap_err();
         assert!(matches!(
             error,
             FwcError::CrowdSec {
@@ -3802,7 +3820,7 @@ mod tests {
                 ..
             }
         ));
-        assert!(reject_fwcloud_bouncer("nginx-prod", "unused").is_ok());
+        assert!(reject_local_bouncer(&bouncers[1]).is_ok());
     }
 
     #[test]
@@ -3831,6 +3849,8 @@ mod tests {
             bouncers: bouncers_from_json(&serde_json::json!([{
                 "name": "nginx-prod",
                 "type": "",
+                "ip_address": "192.0.2.10",
+                "os": "linux",
                 "api_key": "generated-key",
                 "revoked": false,
                 "last_pull": "2026-07-27T10:00:00Z"
@@ -3841,6 +3861,8 @@ mod tests {
         assert!(!serialized.contains("api_key"));
         assert!(!serialized.contains("generated-key"));
         assert!(response.bouncers[0].bouncer_type.is_none());
+        assert_eq!(response.bouncers[0].ip_address.as_deref(), Some("192.0.2.10"));
+        assert_eq!(response.bouncers[0].os.as_deref(), Some("linux"));
     }
 
     #[test]

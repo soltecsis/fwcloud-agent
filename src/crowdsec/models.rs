@@ -201,6 +201,8 @@ pub struct CrowdSecBouncer {
     pub name: String,
     #[serde(rename = "type")]
     pub bouncer_type: Option<String>,
+    pub ip_address: Option<String>,
+    pub os: Option<String>,
     pub revoked: bool,
     pub last_pull: Option<String>,
 }
