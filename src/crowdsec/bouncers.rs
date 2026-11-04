@@ -2266,12 +2266,13 @@ async fn remove_bouncer_registration() -> Result<bool> {
         return Ok(false);
     }
 
-    if !bouncer_is_registered().await? {
+    let name = managed_bouncer_name().await?;
+    if !bouncer_is_registered(&name).await? {
         return Ok(false);
     }
 
     debug!("Removing FWCloud CrowdSec Firewall Bouncer registration");
-    CrowdSecCommand::cscli(&["bouncers", "delete", FWCLOUD_BOUNCER_NAME])?
+    CrowdSecCommand::cscli(&["bouncers", "delete", &name])?
         .execute()
         .await?;
     Ok(true)
@@ -3015,17 +3016,18 @@ fn bouncer_api_url_from_contents(configuration: &str) -> Result<String> {
 }
 
 async fn generate_bouncer_api_key() -> Result<String> {
-    if bouncer_is_registered().await? {
+    let name = managed_bouncer_name().await?;
+    if bouncer_is_registered(&name).await? {
         debug!(
             "Replacing FWCloud CrowdSec Firewall Bouncer registration without local configuration"
         );
-        CrowdSecCommand::cscli(&["bouncers", "delete", FWCLOUD_BOUNCER_NAME])?
+        CrowdSecCommand::cscli(&["bouncers", "delete", &name])?
             .execute()
             .await?;
     }
 
     debug!("Generating FWCloud CrowdSec Firewall Bouncer API key");
-    let output = CrowdSecCommand::cscli(&["bouncers", "add", FWCLOUD_BOUNCER_NAME, "-o", "raw"])?
+    let output = CrowdSecCommand::cscli(&["bouncers", "add", &name, "-o", "raw"])?
         .execute()
         .await?;
     let api_key = output.stdout().trim().to_string();
@@ -3040,7 +3042,7 @@ async fn generate_bouncer_api_key() -> Result<String> {
     }
 }
 
-async fn bouncer_is_registered() -> Result<bool> {
+async fn bouncer_is_registered(name: &str) -> Result<bool> {
     let output = CrowdSecCommand::cscli(&["bouncers", "list", "-o", "json"])?
         .execute()
         .await?;
@@ -3051,15 +3053,19 @@ async fn bouncer_is_registered() -> Result<bool> {
         )
     })?;
 
-    Ok(json_bouncer_is_registered(&bouncers))
+    Ok(json_bouncer_is_registered(&bouncers, name))
 }
 
-fn json_bouncer_is_registered(value: &serde_json::Value) -> bool {
+fn json_bouncer_is_registered(value: &serde_json::Value, name: &str) -> bool {
     match value {
-        serde_json::Value::Array(values) => values.iter().any(json_bouncer_is_registered),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| json_bouncer_is_registered(value, name)),
         serde_json::Value::Object(values) => {
-            values.get("name").and_then(serde_json::Value::as_str) == Some(FWCLOUD_BOUNCER_NAME)
-                || values.values().any(json_bouncer_is_registered)
+            values.get("name").and_then(serde_json::Value::as_str) == Some(name)
+                || values
+                    .values()
+                    .any(|value| json_bouncer_is_registered(value, name))
         }
         _ => false,
     }
