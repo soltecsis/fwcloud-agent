@@ -316,6 +316,7 @@ mod tests {
             target: machine(true),
             authority_changed: false,
             backend: Some(CrowdSecFirewallBackend::Iptables),
+            managed_bouncer_name: None,
             machine_connectivity_pending: false,
             ws_id: None,
         };

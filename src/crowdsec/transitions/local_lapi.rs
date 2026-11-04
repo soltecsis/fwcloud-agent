@@ -157,6 +157,9 @@ pub async fn prepare(
             "Active CrowdSec decisions are not migrated to the restored local Local API",
         );
     }
+    if let Some(name) = request.managed_bouncer_name.as_deref() {
+        bouncers::set_managed_bouncer_name(name).await?;
+    }
     std::fs::create_dir_all(directory(data)).map_err(|_| failed())?;
     std::fs::set_permissions(directory(data), std::fs::Permissions::from_mode(0o700))
         .map_err(|_| failed())?;
@@ -307,6 +310,7 @@ mod tests {
             },
             authority_changed: true,
             backend: Some(CrowdSecFirewallBackend::Iptables),
+            managed_bouncer_name: Some("cluster-primary".into()),
             machine_connectivity_pending: false,
             ws_id: None,
         };
