@@ -361,11 +361,7 @@ pub async fn set_managed_bouncer_name(name: &str) -> Result<()> {
 
 pub async fn managed_bouncer_name() -> Result<String> {
     match fs::read_to_string(MANAGED_BOUNCER_NAME_PATH).await {
-        Ok(name) => {
-            let name = name.trim();
-            validate_bouncer_name(name)?;
-            Ok(name.to_string())
-        }
+        Ok(name) => managed_bouncer_name_from_contents(&name),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             Ok(FWCLOUD_BOUNCER_NAME.to_string())
         }
@@ -489,7 +485,9 @@ fn bouncer_from_json(value: &Value) -> Option<CrowdSecBouncer> {
 }
 
 fn optional_string(value: Option<&Value>) -> Option<String> {
-    value_as_string(value).filter(|value| !value.is_empty())
+    value_as_string(value)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn value_as_string(value: Option<&Value>) -> Option<String> {
@@ -514,6 +512,12 @@ fn validate_bouncer_name(name: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn managed_bouncer_name_from_contents(contents: &str) -> Result<String> {
+    let name = contents.trim();
+    validate_bouncer_name(name)?;
+    Ok(name.to_string())
 }
 
 fn reject_local_bouncer(bouncer: &CrowdSecBouncer) -> Result<()> {
@@ -3251,8 +3255,9 @@ mod tests {
         nftables_counter_validation_arguments, nftables_set_only_configuration_contents,
         non_selected_firewall_backend, parse_ipset_address_counters,
         parse_iptables_blocking_chain_counter, parse_nftables_address_counters,
-        parse_nftables_counter, pending_backend_contents, pending_backend_from_contents,
-        pending_policy_status, reject_local_bouncer, select_active_backend,
+        managed_bouncer_name_from_contents, parse_nftables_counter, pending_backend_contents,
+        pending_backend_from_contents, pending_policy_status, reject_local_bouncer,
+        select_active_backend,
         set_only_configuration_contents, validate_api_key, validate_bouncer_name,
         BouncerConfigurationState,
         BouncerReconciliationAction, CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig,
@@ -3791,6 +3796,15 @@ mod tests {
     }
 
     #[test]
+    fn reads_validated_managed_bouncer_names() {
+        assert_eq!(
+            managed_bouncer_name_from_contents("cluster-primary\n").unwrap(),
+            "cluster-primary"
+        );
+        assert!(managed_bouncer_name_from_contents("invalid name").is_err());
+    }
+
+    #[test]
     fn validates_bouncer_api_keys() {
         assert!(validate_api_key("valid-api-key").is_ok());
 
@@ -3849,8 +3863,8 @@ mod tests {
             bouncers: bouncers_from_json(&serde_json::json!([{
                 "name": "nginx-prod",
                 "type": "",
-                "ip_address": "192.0.2.10",
-                "os": "linux",
+                "ip_address": " 192.0.2.10 ",
+                "os": " linux ",
                 "api_key": "generated-key",
                 "revoked": false,
                 "last_pull": "2026-07-27T10:00:00Z"
