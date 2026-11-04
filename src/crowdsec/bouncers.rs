@@ -70,6 +70,7 @@ pub const FIREWALL_BOUNCER_SERVICE: &str = "crowdsec-firewall-bouncer.service";
 pub const FWCLOUD_BOUNCER_NAME: &str = "fwcloud";
 pub const BOUNCER_CONFIG_DIRECTORY: &str = "/etc/crowdsec/bouncers";
 pub const BOUNCER_CONFIG_PATH: &str = "/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml";
+pub const MANAGED_BOUNCER_NAME_PATH: &str = "/etc/crowdsec/bouncers/fwcloud-crowdsec-bouncer-name";
 const LEGACY_BOUNCER_CONFIG_OVERRIDE_PATH: &str =
     "/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local";
 const FWCLOUD_BOUNCER_CONFIGURATION_MARKER: &str = "# Managed by FWCloud";
@@ -342,6 +343,36 @@ pub async fn list() -> Result<CrowdSecBouncersResponse> {
     Ok(CrowdSecBouncersResponse {
         bouncers: bouncers_from_json(&value),
     })
+}
+
+pub async fn set_managed_bouncer_name(name: &str) -> Result<()> {
+    validate_bouncer_name(name)?;
+    fs::create_dir_all(BOUNCER_CONFIG_DIRECTORY)
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create CrowdSec Firewall Bouncer configuration directory",
+            )
+        })?;
+    write_managed_bouncer_name(name)
+}
+
+pub async fn managed_bouncer_name() -> Result<String> {
+    match fs::read_to_string(MANAGED_BOUNCER_NAME_PATH).await {
+        Ok(name) => {
+            let name = name.trim();
+            validate_bouncer_name(name)?;
+            Ok(name.to_string())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(FWCLOUD_BOUNCER_NAME.to_string())
+        }
+        Err(_) => Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to read the managed CrowdSec Firewall Bouncer name",
+        )),
+    }
 }
 
 pub async fn register(name: &str) -> Result<CrowdSecBouncerRegisterResponse> {
@@ -3100,6 +3131,47 @@ fn write_bouncer_configuration(contents: &str) -> Result<()> {
             "Unable to remove legacy CrowdSec Firewall Bouncer configuration",
         )),
     }
+}
+
+fn write_managed_bouncer_name(name: &str) -> Result<()> {
+    let temporary_path = format!("{}.tmp", MANAGED_BOUNCER_NAME_PATH);
+    let _ = std_fs::remove_file(&temporary_path);
+    let mut name_file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(&temporary_path)
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create the managed CrowdSec Firewall Bouncer name",
+            )
+        })?;
+    std_fs::set_permissions(&temporary_path, std_fs::Permissions::from_mode(0o600)).map_err(
+        |_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to secure the managed CrowdSec Firewall Bouncer name",
+            )
+        },
+    )?;
+    name_file
+        .write_all(name.as_bytes())
+        .and_then(|_| name_file.write_all(b"\n"))
+        .and_then(|_| name_file.sync_all())
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to write the managed CrowdSec Firewall Bouncer name",
+            )
+        })?;
+    std_fs::rename(&temporary_path, MANAGED_BOUNCER_NAME_PATH).map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to save the managed CrowdSec Firewall Bouncer name",
+        )
+    })
 }
 
 fn set_only_configuration_contents(
