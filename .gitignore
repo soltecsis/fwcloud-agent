@@ -5,6 +5,9 @@
 /tmp
 /data
 .env
+/reports
+/packages
+__pycache__/
 
 /tests/playground/tmp/*
 !/tests/playground/tmp/.gitkeep

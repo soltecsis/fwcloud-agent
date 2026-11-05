@@ -1,0 +1,22 @@
+name: Set up pinned Rust
+description: Install and verify the repository Rust toolchain and an optional pinned Cargo utility.
+inputs:
+  tool:
+    description: Optional Cargo utility listed in .github/ci-tools.toml.
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Install and verify Rust inputs
+      shell: bash
+      env:
+        CI_CARGO_TOOL: ${{ inputs.tool }}
+      run: python3 .github/scripts/rust-ci.py setup
+    - name: Upload verified environment metadata
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: agent-environment-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: reports/ci/${{ github.job }}.json
+        retention-days: 90
+        if-no-files-found: error

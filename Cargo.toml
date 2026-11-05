@@ -110,7 +110,7 @@ actix-web-actors = "4.3.1"
 actix-web = { version = "4.15.0", features = ["openssl"] }
 actix-service = "2.0.3"
 actix-multipart = "0.8.1"
-tokio = { version = "1.53.1", features = ["full"] }
+tokio = { version = "1.53.3", features = ["full"] }
 futures = "0.3.34"
 openssl = { version = "0.10.81", features = ["vendored"] }
 thiserror = "2.0.20"
