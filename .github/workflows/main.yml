@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, devel, ENS]
   pull_request:
-    branches: [main, ENS]
+    branches: [main, devel, ENS]
   workflow_dispatch:
 
 permissions:
@@ -20,27 +20,28 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
-  SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+  ANALYSIS_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   quality:
-    name: Rust quality
+    name: FWCloud-Agent Quality
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.ANALYSIS_COMMIT }}
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
       - name: Verify CI helpers
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
-      - name: Check locked sources and tests
-        run: cargo check --locked --all-targets
       - name: Rustfmt
         run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --locked -- -D warnings
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Verify the committed lockfile is unchanged
+        if: ${{ always() }}
+        run: git diff --exit-code -- Cargo.lock
 
   security_audit:
     name: Rust dependency audit
@@ -49,7 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.ANALYSIS_COMMIT }}
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
@@ -57,19 +58,27 @@ jobs:
       - name: Audit the committed lockfile
         # Retain .cargo/audit.toml; review its existing exception in phase 6.
         run: cargo audit --file Cargo.lock
+      - name: Verify the committed lockfile is unchanged
+        if: ${{ always() }}
+        run: git diff --exit-code -- Cargo.lock
 
   test:
-    name: Rust tests
+    name: FWCloud-Agent Test
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.ANALYSIS_COMMIT }}
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
+      - name: Build the locked sources
+        run: cargo build --locked
       - name: Test the locked sources
         run: cargo test --locked
+      - name: Verify the committed lockfile is unchanged
+        if: ${{ always() }}
+        run: git diff --exit-code -- Cargo.lock
 
   coverage:
     name: Rust coverage
@@ -78,7 +87,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.ANALYSIS_COMMIT }}
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
@@ -86,6 +95,9 @@ jobs:
       - name: Measure coverage with the existing threshold
         # Keep 20% until the reference coverage review in phase 3.
         run: cargo tarpaulin --locked --out Xml --output-dir reports/coverage --ignore-tests --fail-under 20
+      - name: Verify the committed lockfile is unchanged
+        if: ${{ always() }}
+        run: git diff --exit-code -- Cargo.lock
       - name: Upload coverage evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -95,24 +107,10 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
-  build:
-    name: Rust build
-    needs: [quality, security_audit, test, coverage]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-rust
-      - name: Build the locked sources
-        run: cargo build --locked
-
   agent-ci:
     name: agent-ci
     if: ${{ always() }}
-    needs: [quality, security_audit, test, coverage, build]
+    needs: [quality, test]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -125,7 +123,7 @@ jobs:
           import os
           import sys
 
-          expected = {"quality", "security_audit", "test", "coverage", "build"}
+          expected = {"quality", "test"}
           results = json.loads(os.environ["REQUIRED_RESULTS"])
           if set(results) != expected:
               sys.exit("Missing or unexpected required jobs")
@@ -137,14 +135,14 @@ jobs:
           PY
 
   deb-package:
-    needs: [agent-ci]
+    needs: [agent-ci, security_audit, coverage]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: DEB package
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.ANALYSIS_COMMIT }}
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
@@ -159,6 +157,9 @@ jobs:
         run: |
           mkdir -p packages/deb
           cargo deb --locked --verbose --target=x86_64-unknown-linux-musl --output packages/deb/
+      - name: Verify the committed lockfile is unchanged
+        if: ${{ always() }}
+        run: git diff --exit-code -- Cargo.lock
       - name: Upload DEB package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -168,7 +169,7 @@ jobs:
           if-no-files-found: error
 
   rpm-package:
-    needs: [agent-ci]
+    needs: [agent-ci, security_audit, coverage]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: RPM package
@@ -178,7 +179,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.ANALYSIS_COMMIT }}
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
@@ -193,6 +194,9 @@ jobs:
         run: cargo build --locked --release --target=x86_64-unknown-linux-musl
       - name: Package the compiled binary
         run: cargo rpm build --no-cargo-build -v --target=x86_64-unknown-linux-musl
+      - name: Verify the committed lockfile is unchanged
+        if: ${{ always() }}
+        run: git diff --exit-code -- Cargo.lock
       - name: Upload RPM package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

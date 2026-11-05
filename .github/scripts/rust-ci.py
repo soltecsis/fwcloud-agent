@@ -62,13 +62,13 @@ def verify_release(name, actual, expected):
 
 def required_context(env):
     names = (
-        "SOURCE_COMMIT", "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
+        "ANALYSIS_COMMIT", "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
         "GITHUB_WORKFLOW", "GITHUB_EVENT_NAME", "GITHUB_REF", "GITHUB_JOB",
     )
     for name in names:
         if not env.get(name):
             raise ValueError(f"Missing CI context: {name}")
-    if not re.fullmatch(r"[0-9a-f]{40}", env["SOURCE_COMMIT"]):
+    if not re.fullmatch(r"[0-9a-f]{40}", env["ANALYSIS_COMMIT"]):
         raise ValueError("Invalid source commit")
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", env["GITHUB_REPOSITORY"], re.ASCII):
         raise ValueError("Invalid repository")
@@ -85,8 +85,8 @@ def record(env, tool="", root=ROOT):
     if tool and tool not in tools:
         raise ValueError("Unsupported Cargo utility")
     head = output(["git", "rev-parse", "HEAD"], env=env, root=root)
-    if head != env["SOURCE_COMMIT"]:
-        raise ValueError("Checked-out revision differs from SOURCE_COMMIT")
+    if head != env["ANALYSIS_COMMIT"]:
+        raise ValueError("Checked-out revision differs from ANALYSIS_COMMIT")
     versions = {
         "rustc": verify_release(
             "rustc", output(["rustc", "--version", "--verbose"], env=env, root=root),

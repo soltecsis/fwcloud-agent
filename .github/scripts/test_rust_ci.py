@@ -49,7 +49,7 @@ class RustCiTests(unittest.TestCase):
         )
         (self.root / "Cargo.lock").write_text("version = 4\n")
         self.env = {
-            "SOURCE_COMMIT": COMMIT,
+            "ANALYSIS_COMMIT": COMMIT,
             "GITHUB_REPOSITORY": "soltecsis/fwcloud-agent",
             "GITHUB_RUN_ID": "123",
             "GITHUB_RUN_ATTEMPT": "2",
@@ -123,7 +123,7 @@ class RustCiTests(unittest.TestCase):
     def test_revision_mismatch_and_missing_context_fail(self):
         with self.assertRaises(ValueError):
             self.record(versions=VERSIONS | {("git", "rev-parse", "HEAD"): "2" * 40})
-        for name in ("SOURCE_COMMIT", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB"):
+        for name in ("ANALYSIS_COMMIT", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB"):
             with self.subTest(name=name):
                 env = self.env.copy()
                 del env[name]
@@ -131,7 +131,7 @@ class RustCiTests(unittest.TestCase):
                     self.record(env)
 
     def test_invalid_context_and_missing_lockfile_fail(self):
-        for name, value in (("SOURCE_COMMIT", "main"), ("GITHUB_JOB", "../../evidence"),
+        for name, value in (("ANALYSIS_COMMIT", "main"), ("GITHUB_JOB", "../../evidence"),
                             ("GITHUB_RUN_ATTEMPT", "0"), ("GITHUB_REPOSITORY", "invalid/repository/path")):
             with self.subTest(name=name):
                 with self.assertRaises(ValueError):
