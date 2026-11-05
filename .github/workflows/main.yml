@@ -2,164 +2,219 @@ name: FWCloud-Agent CI
 
 on:
   push:
-    branches: [main, devel]
+    branches: [main, devel, ENS]
+  pull_request:
+    branches: [main, ENS]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
-  checks:
-    name: Checks
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.rustversion.outputs.rustversion }}
+  quality:
+    name: Rust quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - run: cargo check
-      - run: cargo pkgid
-      - run: 'echo "$(cargo pkgid | cut -d# -f2)"'
-      - id: rustversion
-        run: 'echo "::set-output name=rustversion::$(cargo pkgid | cut -d# -f2)"'
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+      - name: Verify CI helpers
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - name: Check locked sources and tests
+        run: cargo check --locked --all-targets
+      - name: Rustfmt
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --locked -- -D warnings
 
   security_audit:
-    needs: checks
-    name: Security audit
-    runs-on: ubuntu-latest
+    name: Rust dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rs/audit-check@v1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tool: cargo-audit
+      - name: Audit the committed lockfile
+        # Retain .cargo/audit.toml; review its existing exception in phase 6.
+        run: cargo audit --file Cargo.lock
 
   test:
-    needs: checks
-    name: Test
-    runs-on: ubuntu-latest
+    name: Rust tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-
-  fmt:
-    needs: checks
-    name: Rustfmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          components: rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
-
-  clippy:
-    needs: checks
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          components: clippy
-      - uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: -- -D warnings
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+      - name: Test the locked sources
+        run: cargo test --locked
 
   coverage:
-    needs: checks
-    name: Code coverage
-    runs-on: ubuntu-latest
+    name: Rust coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          toolchain: stable
-          override: true
-      - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin
-      - name: Run cargo-tarpaulin
-        run: cargo tarpaulin --out Xml --ignore-tests --fail-under 20
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tool: cargo-tarpaulin
+      - name: Measure coverage with the existing threshold
+        # Keep 20% until the reference coverage review in phase 3.
+        run: cargo tarpaulin --locked --out Xml --output-dir reports/coverage --ignore-tests --fail-under 20
+      - name: Upload coverage evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agent-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/coverage/
+          retention-days: 90
+          if-no-files-found: error
 
   build:
-    needs: [security_audit, test, fmt, clippy, coverage]
-    name: Build
-    runs-on: ubuntu-latest
+    name: Rust build
+    needs: [quality, security_audit, test, coverage]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: cargo build
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+      - name: Build the locked sources
+        run: cargo build --locked
+
+  agent-ci:
+    name: agent-ci
+    if: ${{ always() }}
+    needs: [quality, security_audit, test, coverage, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every foundation check to succeed
+        env:
+          REQUIRED_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          expected = {"quality", "security_audit", "test", "coverage", "build"}
+          results = json.loads(os.environ["REQUIRED_RESULTS"])
+          if set(results) != expected:
+              sys.exit("Missing or unexpected required jobs")
+          for job in sorted(expected):
+              result = results[job].get("result")
+              print(f"{job}: {result}")
+              if result != "success":
+                  sys.exit(f"Required job did not succeed: {job}")
+          PY
 
   deb-package:
-    needs: [build]
-    runs-on: ubuntu-latest
+    needs: [agent-ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     name: DEB package
     steps:
-      - uses: actions/checkout@v4
-      - name: Install required packages
-        run: sudo apt install -y curl libssl-dev pkg-config musl-tools build-essential
-      - name: Install rustup
-        run: curl https://sh.rustup.rs -sSf | sh -s -- -y && source "$HOME/.cargo/env"
-      - name: Install x86_64-unknown-linux-musl target
-        run: rustup target add x86_64-unknown-linux-musl
-      - name: Install cargo-deb
-        run: cargo install cargo-deb
-      - name: Build DEB package
-        run: cargo deb --verbose --target=x86_64-unknown-linux-musl
-      - name: Upload package
-        uses: actions/upload-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          name: deb-package
-          path: ./target/x86_64-unknown-linux-musl/debian/*
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tool: cargo-deb
+      - name: Install package build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libssl-dev pkg-config musl-tools build-essential
+      - name: Install the MUSL target for the pinned toolchain
+        run: rustup target add --toolchain "$RUSTUP_TOOLCHAIN" x86_64-unknown-linux-musl
+      - name: Build DEB package from locked sources
+        run: |
+          mkdir -p packages/deb
+          cargo deb --locked --verbose --target=x86_64-unknown-linux-musl --output packages/deb/
+      - name: Upload DEB package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: deb-package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: packages/deb/*.deb
+          retention-days: 14
+          if-no-files-found: error
 
   rpm-package:
-    needs: [build]
-    runs-on: ubuntu-latest
+    needs: [agent-ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     name: RPM package
+    env:
+      # cargo-rpm otherwise runs an unlocked cargo metadata lookup.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
-      - uses: actions/checkout@v4
-      - name: Install required packages
-        run: sudo apt install -y curl rpm libssl-dev pkg-config musl-tools build-essential
-      - name: Install rustup
-        run: curl https://sh.rustup.rs -sSf | sh -s -- -y && source "$HOME/.cargo/env"
-      - name: Install x86_64-unknown-linux-musl target
-        run: rustup target add x86_64-unknown-linux-musl
-      - name: Install cargo-rpm
-        run: cargo install cargo-rpm
-      - name: Build RPM package
-        # run: cargo rpm build -v
-        run: cargo rpm build -v --target=x86_64-unknown-linux-musl
-      - name: Upload RPM Artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          name: rpm-package
-          # path: ./target/release/rpmbuild/RPMS/x86_64/*
-          path: ./target/x86_64-unknown-linux-musl/release/rpmbuild/RPMS/x86_64/*
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          tool: cargo-rpm
+      - name: Install package build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y rpm libssl-dev pkg-config musl-tools build-essential
+      - name: Install the MUSL target for the pinned toolchain
+        run: rustup target add --toolchain "$RUSTUP_TOOLCHAIN" x86_64-unknown-linux-musl
+      - name: Build the RPM binary from locked sources
+        run: cargo build --locked --release --target=x86_64-unknown-linux-musl
+      - name: Package the compiled binary
+        run: cargo rpm build --no-cargo-build -v --target=x86_64-unknown-linux-musl
+      - name: Upload RPM package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rpm-package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/x86_64-unknown-linux-musl/release/rpmbuild/RPMS/x86_64/*.rpm
+          retention-days: 14
+          if-no-files-found: error
 
   deb-to-fwcloud:
-    needs: [deb-package]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    needs: [agent-ci, deb-package, rpm-package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: ${{ github.repository == 'soltecsis/fwcloud-agent' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     name: DEB to FWCloud
     steps:
-      - uses: actions/checkout@v4
-      - name: Download packages
-        uses: actions/download-artifact@v4
-      - name: List packages
-        run: ls -lha ./deb-package/
+      - name: Download DEB from this execution
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: deb-package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: deb-package
       - name: Upload DEB package
-        uses: SamKirkland/FTP-Deploy-Action@4.3.0
+        uses: SamKirkland/FTP-Deploy-Action@d0aa83872616587eb552bc831bb9166b3f9c5ad5 # 4.3.0
         with:
           server: ${{ secrets.FWCLOUD_PKG_FTP_HOST }}
           username: ${{ secrets.FWCLOUD_PKG_FTP_USERNAME }}
@@ -167,22 +222,21 @@ jobs:
           protocol: ftps
           local-dir: ./deb-package/
           server-dir: ./fwcloud-agent/deb/
-          exclude: |
-            *.tmp0-stripped 
 
   rpm-to-fwcloud:
-    needs: [rpm-package]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    needs: [agent-ci, deb-package, rpm-package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: ${{ github.repository == 'soltecsis/fwcloud-agent' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     name: RPM to FWCloud
     steps:
-      - uses: actions/checkout@v4
-      - name: Download packages
-        uses: actions/download-artifact@v4
-      - name: List packages
-        run: ls -lha ./rpm-package/
+      - name: Download RPM from this execution
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: rpm-package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: rpm-package
       - name: Upload RPM package
-        uses: SamKirkland/FTP-Deploy-Action@4.3.0
+        uses: SamKirkland/FTP-Deploy-Action@d0aa83872616587eb552bc831bb9166b3f9c5ad5 # 4.3.0
         with:
           server: ${{ secrets.FWCLOUD_PKG_FTP_HOST }}
           username: ${{ secrets.FWCLOUD_PKG_FTP_USERNAME }}
@@ -192,22 +246,23 @@ jobs:
           server-dir: ./fwcloud-agent/rpm/
 
   deb-to-packagecloud:
-    needs: [deb-package]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    needs: [agent-ci, deb-package, rpm-package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: ${{ github.repository == 'soltecsis/fwcloud-agent' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     name: DEB to Packagecloud
     strategy:
+      fail-fast: false
       matrix:
         dist: [any/any, ubuntu/bionic, ubuntu/cosmic, ubuntu/disco, ubuntu/eoan, ubuntu/focal, ubuntu/groovy, ubuntu/hirsute, ubuntu/impish, ubuntu/jammy, debian/jessie, debian/stretch, debian/buster, debian/bullseye, debian/bookworm, debian/trixie, linuxmint/ulyana, linuxmint/ulyssa, linuxmint/uma, linuxmint/una]
     steps:
-      - name: Check out repository code
-        uses: actions/checkout@v4
-      - name: Download packages
-        uses: actions/download-artifact@v4
-      - name: List packages
-        run: ls -lha ./deb-package/
-      - name: ${{ matrix.dist }}
-        uses: danielmundi/upload-packagecloud@v1
+      - name: Download DEB from this execution
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: deb-package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: deb-package
+      - name: Publish package
+        uses: danielmundi/upload-packagecloud@46cd0e61152bf952dbc0d1759e609d3d22649030 # v1
         with:
           PACKAGE-NAME: ./deb-package/*.deb
           PACKAGECLOUD-USERNAME: ${{ secrets.PACKAGECLOUD_USERNAME }}
@@ -216,22 +271,23 @@ jobs:
           PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
 
   rpm-to-packagecloud:
-    needs: [rpm-package]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    needs: [agent-ci, deb-package, rpm-package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: ${{ github.repository == 'soltecsis/fwcloud-agent' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     name: RPM to Packagecloud
     strategy:
+      fail-fast: false
       matrix:
         dist: [rpm_any/rpm_any, el/7, el/8, el/9, fedora/30, fedora/31, fedora/32, fedora/33, fedora/34, fedora/35, fedora/36]
     steps:
-      - name: Check out repository code
-        uses: actions/checkout@v4
-      - name: Download packages
-        uses: actions/download-artifact@v4
-      - name: List packages
-        run: ls -lha ./rpm-package/
-      - name: ${{ matrix.dist }}
-        uses: danielmundi/upload-packagecloud@v1
+      - name: Download RPM from this execution
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: rpm-package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: rpm-package
+      - name: Publish package
+        uses: danielmundi/upload-packagecloud@46cd0e61152bf952dbc0d1759e609d3d22649030 # v1
         with:
           PACKAGE-NAME: ./rpm-package/*.rpm
           PACKAGECLOUD-USERNAME: ${{ secrets.PACKAGECLOUD_USERNAME }}
