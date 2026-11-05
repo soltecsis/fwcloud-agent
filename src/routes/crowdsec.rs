@@ -995,6 +995,7 @@ async fn install_crowdsec(
 
         let (response, bouncer_statistics_available) = match request.mode {
             CrowdSecInstallMode::Lapi => {
+                persist_managed_bouncer_name(request.managed_bouncer_name.as_deref()).await?;
                 let install_result =
                     install::install_with_backend_and_progress(request.backend, Some(&progress))
                         .await;
@@ -1129,6 +1130,8 @@ async fn install_crowdsec_bouncer(
         crate::crowdsec::transitions::address::ensure_idle(cfg.data_dir).await?;
         debug!("CrowdSec mutex locked (thread id: {})", thread_id::get());
 
+        persist_managed_bouncer_name(request.managed_bouncer_name.as_deref()).await?;
+
         let install_result =
             bouncers::install_with_backend_and_progress(request.backend, Some(&progress)).await;
 
@@ -1159,6 +1162,14 @@ fn bouncer_install_request(body: &[u8]) -> Result<CrowdSecBouncerInstallRequest>
             "Invalid CrowdSec Firewall Bouncer installation request",
         )
     })
+}
+
+async fn persist_managed_bouncer_name(name: Option<&str>) -> Result<()> {
+    if let Some(name) = name {
+        bouncers::set_managed_bouncer_name(name).await?;
+    }
+
+    Ok(())
 }
 
 #[post("/crowdsec/bouncer/uninstall")]

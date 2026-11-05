@@ -615,6 +615,7 @@ mod tests {
             target,
             authority_changed: true,
             backend: None,
+            managed_bouncer_name: None,
             machine_connectivity_pending: false,
             ws_id: None,
         };
@@ -636,6 +637,7 @@ mod tests {
             },
             authority_changed: true,
             backend: None,
+            managed_bouncer_name: None,
             machine_connectivity_pending: false,
             ws_id: None,
         };

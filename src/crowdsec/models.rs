@@ -57,6 +57,7 @@ pub struct CrowdSecInstallRequest {
     pub mode: CrowdSecInstallMode,
     #[serde(default)]
     pub backend: CrowdSecFirewallBackend,
+    pub managed_bouncer_name: Option<String>,
     pub machine_name: Option<String>,
     pub lapi_url: Option<String>,
     #[serde(default)]
@@ -94,6 +95,7 @@ pub struct CrowdSecUninstallRequest {
 pub struct CrowdSecBouncerInstallRequest {
     #[serde(default)]
     pub backend: CrowdSecFirewallBackend,
+    pub managed_bouncer_name: Option<String>,
     pub ws_id: Option<Uuid>,
 }
 
@@ -199,6 +201,8 @@ pub struct CrowdSecBouncer {
     pub name: String,
     #[serde(rename = "type")]
     pub bouncer_type: Option<String>,
+    pub ip_address: Option<String>,
+    pub os: Option<String>,
     pub revoked: bool,
     pub last_pull: Option<String>,
 }

@@ -339,6 +339,7 @@ pub struct TransitionPrepareRequest {
     pub target: TransitionTarget,
     pub authority_changed: bool,
     pub backend: Option<CrowdSecFirewallBackend>,
+    pub managed_bouncer_name: Option<String>,
     #[serde(default)]
     pub machine_connectivity_pending: bool,
     pub ws_id: Option<Uuid>,

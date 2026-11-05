@@ -23,6 +23,7 @@
 use std::{
     fs::{self as std_fs, OpenOptions},
     io::Write,
+    net::IpAddr,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::Path,
     time::Duration,
@@ -70,6 +71,7 @@ pub const FIREWALL_BOUNCER_SERVICE: &str = "crowdsec-firewall-bouncer.service";
 pub const FWCLOUD_BOUNCER_NAME: &str = "fwcloud";
 pub const BOUNCER_CONFIG_DIRECTORY: &str = "/etc/crowdsec/bouncers";
 pub const BOUNCER_CONFIG_PATH: &str = "/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml";
+pub const MANAGED_BOUNCER_NAME_PATH: &str = "/etc/crowdsec/bouncers/fwcloud-crowdsec-bouncer-name";
 const LEGACY_BOUNCER_CONFIG_OVERRIDE_PATH: &str =
     "/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local";
 const FWCLOUD_BOUNCER_CONFIGURATION_MARKER: &str = "# Managed by FWCloud";
@@ -344,9 +346,34 @@ pub async fn list() -> Result<CrowdSecBouncersResponse> {
     })
 }
 
+pub async fn set_managed_bouncer_name(name: &str) -> Result<()> {
+    validate_bouncer_name(name)?;
+    fs::create_dir_all(BOUNCER_CONFIG_DIRECTORY)
+        .await
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create CrowdSec Firewall Bouncer configuration directory",
+            )
+        })?;
+    write_managed_bouncer_name(name)
+}
+
+pub async fn managed_bouncer_name() -> Result<String> {
+    match fs::read_to_string(MANAGED_BOUNCER_NAME_PATH).await {
+        Ok(name) => managed_bouncer_name_from_contents(&name),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(FWCLOUD_BOUNCER_NAME.to_string())
+        }
+        Err(_) => Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to read the managed CrowdSec Firewall Bouncer name",
+        )),
+    }
+}
+
 pub async fn register(name: &str) -> Result<CrowdSecBouncerRegisterResponse> {
     validate_bouncer_name(name)?;
-    reject_fwcloud_bouncer(name, "The FWCloud bouncer name is reserved")?;
 
     if list()
         .await?
@@ -370,7 +397,6 @@ pub async fn register(name: &str) -> Result<CrowdSecBouncerRegisterResponse> {
 
 pub async fn replicate(name: &str, api_key: &str) -> Result<CrowdSecBouncerReplicationResponse> {
     validate_bouncer_name(name)?;
-    reject_fwcloud_bouncer(name, "The FWCloud bouncer name is reserved")?;
     if !valid_api_key(api_key) {
         return Err(FwcError::crowdsec(
             BOUNCER_INVALID,
@@ -415,19 +441,14 @@ pub async fn replicate(name: &str, api_key: &str) -> Result<CrowdSecBouncerRepli
 pub async fn remove(name: &str) -> Result<CrowdSecBouncerRemoveResponse> {
     validate_bouncer_name(name)?;
 
-    if !list()
-        .await?
-        .bouncers
+    let bouncers = list().await?.bouncers;
+    let bouncer = bouncers
         .iter()
-        .any(|bouncer| bouncer.name == name)
-    {
-        return Err(FwcError::crowdsec(
-            BOUNCER_NOT_FOUND,
-            "CrowdSec bouncer is not registered",
-        ));
-    }
-
-    reject_fwcloud_bouncer(name, "Use the FWCloud local bouncer uninstall operation")?;
+        .find(|bouncer| bouncer.name == name)
+        .ok_or_else(|| {
+            FwcError::crowdsec(BOUNCER_NOT_FOUND, "CrowdSec bouncer is not registered")
+        })?;
+    reject_local_bouncer(bouncer)?;
 
     debug!("Removing CrowdSec bouncer: {}", name);
     CrowdSecCommand::cscli(&["bouncers", "delete", name])?
@@ -453,6 +474,8 @@ fn bouncer_from_json(value: &Value) -> Option<CrowdSecBouncer> {
     Some(CrowdSecBouncer {
         name: value_as_string(value.get("name"))?,
         bouncer_type: optional_string(value.get("type")),
+        ip_address: optional_string(value.get("ip_address")),
+        os: optional_string(value.get("os")),
         revoked: value
             .get("revoked")
             .and_then(Value::as_bool)
@@ -462,7 +485,9 @@ fn bouncer_from_json(value: &Value) -> Option<CrowdSecBouncer> {
 }
 
 fn optional_string(value: Option<&Value>) -> Option<String> {
-    value_as_string(value).filter(|value| !value.is_empty())
+    value_as_string(value)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn value_as_string(value: Option<&Value>) -> Option<String> {
@@ -489,12 +514,40 @@ fn validate_bouncer_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn reject_fwcloud_bouncer(name: &str, message: &'static str) -> Result<()> {
-    if name == FWCLOUD_BOUNCER_NAME {
-        Err(FwcError::crowdsec(BOUNCER_CONFLICT, message))
-    } else {
-        Ok(())
+fn managed_bouncer_name_from_contents(contents: &str) -> Result<String> {
+    let name = contents.trim();
+    validate_bouncer_name(name)?;
+    Ok(name.to_string())
+}
+
+fn reject_local_bouncer(bouncer: &CrowdSecBouncer) -> Result<()> {
+    if bouncer_has_loopback_address(bouncer) {
+        return Err(FwcError::crowdsec(
+            BOUNCER_CONFLICT,
+            "Use the FWCloud local bouncer uninstall operation",
+        ));
     }
+
+    Ok(())
+}
+
+fn bouncer_has_loopback_address(bouncer: &CrowdSecBouncer) -> bool {
+    let Some(address) = bouncer.ip_address.as_deref() else {
+        return false;
+    };
+    let normalized = address
+        .trim()
+        .trim_matches(|character| character == '[' || character == ']')
+        .to_ascii_lowercase();
+
+    normalized
+        .parse::<IpAddr>()
+        .map(|address| address.is_loopback())
+        .unwrap_or(false)
+        || matches!(
+            normalized.as_str(),
+            "localhost" | "localhost.localdomain" | "lo" | "loopback"
+        )
 }
 
 fn bouncer_register_response(name: &str, output: &str) -> Result<CrowdSecBouncerRegisterResponse> {
@@ -2235,12 +2288,13 @@ async fn remove_bouncer_registration() -> Result<bool> {
         return Ok(false);
     }
 
-    if !bouncer_is_registered().await? {
+    let name = managed_bouncer_name().await?;
+    if !bouncer_is_registered(&name).await? {
         return Ok(false);
     }
 
     debug!("Removing FWCloud CrowdSec Firewall Bouncer registration");
-    CrowdSecCommand::cscli(&["bouncers", "delete", FWCLOUD_BOUNCER_NAME])?
+    CrowdSecCommand::cscli(&["bouncers", "delete", &name])?
         .execute()
         .await?;
     Ok(true)
@@ -2984,17 +3038,18 @@ fn bouncer_api_url_from_contents(configuration: &str) -> Result<String> {
 }
 
 async fn generate_bouncer_api_key() -> Result<String> {
-    if bouncer_is_registered().await? {
+    let name = managed_bouncer_name().await?;
+    if bouncer_is_registered(&name).await? {
         debug!(
             "Replacing FWCloud CrowdSec Firewall Bouncer registration without local configuration"
         );
-        CrowdSecCommand::cscli(&["bouncers", "delete", FWCLOUD_BOUNCER_NAME])?
+        CrowdSecCommand::cscli(&["bouncers", "delete", &name])?
             .execute()
             .await?;
     }
 
     debug!("Generating FWCloud CrowdSec Firewall Bouncer API key");
-    let output = CrowdSecCommand::cscli(&["bouncers", "add", FWCLOUD_BOUNCER_NAME, "-o", "raw"])?
+    let output = CrowdSecCommand::cscli(&["bouncers", "add", &name, "-o", "raw"])?
         .execute()
         .await?;
     let api_key = output.stdout().trim().to_string();
@@ -3009,7 +3064,7 @@ async fn generate_bouncer_api_key() -> Result<String> {
     }
 }
 
-async fn bouncer_is_registered() -> Result<bool> {
+async fn bouncer_is_registered(name: &str) -> Result<bool> {
     let output = CrowdSecCommand::cscli(&["bouncers", "list", "-o", "json"])?
         .execute()
         .await?;
@@ -3020,15 +3075,19 @@ async fn bouncer_is_registered() -> Result<bool> {
         )
     })?;
 
-    Ok(json_bouncer_is_registered(&bouncers))
+    Ok(json_bouncer_is_registered(&bouncers, name))
 }
 
-fn json_bouncer_is_registered(value: &serde_json::Value) -> bool {
+fn json_bouncer_is_registered(value: &serde_json::Value, name: &str) -> bool {
     match value {
-        serde_json::Value::Array(values) => values.iter().any(json_bouncer_is_registered),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| json_bouncer_is_registered(value, name)),
         serde_json::Value::Object(values) => {
-            values.get("name").and_then(serde_json::Value::as_str) == Some(FWCLOUD_BOUNCER_NAME)
-                || values.values().any(json_bouncer_is_registered)
+            values.get("name").and_then(serde_json::Value::as_str) == Some(name)
+                || values
+                    .values()
+                    .any(|value| json_bouncer_is_registered(value, name))
         }
         _ => false,
     }
@@ -3102,6 +3161,47 @@ fn write_bouncer_configuration(contents: &str) -> Result<()> {
     }
 }
 
+fn write_managed_bouncer_name(name: &str) -> Result<()> {
+    let temporary_path = format!("{}.tmp", MANAGED_BOUNCER_NAME_PATH);
+    let _ = std_fs::remove_file(&temporary_path);
+    let mut name_file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(&temporary_path)
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to create the managed CrowdSec Firewall Bouncer name",
+            )
+        })?;
+    std_fs::set_permissions(&temporary_path, std_fs::Permissions::from_mode(0o600)).map_err(
+        |_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to secure the managed CrowdSec Firewall Bouncer name",
+            )
+        },
+    )?;
+    name_file
+        .write_all(name.as_bytes())
+        .and_then(|_| name_file.write_all(b"\n"))
+        .and_then(|_| name_file.sync_all())
+        .map_err(|_| {
+            FwcError::crowdsec(
+                FIREWALL_INTEGRATION_INVALID,
+                "Unable to write the managed CrowdSec Firewall Bouncer name",
+            )
+        })?;
+    std_fs::rename(&temporary_path, MANAGED_BOUNCER_NAME_PATH).map_err(|_| {
+        FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to save the managed CrowdSec Firewall Bouncer name",
+        )
+    })
+}
+
 fn set_only_configuration_contents(
     configuration: &CrowdSecBouncerSetOnlyConfig,
     lapi_url: &str,
@@ -3155,8 +3255,9 @@ mod tests {
         nftables_counter_validation_arguments, nftables_set_only_configuration_contents,
         non_selected_firewall_backend, parse_ipset_address_counters,
         parse_iptables_blocking_chain_counter, parse_nftables_address_counters,
-        parse_nftables_counter, pending_backend_contents, pending_backend_from_contents,
-        pending_policy_status, reject_fwcloud_bouncer, select_active_backend,
+        managed_bouncer_name_from_contents, parse_nftables_counter, pending_backend_contents,
+        pending_backend_from_contents, pending_policy_status, reject_local_bouncer,
+        select_active_backend,
         set_only_configuration_contents, validate_api_key, validate_bouncer_name,
         BouncerConfigurationState,
         BouncerReconciliationAction, CrowdSecBouncerIntegrationState, CrowdSecBouncerSetOnlyConfig,
@@ -3166,8 +3267,8 @@ mod tests {
         BOUNCER_BACKEND_STARTUP_CONFIGURATION_REMOVAL_MESSAGE, BOUNCER_CONFIG_PATH,
         BOUNCER_NFTABLES_DROP_IN_CONTENT, BOUNCER_NFTABLES_DROP_IN_PATH,
         BOUNCER_PACKAGE_TRANSITION_DROP_IN_CONTENT, BOUNCER_PACKAGE_TRANSITION_DROP_IN_PATH,
-        BOUNCER_RECONCILIATION_SKIPPED_MESSAGE, FWCLOUD_BOUNCER_NAME,
-        IPSET_SETUP_SERVICE_CONTENT, IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
+        BOUNCER_RECONCILIATION_SKIPPED_MESSAGE, IPSET_SETUP_SERVICE_CONTENT,
+        IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
         IPTABLES_V4_INPUT_BLOCKING_CHAIN, NFTABLES_V4_INPUT_BLOCKING_COUNTER,
         NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
     };
@@ -3695,6 +3796,15 @@ mod tests {
     }
 
     #[test]
+    fn reads_validated_managed_bouncer_names() {
+        assert_eq!(
+            managed_bouncer_name_from_contents("cluster-primary\n").unwrap(),
+            "cluster-primary"
+        );
+        assert!(managed_bouncer_name_from_contents("invalid name").is_err());
+    }
+
+    #[test]
     fn validates_bouncer_api_keys() {
         assert!(validate_api_key("valid-api-key").is_ok());
 
@@ -3711,12 +3821,12 @@ mod tests {
     }
 
     #[test]
-    fn protects_the_fwcloud_bouncer_from_generic_operations() {
-        let error = reject_fwcloud_bouncer(
-            FWCLOUD_BOUNCER_NAME,
-            "Use the FWCloud local bouncer uninstall operation",
-        )
-        .unwrap_err();
+    fn protects_loopback_bouncers_from_generic_removal() {
+        let bouncers = bouncers_from_json(&serde_json::json!([
+            {"name":"local", "ip_address":"127.0.0.1"},
+            {"name":"remote", "ip_address":"192.0.2.10"}
+        ]));
+        let error = reject_local_bouncer(&bouncers[0]).unwrap_err();
         assert!(matches!(
             error,
             FwcError::CrowdSec {
@@ -3724,7 +3834,7 @@ mod tests {
                 ..
             }
         ));
-        assert!(reject_fwcloud_bouncer("nginx-prod", "unused").is_ok());
+        assert!(reject_local_bouncer(&bouncers[1]).is_ok());
     }
 
     #[test]
@@ -3753,6 +3863,8 @@ mod tests {
             bouncers: bouncers_from_json(&serde_json::json!([{
                 "name": "nginx-prod",
                 "type": "",
+                "ip_address": " 192.0.2.10 ",
+                "os": " linux ",
                 "api_key": "generated-key",
                 "revoked": false,
                 "last_pull": "2026-07-27T10:00:00Z"
@@ -3763,6 +3875,8 @@ mod tests {
         assert!(!serialized.contains("api_key"));
         assert!(!serialized.contains("generated-key"));
         assert!(response.bouncers[0].bouncer_type.is_none());
+        assert_eq!(response.bouncers[0].ip_address.as_deref(), Some("192.0.2.10"));
+        assert_eq!(response.bouncers[0].os.as_deref(), Some("linux"));
     }
 
     #[test]
