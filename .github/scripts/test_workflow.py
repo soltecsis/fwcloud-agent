@@ -36,8 +36,8 @@ class AggregateTests(unittest.TestCase):
         result = self.invoke(self.successful_results())
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_phase_one_requires_both_quality_and_test_even_after_failure(self):
-        self.assertEqual(set(self.required), {"quality", "test"})
+    def test_all_mandatory_controls_are_required_even_after_failure(self):
+        self.assertEqual(set(self.required), {"quality", "test", "security_audit", "secrets", "deb-package", "rpm-package"})
         self.assertIn("if: ${{ always() }}", self.aggregate)
         self.assertNotIn("continue-on-error", self.aggregate)
 
@@ -77,7 +77,7 @@ class PackagingGateTests(unittest.TestCase):
     def test_packages_preserve_audit_and_coverage_gates(self):
         for job in ("deb-package", "rpm-package"):
             with self.subTest(job=job):
-                self.assertEqual(self.needs(job), {"agent-ci", "security_audit"})
+                self.assertEqual(self.needs(job), {"quality", "test", "security_audit", "secrets"})
                 self.assertNotIn("if:", self.jobs[job].split("steps:", 1)[0])
 
     def test_dependency_graph_does_not_reference_removed_jobs(self):
@@ -88,6 +88,23 @@ class PackagingGateTests(unittest.TestCase):
             if "needs:" in section:
                 with self.subTest(job=job):
                     self.assertLessEqual(self.needs(job), self.jobs.keys())
+
+    def test_dependency_graph_is_acyclic(self):
+        def visit(job, active):
+            self.assertNotIn(job, active)
+            for dependency in self.needs(job) if 'needs:' in self.jobs[job] else []:
+                visit(dependency, active | {job})
+        for job in self.jobs:
+            visit(job, set())
+
+    def test_packages_are_scanned_before_approved_artifacts_are_uploaded(self):
+        for kind in ['deb', 'rpm']:
+            section = self.jobs[kind + '-package']
+            self.assertLess(section.index('uses: ./.github/actions/scan-secrets'),
+                            section.index('name: Upload ' + kind.upper() + ' package'))
+            self.assertIn('kind: ' + kind, section)
+            self.assertIn('report-directory: reports/secrets-' + kind, section)
+            self.assertNotIn('continue-on-error', section)
 
     def test_publication_remains_restricted_to_main_pushes_after_packages(self):
         publishers = ("deb-to-fwcloud", "rpm-to-fwcloud",
@@ -148,6 +165,38 @@ class ReportingWorkflowTests(unittest.TestCase):
         for action in re.findall(r"uses: ([^\s]+)", workflow):
             if not action.startswith("./"):
                 self.assertRegex(action, r"@[0-9a-f]{40}$")
+
+
+class SecretsWorkflowTests(unittest.TestCase):
+    def test_history_job_uses_exact_head_full_history_and_no_credentials(self):
+        section = WORKFLOW.read_text().split('\n  secrets:\n', 1)[1].split('\n  agent-ci:\n', 1)[0]
+        self.assertIn('name: FWCloud-Agent Secrets', section)
+        self.assertIn('timeout-minutes: 15', section)
+        self.assertIn('ref: ${{ env.ANALYSIS_COMMIT }}', section)
+        self.assertIn('fetch-depth: 0', section)
+        self.assertIn('persist-credentials: false', section)
+        self.assertIn('kind: history', section)
+        self.assertIn('agent-secrets-${{ github.run_id }}-${{ github.run_attempt }}', section)
+        self.assertNotIn('secrets.', section)
+
+    def test_private_reports_are_removed_before_metadata_only_publication(self):
+        action = (WORKFLOW.parents[1] / 'actions/scan-secrets/action.yml').read_text()
+        self.assertNotIn('continue-on-error', action)
+        self.assertIn('always() && steps.cleanup.outcome', action)
+        self.assertIn("steps.secret_report.outputs.metadata_ready == 'true'", action)
+        self.assertLess(action.index('name: Remove detailed secret evidence'),
+                        action.index('name: Publish sanitized secret evidence'))
+        self.assertIn('path: ${{ inputs.report-directory }}/metadata.json', action)
+        self.assertIn('if-no-files-found: error', action)
+        self.assertIn('retention-days: 90', action)
+        self.assertIn('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02', action)
+        self.assertIn("if: ${{ inputs.kind == 'history' }}", action)
+        self.assertIn("RUN_SECRET_INTEGRATION: '1'", action)
+
+    def test_both_report_helper_and_ci_unit_tests_are_in_quality(self):
+        quality = WORKFLOW.read_text().split('\n  quality:\n', 1)[1].split('\n  security_audit:\n', 1)[0]
+        self.assertIn('node --test scripts/gitleaks-report.test.cjs', quality)
+        self.assertIn("python3 -m unittest discover -s .github/scripts -p 'test_*.py'", quality)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ conflicts = "firewalld"
 section = "utility"
 priority = "optional"
 assets = [
+    ["packaging/configure-api-key.sh", "opt/fwcloud/agent/configure-api-key.sh", "700"],
     ["target/release/fwcloud-agent", "opt/fwcloud/agent/", "700"],
     [".env.example", "opt/fwcloud/agent/.env", "600"],
     ["plugins/lib.sh", "opt/fwcloud/agent/plugins/lib.sh", "700"],
@@ -76,7 +77,8 @@ buildflags = ["--release"]
 fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", username = "root" }
 
 [package.metadata.rpm.files]
-"../.env.example" = { path = "/opt/fwcloud/agent/.env", mode = "700", username = "root" }
+"../packaging/configure-api-key.sh" = { path = "/opt/fwcloud/agent/configure-api-key.sh", mode = "700", username = "root" }
+"../.env.example" = { path = "/opt/fwcloud/agent/.env", mode = "600", username = "root" }
 "../plugins/lib.sh" = { path = "/opt/fwcloud/agent/plugins/lib.sh", mode = "700", username = "root" }
 "../plugins/geoip/geoip.sh" = { path = "/opt/fwcloud/agent/plugins/geoip/geoip.sh", mode = "700", username = "root" }
 "../plugins/openvpn/openvpn.sh" = { path = "/opt/fwcloud/agent/plugins/openvpn/openvpn.sh", mode = "700", username = "root" }

@@ -1,0 +1,67 @@
+name: Scan secrets with verified Gitleaks
+description: Fail closed and retain only aggregate secret-scanning evidence.
+inputs:
+  kind:
+    description: history, deb or rpm
+    required: true
+  report-directory:
+    description: Dedicated evidence directory
+    required: true
+  artifact-name:
+    description: Evidence name for this execution
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Discard stale secret evidence
+      shell: bash
+      run: python3 .github/scripts/gitleaks-ci.py prepare "$SCAN_KIND"
+      env:
+        SCAN_KIND: ${{ inputs.kind }}
+    - name: Install and verify official Gitleaks
+      shell: bash
+      run: python3 .github/scripts/gitleaks-ci.py install
+    - name: Verify actual-scanner regression fixtures
+      if: ${{ inputs.kind == 'history' }}
+      shell: bash
+      run: python3 -m unittest discover -s .github/scripts -p test_gitleaks_ci.py -v
+      env:
+        RUN_SECRET_INTEGRATION: '1'
+    - name: Scan selected history or extracted package
+      id: secret_scan
+      shell: bash
+      run: python3 .github/scripts/gitleaks-ci.py scan "$SCAN_KIND"
+      env:
+        SCAN_KIND: ${{ inputs.kind }}
+    - name: Validate and sanitize secret evidence
+      id: secret_report
+      if: ${{ always() }}
+      shell: bash
+      run: node scripts/gitleaks-report.cjs
+      env:
+        GITLEAKS_VERSION: '8.30.1'
+        GITLEAKS_SCOPE: ${{ steps.secret_scan.outputs.scope }}
+        GITLEAKS_LOG_OPTS: ${{ steps.secret_scan.outputs.log_opts }}
+        GITLEAKS_COMMIT_COUNT: ${{ steps.secret_scan.outputs.commit_count }}
+        GITLEAKS_EXIT_CODE: ${{ steps.secret_scan.outputs.exit_code }}
+        GITLEAKS_LOG_BYTES: ${{ steps.secret_scan.outputs.log_bytes }}
+        GITLEAKS_PRE_SCAN_ERROR: ${{ steps.secret_scan.outputs.pre_scan_error }}
+        GITLEAKS_PACKAGE_TYPE: ${{ steps.secret_scan.outputs.package_type }}
+        GITLEAKS_PACKAGE_SHA256: ${{ steps.secret_scan.outputs.package_sha256 }}
+        GITLEAKS_REPORT_PATH: ${{ inputs.report-directory }}/gitleaks.json
+        GITLEAKS_METADATA_PATH: ${{ inputs.report-directory }}/metadata.json
+    - name: Remove detailed secret evidence
+      id: cleanup
+      if: ${{ always() }}
+      shell: bash
+      run: python3 .github/scripts/gitleaks-ci.py cleanup "$SCAN_KIND"
+      env:
+        SCAN_KIND: ${{ inputs.kind }}
+    - name: Publish sanitized secret evidence
+      if: ${{ always() && steps.cleanup.outcome == 'success' && steps.secret_report.outputs.metadata_ready == 'true' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.report-directory }}/metadata.json
+        retention-days: 90
+        if-no-files-found: error

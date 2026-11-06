@@ -1,6 +1,8 @@
 %define __spec_install_post %{nil}
 %define __os_install_post %{_dbpath}/brp-compress
 %define debug_package %{nil}
+# Do not generate optional debug symlinks rejected by strict package extraction.
+%define _build_id_links none
 
 Name: fwcloud-agent
 Summary: FWCloud Agent for firewalls management
@@ -31,6 +33,7 @@ mkdir %{buildroot}/opt/fwcloud/agent/data
 mkdir %{buildroot}/opt/fwcloud/agent/tmp
 mkdir %{buildroot}/opt/fwcloud/agent/log
 chmod -R 700 %{buildroot}/opt/fwcloud/agent
+chmod 600 %{buildroot}/opt/fwcloud/agent/.env
 
 %clean
 rm -rf %{buildroot}
@@ -38,6 +41,7 @@ rm -rf %{buildroot}
 %files
 /opt/fwcloud/agent/fwcloud-agent
 /opt/fwcloud/agent/.env
+/opt/fwcloud/agent/configure-api-key.sh
 /opt/fwcloud/agent/etc/
 /opt/fwcloud/agent/data/
 /opt/fwcloud/agent/tmp/
@@ -76,10 +80,15 @@ rm -rf %{buildroot}
 ROOT_DIR="/opt/fwcloud/agent"
 if [ $1 -gt 1 ]; then
   # Preserve the .env configuration file.
-  mv -f "${ROOT_DIR}/.env" "${ROOT_DIR}/.env.upgrade"
+  if [ -f "${ROOT_DIR}/.env" ] && [ ! -e "${ROOT_DIR}/.env.upgrade" ]; then
+    mv -f "${ROOT_DIR}/.env" "${ROOT_DIR}/.env.upgrade"
+  fi
 fi
 
 %post
+set -e
+# Stop an old process before attempting credential remediation.
+systemctl stop fwcloud-agent
 ROOT_DIR="/opt/fwcloud/agent"
 # Generate self-signed certificate.
 if [ ! -f "${ROOT_DIR}/etc/key.pem" -o ! -f "${ROOT_DIR}/etc/cert.pem" ]; then
@@ -88,13 +97,8 @@ if [ ! -f "${ROOT_DIR}/etc/key.pem" -o ! -f "${ROOT_DIR}/etc/cert.pem" ]; then
   chmod 600 key.pem cert.pem
 fi
 
-# Generate API KEY
-if [ -f "${ROOT_DIR}/.env.upgrade" ]; then
-  mv -f "${ROOT_DIR}/.env.upgrade" "${ROOT_DIR}/.env"
-else
-  KEY=`openssl rand -base64 48|sed 's/[[:punct:]]/x/g'`
-  sed -i -E "s|API_KEY=\"([a-zA-Z0-9[:punct:]]){64}\"|API_KEY=\"$KEY\"|" "${ROOT_DIR}/.env"
-fi
+# Restore configuration and repair unsafe API credentials before starting.
+/bin/sh "${ROOT_DIR}/configure-api-key.sh" "$ROOT_DIR"
 
 # Enable and start FWCloud-Agent daemon.
 systemctl enable fwcloud-agent
