@@ -33,8 +33,8 @@ use validator::Validate;
 
 use crate::config::Config;
 use crate::errors::{FwcError, Result};
-use crate::utils::cmd::{run_cmd, run_cmd_ws};
 
+use super::files_list::{validate_directory, validate_filename};
 use super::ws::WsData;
 
 struct FileData {
@@ -46,8 +46,8 @@ struct FileData {
 }
 
 #[derive(Validate)]
-pub struct HttpFiles {
-    tmp_dir: &'static str,
+pub struct HttpFiles<'a> {
+    tmp_dir: &'a str,
     dst_dir: String,
     create_dst_dir: bool,
     files: Vec<FileData>,
@@ -65,8 +65,8 @@ pub struct HttpFiles {
     ws_id_buf: String,
 }
 
-impl HttpFiles {
-    pub fn new(tmp_dir: &'static str, create_dst_dir: bool) -> Self {
+impl<'a> HttpFiles<'a> {
+    pub fn new(tmp_dir: &'a str, create_dst_dir: bool) -> Self {
         HttpFiles {
             tmp_dir,
             dst_dir: String::from(""),
@@ -119,14 +119,16 @@ impl HttpFiles {
                     .clone();
                 debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
             }
-            res = run_cmd_ws(
+            res = cfg.command_executor.run_ws(
                 "sh",
                 &[&self.files[0].dst_path[..], "install"],
                 &ws_data,
                 false,
             )?;
         } else {
-            res = run_cmd("sh", &[&self.files[0].dst_path[..], "install"])?;
+            res = cfg
+                .command_executor
+                .run("sh", &[&self.files[0].dst_path[..], "install"])?;
         }
 
         // Load policy.
@@ -143,7 +145,9 @@ impl HttpFiles {
                             .clone();
                         debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
                     }
-                    res = run_cmd_ws("sh", &[&file[..], "start"], &ws_data, true)?;
+                    res =
+                        cfg.command_executor
+                            .run_ws("sh", &[&file[..], "start"], &ws_data, true)?;
                     {
                         debug!("Locking ws map mutex (thread id: {})", thread_id::get());
                         let mut ws_map = cfg.ws_map.lock().unwrap();
@@ -151,7 +155,7 @@ impl HttpFiles {
                         debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
                     }
                 } else {
-                    res = run_cmd("sh", &[&file[..], "start"])?;
+                    res = cfg.command_executor.run("sh", &[&file[..], "start"])?;
                 }
                 break;
             }
@@ -162,21 +166,26 @@ impl HttpFiles {
 
     async fn extract_multipart_data(&mut self, mut payload: Multipart) -> Result<()> {
         // iterate over multipart stream
-        while let Ok(Some(mut field)) = payload.try_next().await {
-            let content_type = field.content_disposition();
-
-            let filename = sanitize_filename::sanitize(
-                content_type.expect("filename").get_filename().unwrap_or(""),
-            );
-            if filename.is_empty() {
-                let name = content_type
-                    .expect("filename")
-                    .get_name()
-                    .unwrap_or("")
-                    .to_string();
+        while let Some(mut field) = payload
+            .try_next()
+            .await
+            .map_err(|e| FwcError::BadRequest(e.to_string()))?
+        {
+            let disposition = field
+                .content_disposition()
+                .ok_or_else(|| FwcError::BadRequest("Missing file metadata".into()))?;
+            let filename = if let Some(filename) = disposition.get_filename() {
+                validate_filename(filename)?;
+                if sanitize_filename::sanitize(filename) != filename {
+                    return Err(FwcError::BadRequest("Invalid file name".into()));
+                }
+                filename.to_owned()
+            } else {
+                let name = disposition.get_name().unwrap_or("").to_owned();
                 self.extract_field_data(field, name).await?;
                 continue;
-            }
+            };
+            validate_directory(&format!("{}/{}", self.dst_dir, filename))?;
 
             // Parameter for destination dir (dst_dir) must go before any file contents in the
             // multipart stream.
@@ -194,7 +203,7 @@ impl HttpFiles {
             }
 
             let random_file_name = Uuid::new_v4();
-            let mut file_data = FileData {
+            let file_data = FileData {
                 src_path: format!("{}/{}.tmp", self.tmp_dir, random_file_name),
                 src_name: format!("{random_file_name}.tmp"),
                 dst_path: format!("{}/{}", self.dst_dir, filename),
@@ -202,15 +211,16 @@ impl HttpFiles {
                 size: 0,
             };
 
+            // Track the staging file before opening it so every error path cleans it up.
+            self.files.push(file_data);
+            let file_data = self.files.last_mut().unwrap();
             // File::create is blocking operation, use threadpool
             let file_path = file_data.src_path.clone();
-            let mut f = web::block(|| std::fs::File::create(file_path))
-                .await?
-                .unwrap();
+            let mut f = web::block(|| std::fs::File::create(file_path)).await??;
 
             // Field in turn is stream of *Bytes* object
             while let Some(chunk) = field.next().await {
-                let data = chunk.unwrap();
+                let data = chunk.map_err(|e| FwcError::BadRequest(e.to_string()))?;
 
                 // File size control.
                 file_data.size += data.len();
@@ -219,12 +229,8 @@ impl HttpFiles {
                 }
 
                 // filesystem operations are blocking, we have to use threadpool
-                f = web::block(move || f.write_all(&data).map(|_| f))
-                    .await?
-                    .unwrap();
+                f = web::block(move || f.write_all(&data).map(|_| f)).await??;
             }
-
-            self.files.push(file_data);
         }
 
         Ok(())
@@ -245,24 +251,14 @@ impl HttpFiles {
 
         // Field in turn is stream of *Bytes* object
         while let Some(chunk) = field.next().await {
-            let data = chunk.unwrap();
+            let data = chunk.map_err(|e| FwcError::BadRequest(e.to_string()))?;
             for byte in data {
                 buf.push(byte as char);
             }
         }
 
-        // Verify that destination directory exists.
-        // The parameter dst_dir must go before any file into the multipart stream.
-        // If the destination directory doesn't exists we will response with error before processing the files
-        // data.
-        if name == "dst_dir" && !Path::new(&self.dst_dir).is_dir() {
-            // If destination directory doesn't exists.
-            if self.create_dst_dir {
-                // Create the destination directory if it doesn't exists.
-                fs::create_dir_all(&self.dst_dir)?;
-            } else {
-                return Err(FwcError::DirNotFound);
-            }
+        if name == "dst_dir" {
+            validate_directory(&self.dst_dir)?;
         }
 
         // If we receive a WebSocket id verify that it is a valid one.
@@ -277,6 +273,13 @@ impl HttpFiles {
     }
 
     fn move_tmp_files(&mut self) -> Result<()> {
+        if !Path::new(&self.dst_dir).is_dir() {
+            if self.create_dst_dir {
+                fs::create_dir_all(&self.dst_dir)?;
+            } else {
+                return Err(FwcError::DirNotFound);
+            }
+        }
         for file_data in self.files.iter() {
             fs::copy(&file_data.src_path, &file_data.dst_path)?;
             fs::remove_file(&file_data.src_path)?;
@@ -295,9 +298,17 @@ impl HttpFiles {
 
         // Destination directory parameter is mandatory.
         if self.dst_dir.is_empty() {
-            return Err(FwcError::Internal(
-                "Destination directory parameter not found in multipart/form-data stream",
+            return Err(FwcError::BadRequest(
+                "Destination directory parameter not found in multipart/form-data stream".into(),
             ));
+        }
+
+        validate_directory(&self.dst_dir)?;
+        if Path::new(&self.dst_dir).exists() && !Path::new(&self.dst_dir).is_dir() {
+            return Err(FwcError::BadRequest("Invalid destination directory".into()));
+        }
+        for file in &self.files {
+            validate_directory(&file.dst_path)?;
         }
 
         if self.files.is_empty() {
@@ -323,7 +334,7 @@ impl HttpFiles {
 }
 
 // Make sure that temporary files are removed after the HttpFiles object instance goes out of scope.
-impl Drop for HttpFiles {
+impl Drop for HttpFiles<'_> {
     fn drop(&mut self) {
         for file_data in self.files.iter() {
             let src = format!("{}/{}", self.tmp_dir, file_data.src_name);

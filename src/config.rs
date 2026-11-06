@@ -45,10 +45,10 @@ pub struct MyMutex {
 
 #[derive(Validate)]
 pub struct Config {
-    pub etc_dir: &'static str,
-    pub tmp_dir: &'static str,
-    pub data_dir: &'static str,
-    pub plugins_dir: &'static str,
+    pub etc_dir: String,
+    pub tmp_dir: String,
+    pub data_dir: String,
+    pub plugins_dir: String,
 
     pub enable_env_logger: bool,
     pub startup_warnings: Vec<String>,
@@ -84,6 +84,8 @@ pub struct Config {
     fwcloud_script_paths_list: String,
     pub fwcloud_script_paths: Vec<String>,
 
+    pub command_executor: Arc<dyn crate::CommandExecutor>,
+
     pub mutex: MyMutex,
 
     pub ws_map: Arc<Mutex<HashMap<Uuid, Arc<Mutex<WsData>>>>>,
@@ -101,37 +103,72 @@ impl Config {
             }
         }
 
+        Self::initialize(
+            "./etc".into(),
+            "./tmp".into(),
+            "./data".into(),
+            "./plugins".into(),
+            true,
+            startup_warnings,
+        )
+    }
+
+    /// Construct an application with explicit paths, without loading or changing the environment.
+    pub fn with_runtime_dirs(
+        etc_dir: String,
+        tmp_dir: String,
+        data_dir: String,
+        plugins_dir: String,
+    ) -> Result<Self> {
+        Self::initialize(etc_dir, tmp_dir, data_dir, plugins_dir, false, vec![])
+    }
+
+    fn initialize(
+        etc_dir: String,
+        tmp_dir: String,
+        data_dir: String,
+        plugins_dir: String,
+        from_environment: bool,
+        startup_warnings: Vec<String>,
+    ) -> Result<Self> {
+        let env_var = |key| {
+            if from_environment {
+                env::var(key)
+            } else {
+                Err(env::VarError::NotPresent)
+            }
+        };
         let mut cfg = Config {
-            etc_dir: "./etc",
-            tmp_dir: "./tmp",
-            data_dir: "./data",
-            plugins_dir: "./plugins",
+            etc_dir,
+            tmp_dir,
+            data_dir,
+            plugins_dir,
 
             enable_env_logger: true,
             startup_warnings,
 
-            bind_ip: env::var("BIND_IP").unwrap_or_else(|_| String::from("0.0.0.0")),
-            bind_port: env::var("BIND_PORT")
+            bind_ip: env_var("BIND_IP").unwrap_or_else(|_| String::from("0.0.0.0")),
+            bind_port: env_var("BIND_PORT")
                 .unwrap_or_else(|_| String::from("33033"))
                 .parse::<u16>()
                 .unwrap_or(33033),
-            workers: env::var("WORKERS")
+            workers: env_var("WORKERS")
                 .unwrap_or_else(|_| String::from("5"))
                 .parse::<usize>()
                 .unwrap_or(5),
-            enable_tls: env::var("ENABLE_SSL")
+            enable_tls: env_var("ENABLE_SSL")
                 .unwrap_or_else(|_| String::from("true"))
                 .parse::<bool>()
                 .unwrap_or(true),
 
-            allowed_ips_list: env::var("ALLOWED_IPS").unwrap_or_else(|_| String::from("")),
+            allowed_ips_list: env_var("ALLOWED_IPS").unwrap_or_else(|_| String::from("")),
             allowed_ips: vec![],
 
-            enable_api_key: env::var("ENABLE_API_KEY")
+            enable_api_key: env_var("ENABLE_API_KEY")
                 .unwrap_or_else(|_| String::from("true"))
                 .parse::<bool>()
                 .unwrap_or(true),
-            api_key: env::var("API_KEY").unwrap_or_else(|_| {
+            api_key: env_var("API_KEY").unwrap_or_else(|_| {
                 rand::rng()
                     .sample_iter(Alphanumeric)
                     .take(64)
@@ -139,10 +176,12 @@ impl Config {
                     .collect()
             }),
 
-            fwcloud_script_paths_list: env::var("FWCLOUD_SCRIPT_PATHS").unwrap_or_else(|_| {
+            fwcloud_script_paths_list: env_var("FWCLOUD_SCRIPT_PATHS").unwrap_or_else(|_| {
                 String::from("/etc/fwcloud/fwcloud.sh,/config/scripts/post-config.d/fwcloud.sh")
             }),
             fwcloud_script_paths: vec![],
+
+            command_executor: Arc::new(crate::SystemCommands),
 
             mutex: MyMutex {
                 openvpn: Arc::new(tokio::sync::Mutex::new(0)),
@@ -178,9 +217,9 @@ impl Config {
         }
 
         // Create config and temporary directories if don't exist.
-        fs::create_dir_all(cfg.etc_dir)?;
-        fs::create_dir_all(cfg.tmp_dir)?;
-        fs::create_dir_all(cfg.data_dir)?;
+        fs::create_dir_all(&cfg.etc_dir)?;
+        fs::create_dir_all(&cfg.tmp_dir)?;
+        fs::create_dir_all(&cfg.data_dir)?;
 
         Ok(cfg)
     }

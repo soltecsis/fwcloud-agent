@@ -19,7 +19,7 @@
     You should have received a copy of the GNU General Public License
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
-use crate::utils::cmd::run_cmd;
+
 use actix_web::{post, web, HttpResponse};
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -47,10 +47,13 @@ pub struct Systemctl {
     https://localhost:33033/api/v1/systemctl
 */
 #[post("/systemctl")]
-async fn systemctl(systemctl: web::Json<Systemctl>) -> Result<HttpResponse> {
+async fn systemctl(
+    systemctl: web::Json<Systemctl>,
+    cfg: web::Data<std::sync::Arc<crate::config::Config>>,
+) -> Result<HttpResponse> {
     systemctl.validate()?; // Validate input.
 
-    run_cmd(
+    cfg.command_executor.run(
         "systemctl",
         &[systemctl.command.as_ref(), systemctl.service.as_ref()],
     )

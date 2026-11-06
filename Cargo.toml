@@ -135,4 +135,7 @@ sysinfo = "0.39.6"
 
 [dev-dependencies]
 serial_test = "4.0.1"
-reqwest = "0.13.4"
+reqwest = { version = "0.13.4", features = ["multipart"] }
+actix-codec = "0.5.2"
+actix-http = "3.13.3"
+tempfile = "3.27.0"

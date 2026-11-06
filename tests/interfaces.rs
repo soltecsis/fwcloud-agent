@@ -24,9 +24,10 @@ mod common;
 
 #[tokio::test]
 async fn interfaces_api_call_exists() {
-    let url = format!("{}/api/v1/interfaces/info", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/interfaces/info", app);
 
-    let res = reqwest::Client::new().get(url).send().await.unwrap();
+    let res = app.client().get(url).send().await.unwrap();
 
     assert_ne!(res.status().as_u16(), 400);
     assert_ne!(res.status().as_u16(), 404);

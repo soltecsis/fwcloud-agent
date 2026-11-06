@@ -41,7 +41,7 @@ async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Resu
         let _mutex_data = mutex.lock().await;
         debug!("Script mutex locked (thread id: {})", thread_id::get());
 
-        res = HttpFiles::new(cfg.tmp_dir, false)
+        res = HttpFiles::new(&cfg.tmp_dir, false)
             .fwcloud_script(payload, &cfg)
             .await?;
 

@@ -21,10 +21,10 @@
 */
 
 use crate::errors::Result;
-use crate::utils::cmd::run_cmd;
-use actix_web::{get, HttpResponse};
+
+use actix_web::{get, web, HttpResponse};
 
 #[get("/interfaces/info")]
-async fn info() -> Result<HttpResponse> {
-    run_cmd("ip", &["a"])
+async fn info(cfg: web::Data<std::sync::Arc<crate::config::Config>>) -> Result<HttpResponse> {
+    cfg.command_executor.run("ip", &["a"])
 }

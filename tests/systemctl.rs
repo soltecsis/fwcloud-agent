@@ -33,9 +33,10 @@ use validator::Validate;
 // `cargo expand --test health_check` (<- name of the test file)
 #[tokio::test]
 async fn systemctl_without_header_neither_data() {
-    let url = format!("{}/api/v1/systemctl", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/systemctl", app);
 
-    let res = reqwest::Client::new().post(url).send().await.unwrap();
+    let res = app.client().post(url).send().await.unwrap();
 
     assert_eq!(res.status().as_u16(), 400);
     let body = res.text().await.unwrap();
@@ -44,9 +45,11 @@ async fn systemctl_without_header_neither_data() {
 
 #[tokio::test]
 async fn systemctl_without_data() {
-    let url = format!("{}/api/v1/systemctl", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/systemctl", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .post(url)
         .header(CONTENT_TYPE, "application/json")
         .send()
@@ -63,7 +66,8 @@ async fn systemctl_without_data() {
 
 #[tokio::test]
 async fn systemctl_with_invalid_data() {
-    let url = format!("{}/api/v1/systemctl", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/systemctl", app);
     let test_cases = vec![
         (
             Systemctl {
@@ -82,7 +86,8 @@ async fn systemctl_with_invalid_data() {
     ];
 
     for (invalid_data, error_message) in test_cases {
-        let res = reqwest::Client::new()
+        let res = app
+            .client()
             .post(&url)
             .header(CONTENT_TYPE, "application/json")
             .body(serde_json::to_string(&invalid_data).unwrap())
@@ -115,4 +120,38 @@ fn systemctl_openvpn_service_validation() {
     };
 
     assert!(invalid_data.validate().is_err());
+}
+
+#[tokio::test]
+async fn valid_commands_are_recorded_and_authorization_prevents_execution() {
+    for (allowed, key, expected) in [
+        (true, Some(common::API_KEY), 200),
+        (true, None, 403),
+        (true, Some("invalid"), 403),
+        (false, Some(common::API_KEY), 403),
+    ] {
+        let app = common::spawn_app(Some(common::protected_options(allowed)));
+        let mut request = app
+            .client()
+            .post(format!("{app}/api/v1/systemctl"))
+            .header("Content-Type", "application/json")
+            .body(r#"{"command":"restart","service":"openvpn-server@test"}"#);
+        if let Some(key) = key {
+            request = request.header("X-API-Key", key);
+        }
+        let response = request.send().await.unwrap();
+        assert_eq!(response.status().as_u16(), expected);
+        let calls = app.commands.calls.lock().unwrap();
+        if expected == 200 {
+            assert_eq!(
+                *calls,
+                vec![(
+                    "systemctl".into(),
+                    vec!["restart".into(), "openvpn-server@test".into()]
+                )]
+            );
+        } else {
+            assert!(calls.is_empty());
+        }
+    }
 }

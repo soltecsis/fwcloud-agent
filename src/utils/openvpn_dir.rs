@@ -27,7 +27,7 @@ use std::os::unix::fs::PermissionsExt;
 use validator::Validate;
 
 use crate::errors::{FwcError, Result};
-use crate::utils::cmd::run_cmd;
+use crate::CommandExecutor;
 
 #[derive(Deserialize, Validate)]
 pub struct OpenVPNDir {
@@ -63,13 +63,13 @@ pub struct OpenVPNDirConfig {
 }
 
 impl OpenVPNDirConfig {
-    pub fn create(&self) -> Result<()> {
+    pub fn create_with_executor(&self, commands: &dyn CommandExecutor) -> Result<()> {
         self.validate()?;
 
         fs::create_dir_all(&self.dir)?;
 
         let owner_group = format!("{}:{}", self.owner, self.group);
-        run_cmd("chown", &[&owner_group, &self.dir])?;
+        commands.run("chown", &[&owner_group, &self.dir])?;
 
         let mode = u32::from_str_radix(&self.mode, 8)
             .map_err(|_| FwcError::Internal("Invalid directory permissions"))?;

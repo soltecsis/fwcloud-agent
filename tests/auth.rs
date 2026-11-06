@@ -30,9 +30,10 @@ async fn auth_error_no_api_key() {
         allowed_ips: vec![],
     };
 
-    let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
+    let app = common::spawn_app(Some(cfg_opt));
+    let url = format!("{}/api/v1/ping", app);
 
-    let res = reqwest::Client::new().put(url).send().await.unwrap();
+    let res = app.client().put(url).send().await.unwrap();
 
     assert_eq!(res.status().as_u16(), 403);
     let body = res.text().await.unwrap();
@@ -47,9 +48,11 @@ async fn auth_invalid_api_key() {
         allowed_ips: vec![],
     };
 
-    let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
+    let app = common::spawn_app(Some(cfg_opt));
+    let url = format!("{}/api/v1/ping", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header("X-API-Key", "1234567812345678")
         .send()
@@ -71,9 +74,11 @@ async fn auth_valid_api_key() {
         allowed_ips: vec![],
     };
 
-    let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
+    let app = common::spawn_app(Some(cfg_opt));
+    let url = format!("{}/api/v1/ping", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header("X-API-Key", api_key)
         .send()
@@ -94,9 +99,11 @@ async fn auth_myip_in_allowed_ips() {
         allowed_ips: vec!["127.0.0.1".to_string()],
     };
 
-    let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
+    let app = common::spawn_app(Some(cfg_opt));
+    let url = format!("{}/api/v1/ping", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header("X-API-Key", api_key)
         .send()
@@ -117,9 +124,11 @@ async fn auth_myip_not_in_allowed_ips() {
         allowed_ips: vec!["10.20.30.40".to_string()],
     };
 
-    let url = format!("{}/api/v1/ping", common::spawn_app(Some(cfg_opt)));
+    let app = common::spawn_app(Some(cfg_opt));
+    let url = format!("{}/api/v1/ping", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header("X-API-Key", api_key)
         .send()

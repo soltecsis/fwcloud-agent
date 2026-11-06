@@ -22,11 +22,7 @@
 
 //use std::fmt::{self, Debug};
 
-use actix_web::{
-    body::BoxBody,
-    http::{header, StatusCode},
-    HttpResponse, ResponseError,
-};
+use actix_web::{http::StatusCode, HttpResponse, ResponseError};
 use log::error;
 use thiserror::Error;
 
@@ -110,7 +106,10 @@ pub enum FwcError {
 impl ResponseError for FwcError {
     fn status_code(&self) -> StatusCode {
         match self {
-            FwcError::NotAllowedParameter
+            FwcError::WebSocketIdBad
+            | FwcError::DirNotFound
+            | FwcError::OnlyOneFileExpected
+            | FwcError::NotAllowedParameter
             | FwcError::BadRequest(_)
             | FwcError::AtLeastOneFile
             | FwcError::Validation(_)
@@ -123,18 +122,14 @@ impl ResponseError for FwcError {
             FwcError::ApiKeyNotValid | FwcError::ApiKeyNotFound | &FwcError::NotAllowedIP => {
                 StatusCode::FORBIDDEN
             }
+            FwcError::WebSocketIdNotFound => StatusCode::NOT_FOUND,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
     fn error_response(&self) -> HttpResponse {
-        let mut resp = HttpResponse::new(self.status_code());
-        resp.headers_mut().insert(
-            header::CONTENT_TYPE,
-            header::HeaderValue::from_static("application/json"),
-        );
-
         error!("{}", self);
-        resp.set_body(BoxBody::new(format!("{{\"message\":\"{self}\"}}")))
+        HttpResponse::build(self.status_code())
+            .json(serde_json::json!({"message": self.to_string()}))
     }
 }

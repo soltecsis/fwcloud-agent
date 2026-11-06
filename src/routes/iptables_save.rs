@@ -21,10 +21,10 @@
 */
 
 use crate::errors::Result;
-use crate::utils::cmd::run_cmd;
-use actix_web::{get, HttpResponse};
+
+use actix_web::{get, web, HttpResponse};
 
 #[get("/iptables-save/data")]
-async fn data() -> Result<HttpResponse> {
-    run_cmd("iptables-save", &[])
+async fn data(cfg: web::Data<std::sync::Arc<crate::config::Config>>) -> Result<HttpResponse> {
+    cfg.command_executor.run("iptables-save", &[])
 }

@@ -1,7 +1,7 @@
 [profile.ci]
 fail-fast = false
-# Existing tests share ./etc state. serial_test locks do not cross Nextest processes.
-test-threads = 1
+# Application fixtures and collector configuration use separate runtime directories.
+test-threads = 4
 retries = 0
 status-level = "fail"
 final-status-level = "fail"

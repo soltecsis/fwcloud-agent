@@ -26,9 +26,10 @@ use reqwest::header::CONTENT_TYPE;
 
 #[tokio::test]
 async fn openvpn_files_remove_without_header_neither_data() {
-    let url = format!("{}/api/v1/openvpn/files/remove", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/files/remove", app);
 
-    let res = reqwest::Client::new().delete(url).send().await.unwrap();
+    let res = app.client().delete(url).send().await.unwrap();
 
     assert_eq!(res.status().as_u16(), 400);
     let body = res.text().await.unwrap();
@@ -37,9 +38,11 @@ async fn openvpn_files_remove_without_header_neither_data() {
 
 #[tokio::test]
 async fn openvpn_files_remove_without_data() {
-    let url = format!("{}/api/v1/openvpn/files/remove", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/files/remove", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .delete(url)
         .header(CONTENT_TYPE, "application/json")
         .send()
@@ -52,4 +55,14 @@ async fn openvpn_files_remove_without_data() {
         body,
         "Json deserialize error: EOF while parsing a value at line 1 column 0"
     );
+}
+
+#[tokio::test]
+async fn remove_success() {
+    common::files::remove_success("openvpn/files/remove").await;
+}
+
+#[tokio::test]
+async fn remove_validation() {
+    common::files::remove_validation("openvpn/files/remove").await;
 }
