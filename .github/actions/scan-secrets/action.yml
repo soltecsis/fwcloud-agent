@@ -45,6 +45,7 @@ runs:
         GITLEAKS_COMMIT_COUNT: ${{ steps.secret_scan.outputs.commit_count }}
         GITLEAKS_EXIT_CODE: ${{ steps.secret_scan.outputs.exit_code }}
         GITLEAKS_LOG_BYTES: ${{ steps.secret_scan.outputs.log_bytes }}
+        GITLEAKS_PRE_SCAN_ERROR: ${{ steps.secret_scan.outputs.pre_scan_error }}
         GITLEAKS_PACKAGE_TYPE: ${{ steps.secret_scan.outputs.package_type }}
         GITLEAKS_PACKAGE_SHA256: ${{ steps.secret_scan.outputs.package_sha256 }}
         GITLEAKS_REPORT_PATH: ${{ inputs.report-directory }}/gitleaks.json

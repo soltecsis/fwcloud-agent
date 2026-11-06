@@ -138,6 +138,22 @@ class PolicyScopeTests(Fixture):
             with self.assertRaises(ValueError): ci.install(self.env)
             tar.assert_not_called()
 
+    def test_preparation_failures_publish_only_fixed_error_categories(self):
+        self.env['GITLEAKS_BINARY'] = str(self.root / 'scanner')
+        for error, category in [
+            (ValueError('unsafe_package_member'), 'unsafe_package_member'),
+            (ValueError('private/source: synthetic-secret'), 'scan_preparation_failed'),
+            (FileNotFoundError('private/package'), 'scan_preparation_failed'),
+        ]:
+            (self.root / 'outputs').write_text('')
+            with patch.object(ci, 'verify_version'), patch.object(ci, 'package', side_effect=error):
+                with redirect_stderr(io.StringIO()) as stderr:
+                    self.assertEqual(ci.scan(self.root, self.env, 'rpm'), 2)
+            fields = dict(line.split('=', 1) for line in (self.root / 'outputs').read_text().splitlines())
+            self.assertEqual(fields['pre_scan_error'], category)
+            self.assertNotIn('exit_code', fields)  # Gitleaks never ran.
+            self.assertNotIn('private', stderr.getvalue() + json.dumps(fields))
+
 
 class ExtractionTests(Fixture):
     def test_tar_rejects_traversal_absolute_paths_links_and_devices(self):

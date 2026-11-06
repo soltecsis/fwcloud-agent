@@ -266,8 +266,12 @@ def scan(root, env, kind):
                 cwd=root, env=environment(env), capture_output=True, timeout=330)
             code = result.returncode if result.returncode >= 0 else 128 - result.returncode
             fields.update(exit_code=str(code), log_bytes=str(len(result.stdout) + len(result.stderr)))
-    except (OSError, ValueError, KeyError, TypeError, tarfile.TarError, subprocess.SubprocessError):
+    except (OSError, ValueError, KeyError, TypeError, tarfile.TarError, subprocess.SubprocessError) as error:
         # Paths, subprocess errors, malformed JSON and source content are never logged.
+        fields['pre_scan_error'] = (
+            'unsafe_package_member' if isinstance(error, ValueError)
+            and error.args == ('unsafe_package_member',) else 'scan_preparation_failed'
+        )
         print('Secret scan could not complete.', file=sys.stderr)
     finally:
         with Path(env['GITHUB_OUTPUT']).open('a') as output:

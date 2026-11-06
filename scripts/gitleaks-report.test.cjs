@@ -96,3 +96,12 @@ test('distribution metadata requires a valid package type and checksum', t => {
       assert.equal(collect(t, [], 0, { ...valid, ...extra }).metadata.status, 'error');
   }
 });
+
+test('pre-scan failures retain fixed diagnostics and never publish arbitrary error text', t => {
+  for (const category of ['unsafe_package_member', 'scan_preparation_failed', PRIVATE]) {
+    const { result, metadata } = collect(t, [], 0, { GITLEAKS_PRE_SCAN_ERROR: category });
+    assert.equal(result.status, 1);
+    assert.equal(metadata.status, 'error');
+    assert.deepEqual(metadata.errors, [category === PRIVATE ? 'invalid_pre_scan_error' : category]);
+  }
+});

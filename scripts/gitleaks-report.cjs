@@ -13,6 +13,10 @@ function collect(env = process.env) {
     if (!env.ANALYSIS_COMMIT || identity.commit !== env.ANALYSIS_COMMIT)
       errors.push('checkout_mismatch');
   } catch { errors.push('invalid_ci_context'); }
+  if (env.GITLEAKS_PRE_SCAN_ERROR) {
+    errors.push(['unsafe_package_member', 'scan_preparation_failed'].includes(env.GITLEAKS_PRE_SCAN_ERROR)
+      ? env.GITLEAKS_PRE_SCAN_ERROR : 'invalid_pre_scan_error');
+  }
   let findings = null;
   try {
     const parsed = JSON.parse(fs.readFileSync(env.GITLEAKS_REPORT_PATH, 'utf8'));
