@@ -871,15 +871,15 @@ mod tests {
         let collector = collector_factory(vec![("OPENVPN_STATUS_FILES", list.join(","))], false);
         assert_eq!(collector.openvpn_status_files.len(), n);
 
-        for inx in 0..n {
-            assert_eq!(collector.openvpn_status_files[inx].st_file, list[inx]);
+        for (inx, file) in list.iter().enumerate() {
+            assert_eq!(&collector.openvpn_status_files[inx].st_file, file);
             assert_eq!(
                 collector.openvpn_status_files[inx].tmp_file,
-                format!("./tmp/{}.tmp", list[inx].replace('/', "_"))
+                format!("./tmp/{}.tmp", file.replace('/', "_"))
             );
             assert_eq!(
                 collector.openvpn_status_files[inx].cache_file,
-                format!("./data/{}.data", list[inx].replace('/', "_"))
+                format!("./data/{}.data", file.replace('/', "_"))
             );
             assert_eq!(collector.openvpn_status_files[inx].last_update, 0);
             assert_eq!(

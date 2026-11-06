@@ -56,10 +56,8 @@ pub fn spawn_app(custom: Option<TestCfgOpt>) -> String {
     let port = config.bind_port;
 
     let server = fwcloud_agent::run(config, listener).expect("Failed to run FWCloud-Agent server");
-    // Launch the server as a background task
-    // tokio::spawn returns a handle to the spawned future,
-    // but we have no use for it here, hence the non-binding let
-    let _ = tokio::spawn(server);
+    // Dropping the join handle detaches the background server task.
+    drop(tokio::spawn(server));
 
     format!("{}://{}:{}", protocol, ip, port)
 }

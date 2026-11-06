@@ -207,7 +207,7 @@ mod tests {
     }
 
     fn create_files(fl: &FilesList) -> Result<()> {
-        fs::create_dir(&fl.dir())?;
+        fs::create_dir(fl.dir())?;
 
         for inx in 0..fl.len() {
             let fw = File::create(fl.path(inx))?;
@@ -234,7 +234,7 @@ mod tests {
     fn sha256_cvs_string(fl: &mut FilesList) -> Result<String> {
         let mut cvs = String::from("file,sha256\n");
         for inx in 0..fl.len() {
-            let mut file = File::open(&fl.path(inx))?;
+            let mut file = File::open(fl.path(inx))?;
             let mut sha256 = Sha256::new();
             let mut buffer = [0_u8; 8192];
             loop {
@@ -244,7 +244,7 @@ mod tests {
                 }
                 sha256.update(&buffer[..read]);
             }
-            let line = format!("{},{}\n", &fl.name(inx), hex::encode(sha256.finalize()));
+            let line = format!("{},{}\n", fl.name(inx), hex::encode(sha256.finalize()));
             cvs.push_str(&line);
         }
 
@@ -288,10 +288,10 @@ mod tests {
 
         let file_content = fl.dump(inx)?;
         let file_lines_count = file_content.len();
-        for i in 0..file_lines_count {
+        for (i, line) in file_content.iter().enumerate() {
             let result = fl.head_remove(inx, 1)?;
             let new_lines_count = fl.dump(inx)?.len();
-            assert_eq!(file_content[i as usize], result[0]);
+            assert_eq!(line, &result[0]);
             assert_eq!(new_lines_count, file_lines_count - (i + 1));
         }
 
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn directory_exists() {
         let fl = files_list_factory(0);
-        fs::create_dir(&fl.dir()).unwrap();
+        fs::create_dir(fl.dir()).unwrap();
         assert!(fl.dir_exists());
         fs::remove_dir(fl.dir()).unwrap();
     }
@@ -407,13 +407,7 @@ mod tests {
     fn remove_returns_error_if_dir_not_exists() {
         let fl = files_list_factory(0);
 
-        match fl.remove() {
-            Err(e) => match e {
-                FwcError::DirNotFound => assert!(true),
-                _ => return assert!(false),
-            },
-            Ok(_) => panic!("Error expected"),
-        }
+        assert!(matches!(fl.remove(), Err(FwcError::DirNotFound)));
     }
 
     #[test]
@@ -427,34 +421,27 @@ mod tests {
         fl2.chdir(&fl1.dir());
         fl2.get_files_in_dir()?;
         fl1.remove()?;
-        fs::remove_dir(&fl1.dir())?;
+        fs::remove_dir(fl1.dir())?;
 
         // Check that all directory files have been read.
-        if fl1.files.sort() == fl2.files.sort() {
-            Ok(())
-        } else {
-            Err(FwcError::Internal("Getting files"))
-        }
+        fl1.files.sort();
+        fl2.files.sort();
+        assert_eq!(fl1.files, fl2.files);
+        Ok(())
     }
 
     #[test]
     fn get_files_in_dir_returns_error_if_dir_not_exists() {
         let mut fl = files_list_factory(0);
 
-        match fl.get_files_in_dir() {
-            Err(e) => match e {
-                FwcError::DirNotFound => assert!(true),
-                _ => return assert!(false),
-            },
-            Ok(_) => panic!("Error expected"),
-        }
+        assert!(matches!(fl.get_files_in_dir(), Err(FwcError::DirNotFound)));
     }
 
     #[test]
     fn sha256_gives_empty_result_if_dir_is_empty() {
         let fl = files_list_factory(0);
 
-        fs::create_dir(&fl.dir()).unwrap();
+        fs::create_dir(fl.dir()).unwrap();
         assert_eq!(fl.sha256(false).unwrap(), String::from("file,sha256\n"));
         fs::remove_dir(fl.dir()).unwrap();
     }
@@ -490,11 +477,7 @@ mod tests {
         create_files(&fl)?;
 
         // Add comments to one file.
-        let mut file = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .open(fl.path(3))
-            .unwrap();
+        let mut file = OpenOptions::new().append(true).open(fl.path(3)).unwrap();
         writeln!(file, "# First comment line!")?;
         writeln!(file, "# Second comment line!")?;
 
@@ -519,7 +502,7 @@ mod tests {
         create_files(&fl)?;
 
         // Modify one of the files.
-        let mut fw = File::create(&fl.path(inx))?;
+        let mut fw = File::create(fl.path(inx))?;
         let compare = format!("{}\n{}", Uuid::new_v4(), Uuid::new_v4());
         fw.write_all(compare.as_bytes())?;
         drop(fw);
