@@ -1,0 +1,12 @@
+# Official Linux x86_64 release assets. Verify before extracting or executing.
+[cargo-nextest]
+version = "0.9.151"
+rust-version = "1.91"
+url = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.151/cargo-nextest-0.9.151-x86_64-unknown-linux-gnu.tar.gz"
+sha256 = "1d4ce302b820c41f4b89c5fb9bce45f0f0c94882c1cf08fc360caf08be6e7df4"
+
+[cargo-llvm-cov]
+version = "0.9.1"
+rust-version = "1.87"
+url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz"
+sha256 = "b3f68e625481fed9b16444174f3fa5ebcdbde4a1878803a35eabe2dcefcdc41a"

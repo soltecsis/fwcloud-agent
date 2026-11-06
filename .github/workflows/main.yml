@@ -85,40 +85,44 @@ jobs:
           ref: ${{ env.ANALYSIS_COMMIT }}
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
-      - name: Build the locked sources
-        run: cargo build --locked
-      - name: Test the locked sources
-        run: cargo test --locked
-      - name: Verify the committed lockfile is unchanged
-        if: ${{ always() }}
-        run: git diff --exit-code -- Cargo.lock
-
-  coverage:
-    name: Rust coverage
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ env.ANALYSIS_COMMIT }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-rust
-        with:
-          tool: cargo-tarpaulin
-      - name: Measure coverage with the existing threshold
-        # Keep 20% until the reference coverage review in phase 3.
-        run: cargo tarpaulin --locked --out Xml --output-dir reports/coverage --ignore-tests --fail-under 20
-      - name: Verify the committed lockfile is unchanged
+          cache-suffix: -llvm-${{ hashFiles('.github/report-tools.toml') }}
+      - name: Install verified reporting tools and LLVM
+        run: python3 .github/scripts/install-report-tools.py
+      - name: Build instrumented tests and compare discovery
+        id: test_build
+        run: python3 .github/scripts/test_ci.py build
+      - name: Execute the instrumented suite once
+        id: test_execution
+        run: python3 .github/scripts/test_ci.py test
+      - name: Export coverage and enforce the 20% line gate
+        if: ${{ always() && steps.test_build.outcome != 'skipped' }}
+        run: python3 .github/scripts/test_ci.py reports
+      - name: Validate test and coverage evidence
         if: ${{ always() }}
-        run: git diff --exit-code -- Cargo.lock
+        run: python3 .github/scripts/ci_reports.py
+      - name: Upload test evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agent-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            reports/tests/
+            reports/metadata.json
+          retention-days: 90
+          if-no-files-found: error
       - name: Upload coverage evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: agent-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          name: agent-coverage-${{ github.run_id }}
           path: reports/coverage/
+          overwrite: true
           retention-days: 90
           if-no-files-found: error
+      - name: Verify the committed lockfile is unchanged
+        if: ${{ always() }}
+        run: git diff --exit-code -- Cargo.lock
 
   agent-ci:
     name: agent-ci
@@ -148,7 +152,7 @@ jobs:
           PY
 
   deb-package:
-    needs: [agent-ci, security_audit, coverage]
+    needs: [agent-ci, security_audit]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: DEB package
@@ -182,7 +186,7 @@ jobs:
           if-no-files-found: error
 
   rpm-package:
-    needs: [agent-ci, security_audit, coverage]
+    needs: [agent-ci, security_audit]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: RPM package

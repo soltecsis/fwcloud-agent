@@ -77,12 +77,13 @@ class PackagingGateTests(unittest.TestCase):
     def test_packages_preserve_audit_and_coverage_gates(self):
         for job in ("deb-package", "rpm-package"):
             with self.subTest(job=job):
-                self.assertEqual(self.needs(job), {"agent-ci", "security_audit", "coverage"})
+                self.assertEqual(self.needs(job), {"agent-ci", "security_audit"})
                 self.assertNotIn("if:", self.jobs[job].split("steps:", 1)[0])
 
     def test_dependency_graph_does_not_reference_removed_jobs(self):
         self.assertNotIn("checks", self.jobs)
         self.assertNotIn("build", self.jobs)
+        self.assertNotIn("coverage", self.jobs)
         for job, section in self.jobs.items():
             if "needs:" in section:
                 with self.subTest(job=job):
@@ -123,6 +124,30 @@ class ShellCheckWorkflowTests(unittest.TestCase):
         self.assertIn("always() && steps.shellcheck.outcome != 'skipped'", quality)
         self.assertIn("path: reports/shellcheck/", quality)
         self.assertIn("if-no-files-found: error", quality)
+
+
+class ReportingWorkflowTests(unittest.TestCase):
+    def test_reports_and_both_uploads_run_after_failed_execution(self):
+        section = WORKFLOW.read_text().split("\n  test:\n", 1)[1].split("\n  agent-ci:\n", 1)[0]
+        self.assertNotIn("continue-on-error", section)
+        self.assertIn("always() && steps.test_build.outcome != 'skipped'", section)
+        self.assertIn("python3 .github/scripts/ci_reports.py", section)
+        self.assertIn("name: agent-tests-${{ github.run_id }}-${{ github.run_attempt }}", section)
+        self.assertIn("name: agent-coverage-${{ github.run_id }}", section)
+        self.assertIn("overwrite: true", section)
+        self.assertEqual(section.count("if-no-files-found: error"), 2)
+        for name in ("Validate test and coverage evidence", "Upload test evidence", "Upload coverage evidence"):
+            step = section.split("      - name: " + name, 1)[1].split("      - name:", 1)[0]
+            self.assertIn("if: ${{ always() }}", step)
+
+    def test_suite_execution_is_consolidated_and_actions_remain_immutable(self):
+        workflow = WORKFLOW.read_text()
+        self.assertNotIn("\n  coverage:\n", workflow)
+        self.assertEqual(workflow.count("python3 .github/scripts/test_ci.py test"), 1)
+        self.assertNotIn("cargo tarpaulin", workflow)
+        for action in re.findall(r"uses: ([^\s]+)", workflow):
+            if not action.startswith("./"):
+                self.assertRegex(action, r"@[0-9a-f]{40}$")
 
 
 if __name__ == "__main__":
