@@ -1,6 +1,8 @@
 %define __spec_install_post %{nil}
 %define __os_install_post %{_dbpath}/brp-compress
 %define debug_package %{nil}
+# Do not generate optional debug symlinks rejected by strict package extraction.
+%define _build_id_links none
 
 Name: fwcloud-agent
 Summary: FWCloud Agent for firewalls management

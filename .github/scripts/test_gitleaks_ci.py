@@ -11,6 +11,7 @@ import stat
 import subprocess
 import tarfile
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -184,7 +185,7 @@ class ExtractionTests(Fixture):
 class ActualScannerTests(Fixture):
     @classmethod
     def setUpClass(cls):
-        for tool in ['dpkg-deb', 'rpm', 'rpmkeys', 'rpmbuild', 'rpm2cpio']:
+        for tool in ['dpkg-deb', 'rpm', 'rpmkeys', 'rpmbuild', 'rpm2cpio', 'cc']:
             if not shutil.which(tool): raise AssertionError('Required package fixture tool is unavailable')
         if not Path(os.environ.get('GITLEAKS_BINARY', '')).is_file():
             raise AssertionError('Verified Gitleaks binary is required')
@@ -303,3 +304,41 @@ cp -a {tree}/opt %{{buildroot}}/
                     self.assertEqual(metadata['status'], 'findings' if expected else 'success')
                     self.assertEqual(metadata['packageType'], kind)
                     self.assertRegex(metadata['packageSha256'], '^[0-9a-f]{64}$')
+
+    def test_production_rpm_spec_with_elf_passes_distribution_scan(self):
+        # A text-only fixture cannot expose RPM's generated build-ID symlinks.
+        manifest = tomllib.loads((ci.ROOT / 'Cargo.toml').read_text())['package']
+        version = manifest['version']
+        name = f'fwcloud-agent-{version}'
+        source = self.root / name
+        source.mkdir()
+        for origin, metadata in manifest['metadata']['rpm']['files'].items():
+            original = (ci.ROOT / '.rpm' / origin).resolve()
+            self.assertTrue(original.is_relative_to(ci.ROOT))
+            destination = source / metadata['path'].lstrip('/')
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(original, destination)
+        code = self.root / 'synthetic.c'
+        code.write_text('int main(void) { return 0; }\n')
+        run(['cc', '-Wl,--build-id', str(code), '-o',
+             str(source / 'opt/fwcloud/agent/fwcloud-agent')], self.root, self.env)
+        top = self.root / 'production-rpmbuild'
+        (top / 'SOURCES').mkdir(parents=True)
+        with tarfile.open(top / 'SOURCES' / f'{name}.tar.gz', 'w:gz') as archive:
+            archive.add(source, arcname=name)
+        spec = (ci.ROOT / '.rpm/fwcloud-agent.spec').read_text()
+        spec = spec.replace('@@VERSION@@', version).replace('@@RELEASE@@', '1')
+        spec_path = self.root / 'production.spec'
+        spec_path.write_text(spec)
+        output = self.root / 'target/x86_64-unknown-linux-musl/release/rpmbuild/RPMS/x86_64'
+        output.mkdir(parents=True)
+        # Model RPM 4's default profile. The production spec must override it;
+        # unlike minimal fixtures, this test never injects a "none" override.
+        run(['rpmbuild', '-bb', '--define', f'_topdir {top}', '--define',
+             f'_rpmdir {output}', '--define', '_rpmfilename fixture.rpm',
+             '--define', '_build_id_links compat', str(spec_path)], self.root, self.env)
+        status, findings, metadata = self.scan('rpm')
+        self.assertEqual(status, 0)
+        self.assertEqual(findings, [])
+        self.assertEqual(metadata['status'], 'success')
+        self.assertEqual(metadata['packageType'], 'rpm')
