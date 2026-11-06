@@ -3,6 +3,28 @@ use serial_test::serial;
 use uuid::Uuid;
 
 #[test]
+fn packaged_placeholder_cannot_be_used_as_an_api_key() -> std::io::Result<()> {
+    let template = include_str!("../.env.example");
+    let placeholder = template
+        .lines()
+        .find_map(|line| line.strip_prefix("API_KEY="))
+        .unwrap()
+        .trim_matches('"');
+    assert!(placeholder.len() == 64);
+    assert!(placeholder == API_KEY_PLACEHOLDER);
+    let directory = tempfile::tempdir()?;
+    let runtime = directory.path().to_string_lossy().into_owned();
+    let mut cfg =
+        Config::with_runtime_dirs(runtime.clone(), runtime.clone(), runtime.clone(), runtime)
+            .unwrap();
+    cfg.api_key = placeholder.to_owned();
+    assert!(cfg.validate().is_err());
+    cfg.api_key = "U".repeat(64);
+    assert!(cfg.validate().is_ok());
+    Ok(())
+}
+
+#[test]
 #[serial]
 fn removes_deprecated_openvpn_status_options_from_env_file() -> std::io::Result<()> {
     let path = format!("./tests/playground/tmp/.env_{}", Uuid::new_v4());

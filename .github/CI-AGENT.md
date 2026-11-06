@@ -966,7 +966,50 @@ actual `agent-tests-<RUN_ID>-<ATTEMPT>` and `agent-coverage-<RUN_ID>` links,
 closing hosted acceptance. The earlier Issue 3 run and synthetic local receipt
 must not be represented as execution of these new tests on GitHub.
 
-## 8. Updating this record
+## 8. Phase 5 — Packaged API credential remediation
+
+**Implemented remediation:** replace the static example with an unmistakable,
+low-entropy, 64-character placeholder. The default-rule initial scan confirmed
+the old example is detected; a separate default-rule scan of the new template
+completed with zero findings. No exception, baseline or allowlist was introduced.
+The runtime configuration validator also rejects the placeholder, so manually
+starting an unconfigured agent cannot activate it as a shared API credential.
+
+Both DEB `postinst` and RPM `%post` call the same packaged
+`configure-api-key.sh` before starting the service. It parses configuration as
+data, never sources `.env`, and uses OpenSSL's CSPRNG (`openssl rand -hex 32`)
+to generate a unique 64-character credential. The helper recognizes the historical
+example by SHA-256, without embedding its value in new source. Existing runtime
+compatible credentials (16–128 ASCII letters, digits, `_` or `-`) are preserved.
+Missing, malformed, empty or duplicate key settings, the placeholder and the
+historical example require replacement. Other settings are preserved.
+
+`.env.upgrade` is the authoritative upgrade input when present. Pre-installation
+does not overwrite an existing backup, and tolerates a missing prior `.env`.
+A legitimate backup is restored unchanged; unsafe credentials are replaced via
+a private temporary file and atomic rename. The backup is removed only after
+successful replacement. Symlinked/nonregular input fails. Missing/invalid random
+output or OpenSSL failure aborts installation without starting the service or
+consuming the backup. RPM stops a prior daemon before remediation; DEB retains
+its existing stop in `prerm`. The resulting `.env` has mode `0600`.
+
+**Operational coordination:** installations still using the historical example
+must be treated as having an exposed authentication credential. An upgrade will
+rotate it and the associated FWCloud connection must be updated through the
+operator's secure configuration process. Coordinate a maintenance window and
+console/firewall access before upgrading affected agents. Legitimate credentials
+are retained; they are not rotated merely because of an upgrade. Install logs and
+tests never print keys. Changing this repository does not rotate an installation
+that has not upgraded. Review of active deployments, secure recovery of new
+credentials, any incident response, and owner approval remain operator tasks.
+
+
+Local validation passed seven installation/upgrade tests and 55 Rust library
+tests, including runtime rejection of the placeholder. Changed installation
+scripts passed the pinned ShellCheck error policy; Clippy passed for the library
+and agent binary with warnings denied. Hosted package validation remains pending.
+
+## 9. Updating this record
 
 Update this document with each delivery. Record the exact revision, commands,
 environment, results, limitations, PR/run/artifact links and reviewer. Keep

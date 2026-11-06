@@ -74,6 +74,10 @@ def discover(root):
         if not (root / path).is_file():
             raise ValueError(f"Missing Debian maintenance script: {path}")
         files.append(path.as_posix())
+    for path in sorted((root / 'packaging').glob('*.sh')):
+        if not path.is_file() or path.is_symlink():
+            raise ValueError('Invalid packaged installation helper')
+        files.append(path.relative_to(root).as_posix())
     return sorted(files)
 
 

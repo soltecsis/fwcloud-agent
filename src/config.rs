@@ -34,6 +34,16 @@ use validator::Validate; // A trait that the Validate derive will impl
 use crate::errors::Result;
 use crate::utils::ws::WsData;
 
+const API_KEY_PLACEHOLDER: &str =
+    "REPLACE_WITH_A_UNIQUE_API_KEY_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+
+fn reject_placeholder_api_key(value: &str) -> std::result::Result<(), validator::ValidationError> {
+    if value == API_KEY_PLACEHOLDER {
+        return Err(validator::ValidationError::new("placeholder_api_key"));
+    }
+    Ok(())
+}
+
 pub struct MyMutex {
     pub openvpn: Arc<tokio::sync::Mutex<u8>>,
     pub wireguard: Arc<tokio::sync::Mutex<u8>>,
@@ -75,6 +85,7 @@ pub struct Config {
 
     #[validate(regex(path = "crate::utils::myregex::ALPHA_NUM_2"))]
     #[validate(length(min = 16, max = 128))]
+    #[validate(custom(function = "reject_placeholder_api_key"))]
     pub api_key: String,
 
     #[validate(regex(
