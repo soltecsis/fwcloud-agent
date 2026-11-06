@@ -11,7 +11,7 @@ does not establish ENS compliance.
 | Field | Value |
 | --- | --- |
 | Repository | `soltecsis/fwcloud-agent` |
-| Working branch | `238-chore-generate-test-reports-and-establish-reproducible-rust-coverage` |
+| Working branch | `239-test-cover-untested-system-management-routes-with-isolated-integration-tests` |
 | Integration target | `ENS` |
 | Phase 1 implementation baseline | `c8fbe38`, existing `ENS` tip at that delivery |
 | Phase 2 script baseline | `2cdfefcef2a6cc887baa979971872de36e21ddf6` |
@@ -58,7 +58,7 @@ reset or force-pushed. The current working branch starts from the ENS tip.
 | 1 | Reproducible CI foundation | Implemented locally; GitHub acceptance pending | Positive and negative PR checks, event/concurrency verification and reviewed evidence |
 | 2 | ShellCheck for plugins and Debian maintenance scripts | Implemented locally; GitHub acceptance pending | Baseline reviewed without exclusions; exercise blocking shell checks in Actions |
 | 3 | Test reports and reference coverage (API Phase 2) | Implemented and verified locally; hosted acceptance pending | Valid artifacts tied to run/revision; reviewed baseline and hosted performance comparison |
-| 4 | Uncovered routes and security tests | Pending | Deterministic route and security tests without destructive system operations |
+| 4 | Uncovered routes and security tests | Implemented and verified locally; hosted execution pending | Deterministic route and security tests without destructive system operations |
 | 5 | Gitleaks and initial history audit | Pending | Incremental/history scope verified; redacted reports and reviewed exceptions |
 | 6 | Trivy and CycloneDX SBOM | Pending | Dependency inventory, HIGH/CRITICAL policy and reviewed audit exceptions |
 | 7 | SonarQube Cloud and Quality Gate | Pending | Rust analysis, Clippy/coverage import, required gate and fork/Dependabot policy |
@@ -752,7 +752,221 @@ uploads. Investigate regressions before closing this phase.
 - [ ] Measure replacement hosted cold/warm runs against the reference and confirm no regression.
 - [ ] Record reviewer and acceptance date. Local timings do not satisfy these items.
 
-## 7. Updating this record
+## 7. Phase 4 — Isolated system-management route tests
+
+### 7.1. Verified starting baseline and historical comparison
+
+On 2026-11-06, the Issue 3 reporting implementation from PR #249 was rerun
+against the tracked application at `dcede7742d3bf3814c65856a4eb3d5f84298e8f8`.
+A clean export under `/tmp/fwcloud-agent-239-baseline` excluded the pre-existing,
+untracked OpenVPN configuration-install work. It passed all **93 tests**;
+JUnit, LCOV, LLVM JSON, HTML, the 20% gate and provenance validation succeeded.
+The local report uses snapshot `87143af6063b2bb96523de411fc145673d5a416f` and
+synthetic run `239`/attempt `1`; this is local evidence, not a GitHub run.
+The baseline used harmless `ip`/`iptables-save` command stubs so its existing
+endpoint-existence tests could not inspect the host network/firewall.
+
+The actual hosted Issue 3
+[run 42195925541](https://github.com/soltecsis/fwcloud-agent/actions/runs/42195925541)
+also completed successfully. Its
+[coverage artifact 13492396227](https://github.com/soltecsis/fwcloud-agent/actions/runs/42195925541/artifacts/13492396227),
+`agent-coverage-42195925541`, was downloaded and inspected. `analysis.json`
+identifies PR #249 head `1f2aa1dbeaa2cd9d82cbf9e623cbe28475169635`, attempt 1,
+Rust/Cargo `1.99.1`, Nextest `0.9.151`, cargo-llvm-cov `0.9.1`, successful tests
+and validation, and `accepted_baseline: true`. The downloaded ZIP matches
+GitHub's SHA-256 `8e8fe5b648d6d091cc38e88161486ef3b901941da7a29472b9434969e5c5859f`;
+its LCOV matches `analysis.json` digest
+`068267fd6bc979ad2f17f947872d090aec77470761ef080509784008be99cf15`.
+The hosted aggregate is **62.06% (1,086/1,750)**. Every route-file measurement
+matches the fresh local starting baseline below. The local aggregate is
+**61.94% (1,084/1,750)**: the two differing covered lines are in the real command
+backend, consistent with the controlled `ip`/`iptables-save` outputs.
+
+The April figures supplied in Issue #239 were approximately 24.2% for routes,
+0% for daemon/IPSec/WireGuard/WebSocket, and 12.9% for OpenVPN. Fresh LLVM
+measurements confirm the four zero-coverage files, but measure routes at
+**40.82% (189/463)** and OpenVPN at **38.99% (85/218)**. Historical Cobertura
+values are context only: instrumentation, executable-line accounting and the
+suite changed. Neither the old XML nor these differences establish current
+coverage or an improvement attributable to this delivery.
+
+### 7.2. Priorities and implemented behavior
+
+The starting report had no executed daemon, IPSec, WireGuard or WebSocket
+handler lines. OpenVPN upload only exercised missing data, and remove/read/status
+successes and their filesystem effects were largely absent. File writes,
+deletions, traversal and authorization were prioritized before longer-running
+or privileged operations.
+
+`tests/common/mod.rs` continues to call the real `fwcloud_agent::run` bootstrap.
+Each `spawn_app` owns a server on `127.0.0.1:0`, a `TempDir` beneath
+`tests/playground/tmp/`, explicit configuration/staging/data/plugin/policy paths,
+its WebSocket map and a recording command executor. `Config::with_runtime_dirs`
+uses owned paths and defaults without reading environment variables or loading,
+rewriting or creating a real `.env`. Production `Config::new` retains its existing
+environment initialization and real command executor. No working-directory or
+process-environment change is needed by integration fixtures.
+
+A dedicated server thread lets fixture destruction stop and join the server
+synchronously, including during assertion unwinding. An owned collector guard
+signals shutdown, wakes its receive timeout and joins the worker before the
+fixture directory is removed. Collector unit tests also use separate persisted
+configuration and cache directories; they no longer share `./etc` or set API
+configuration environment variables. Existing sampling route tests use fixture
+status paths. Nextest's CI concurrency is now four, with retries still disabled.
+Explicit fixture tests verify simultaneous apps, same-name file independence,
+closed listeners and cleanup during a panic.
+
+Shared file-request matrices in `tests/common/files.rs` are called by daemon,
+IPSec, WireGuard and the existing OpenVPN test modules. They verify new and
+replacement uploads, file contents and mode, idempotent removal, malformed or
+missing multipart/JSON, missing fields, invalid file metadata, invalid directories,
+traversal, symlink destinations, and invalid batches. Snapshots include existing
+files, permissions, directories and staging files, so rejected requests cannot
+silently alter fixtures. Every family tests missing/invalid API keys and a
+non-allowed peer IP with API validation explicitly enabled; valid requests use
+a valid key and allowed loopback IP.
+
+OpenVPN tests additionally exercise plain-text reads and real-time status,
+empty/malformed raw status text, missing files, one-file constraints, cached CSV
+formatting, bounded cache consumption and missing/empty caches. Sampling
+configuration coverage is retained and isolated. No new request or worker reads a real
+OpenVPN installation. Authorization tests cover reads, cache consumption,
+sampling updates and update notifications as well as upload/removal.
+
+The placeholder WebSocket test is replaced by nine real protocol tests using
+Reqwest's HTTP upgrade with Actix's existing client-mode WebSocket codec. They
+check the RFC handshake response, initial UUID, ping/pong, client close, transport
+drop, streamed output, completion, invalid upgrades/UUIDs/durations, unknown IDs,
+authorization and connection-map cleanup. Expiry is exercised with an isolated
+old timestamp. The limit test seeds state records instead of live connections.
+The longest requested test duration is one second; reads and cleanup have bounded
+timeouts. No heartbeat or two-hour expiry wait is required.
+
+All route command paths use an injected `CommandExecutor`, including systemctl,
+plugins, interface/firewall queries, policy scripts and directory ownership.
+The test implementation records requests and returns controlled output without
+spawning a child. A systemctl regression verifies the exact requested restart
+arguments and zero command calls for every authorization rejection. Targeted
+file/WebSocket tests also assert zero command calls where applicable.
+
+Tests exposed and now guard production fixes: multipart parser/chunk errors
+propagate instead of being discarded or unwrapped; staging files are registered
+before fallible writes; destination creation waits until validation completes;
+filename traversal and symlink paths are rejected before any batch deletion or
+upload commit; missing/invalid parameters return 400, and unknown WebSocket IDs
+return 404. Error messages are serialized as valid JSON. Invalid upgrades no
+longer allocate map entries; closed/finished actors remove their entries; the
+WebSocket test handler yields during its bounded delays. Production authentication
+is unchanged. These validation/status changes intentionally tighten prior error
+behavior, including requests previously returning 500.
+
+### 7.3. Resulting coverage and remaining branches
+
+All values below are executable LLVM line counts from fresh validated reports;
+no coverage exclusion was added or changed.
+
+| Route source | Fresh starting baseline | After implementation |
+| --- | --- | --- |
+| `src/routes/daemon.rs` | 0/12 (0.00%) | 12/12 (100.00%) |
+| `src/routes/fwcloud_script.rs` | 10/12 (83.33%) | 10/12 (83.33%) |
+| `src/routes/info.rs` | 13/14 (92.86%) | 13/14 (92.86%) |
+| `src/routes/interfaces.rs` | 4/4 (100.00%) | 4/4 (100.00%) |
+| `src/routes/ipsec.rs` | 0/25 (0.00%) | 25/25 (100.00%) |
+| `src/routes/iptables_save.rs` | 4/4 (100.00%) | 4/4 (100.00%) |
+| `src/routes/openvpn.rs` | 85/218 (38.99%) | 167/222 (75.23%) |
+| `src/routes/ping.rs` | 4/4 (100.00%) | 4/4 (100.00%) |
+| `src/routes/plugin.rs` | 65/76 (85.53%) | 65/76 (85.53%) |
+| `src/routes/systemctl.rs` | 4/7 (57.14%) | 11/11 (100.00%) |
+| `src/routes/wireguard.rs` | 0/27 (0.00%) | 25/27 (92.59%) |
+| `src/routes/ws.rs` | 0/60 (0.00%) | 61/62 (98.39%) |
+| **All route files** | **189/463 (40.82%)** | **401/473 (84.78%)** |
+
+Application line coverage increases from **61.94% (1,084/1,750)** to
+**81.11% (1,533/1,890)** in the controlled local comparison. The count increase
+reflects the configuration, validation and resource-lifecycle code. The mandatory
+minimum remains **20%** in both the exporter and report validator.
+
+No `src/routes/` source file remains at 0%. Remaining uncovered branches have
+these explicit follow-up decisions:
+
+- OpenVPN directory ensure/removal and SHA-256 handler successes remain follow-up
+  behavioral coverage; the directory ownership path now accepts the recording
+  executor, so future tests can check `chown` arguments without changing ownership.
+  Unit coverage of directory validation/removal and hashing is retained. Separate
+  zero-value branches for sampling line/cache limits can extend existing sampling
+  matrices without invoking external tools.
+- Policy-script success and plugin WebSocket streaming remain follow-up tests
+  against the command recorder. Real script execution, package/service changes
+  and the real command backend (`src/utils/cmd.rs`, 0% after injection) are
+  deliberately unexecuted in this route suite. They remain in the coverage
+  denominator; command-output parsing/error behavior needs dedicated controlled
+  backend tests before claiming coverage of those operations.
+- WebSocket's future-clock error arm is uncovered; expiry, closure, missing IDs,
+  malformed upgrades and the connection limit are covered. WireGuard's two
+  uncovered lines are multi-line debug-log arguments; both handlers and their
+  successful filesystem effects execute. No exclusion is justified for these lines.
+- This suite does not prove protection against an external process racing path
+  validation with a symlink replacement. Descriptor-relative filesystem operations
+  would be a separate hardening change. Missing raw status files retain the
+  existing I/O-error response (500); missing cached status returns its CSV header.
+  The raw-status endpoints intentionally return text without parsing it; existing
+  collector unit tests cover malformed structured records.
+
+### 7.4. Reproduction and evidence
+
+With the pinned toolchain/reporting tools installed, the normal validation is:
+
+```bash
+cargo test --locked
+cargo fmt --all -- --check
+cargo clippy --all-targets --locked -- -D warnings
+python3 -m unittest discover -s .github/scripts -p 'test_*.py' -q
+```
+
+The existing CI workflow automatically discovers the new test binaries and still
+uses Issue 3's `test_ci.py build`, `test_ci.py test`, `test_ci.py reports` and
+`ci_reports.py` stages with the actual Actions identity. Cargo and Nextest both
+discover **127 tests**, zero doctests, and the instrumented run passes all 127
+with no failures, skips or retries. Test execution takes about 4.02 seconds
+locally with four Nextest processes; this is not a hosted performance comparison.
+The 63 CI helper tests and all-target Clippy pass. Resources under the verification
+checkout's `tests/playground/tmp/` return to only `.gitkeep` after execution.
+Local execution uses UID 1000 and needs no root or Linux capabilities; the local
+Codex sandbox needs permission to open loopback listeners.
+
+The implementation was exported to `/tmp/fwcloud-agent-239-result`, excluding
+pre-existing untracked `src/utils/openvpn_config.rs`,
+`tests/openvpn_server_configs_install.rs` and `.omc/`. Those files were left
+unchanged. The unfinished untracked install test targets a route absent from this
+change and is not included in the reported suite. The validated implementation
+snapshot is `07e2a9d25f6688d0b1df4b1a3a9046198778e6e2`, synthetic run `239`/attempt
+`1`; it is not a published implementation revision or Actions execution.
+
+The first implementation export was rejected by scope validation because a
+shared build directory still held binaries from the baseline checkout. Cleaning
+application build artifacts and running the entire reporting workflow again
+produced the accepted evidence below. No extra filename exclusion or validator
+relaxation was used. These results supersede that rejected export.
+
+Local evidence is retained under ignored `reports/system-routes/baseline/` and
+`reports/system-routes/after/`, each containing `tests/junit.xml`,
+`tests/execution.json`, `coverage/lcov.info`, `coverage/coverage.json`,
+`coverage/coverage-summary.json`, `coverage/html/index.html`,
+`coverage/analysis.json` and `metadata.json`. Source paths are normalized and the
+validator accepted both reports. LCOV SHA-256 values are:
+
+- Before: `e346e18b265f187d9578fc5877216a464f67491efce4651bc7d6ddf71a97ff1f`.
+- After: `1cfffd2c137435907f8951e6cc2a0af2413b25384423919ffba7485845c0a7ea`.
+
+The hosted baseline run and artifact above are verified. A hosted execution of
+**this implementation** remains pending publication of its commit/PR. Record its
+actual `agent-tests-<RUN_ID>-<ATTEMPT>` and `agent-coverage-<RUN_ID>` links,
+`analysis.json` identity/checksum, runner image and review outcome here before
+closing hosted acceptance. The earlier Issue 3 run and synthetic local receipt
+must not be represented as execution of these new tests on GitHub.
+
+## 8. Updating this record
 
 Update this document with each delivery. Record the exact revision, commands,
 environment, results, limitations, PR/run/artifact links and reviewer. Keep

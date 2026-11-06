@@ -20,7 +20,7 @@
     along with FWCloud.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-use actix::{Actor, AsyncContext, SpawnHandle, StreamHandler};
+use actix::{Actor, ActorContext, AsyncContext, SpawnHandle, StreamHandler};
 use actix_web_actors::ws::{self, CloseReason};
 use log::debug;
 use std::{
@@ -43,6 +43,7 @@ pub struct FwcAgentWs {
     id: Uuid,
     heart_beat_handler: Option<SpawnHandle>,
     pub data: Arc<Mutex<WsData>>,
+    map: Arc<Mutex<HashMap<Uuid, Arc<Mutex<WsData>>>>>,
 }
 
 impl FwcAgentWs {
@@ -51,6 +52,7 @@ impl FwcAgentWs {
     ) -> FwcAgentWs {
         let new_ws = FwcAgentWs {
             id: Uuid::new_v4(),
+            map: map.clone(),
             heart_beat_handler: None,
             data: Arc::new(Mutex::new(WsData {
                 created_at: SystemTime::now(),
@@ -98,6 +100,7 @@ impl FwcAgentWs {
                 // if we have the HEARTBEAT_INTERVAL as 5 seconds, the FWCloud-UI can wait a maximum of
                 // 5 seconds after the request has finished.
                 ctx.cancel_future(handle);
+                ctx.stop();
             }
 
             debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
@@ -128,6 +131,10 @@ impl Actor for FwcAgentWs {
         self.heart_beat(ctx);
         self.send_lines(ctx);
     }
+
+    fn stopped(&mut self, _ctx: &mut Self::Context) {
+        self.map.lock().unwrap().remove(&self.id);
+    }
 }
 
 /// Handler for ws::Message message
@@ -139,8 +146,9 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for FwcAgentWs {
             //Ok(ws::Message::Binary(bin)) => ctx.binary(bin),
             Ok(ws::Message::Close(reason)) => {
                 ctx.close(reason);
-                ctx.cancel_future(ctx.handle());
+                ctx.stop();
             }
+            Err(_) => ctx.stop(),
             _ => (),
         }
     }
