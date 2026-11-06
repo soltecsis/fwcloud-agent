@@ -1,0 +1,14 @@
+[profile.ci]
+fail-fast = false
+# Existing tests share ./etc state. serial_test locks do not cross Nextest processes.
+test-threads = 1
+retries = 0
+status-level = "fail"
+final-status-level = "fail"
+success-output = "never"
+
+[profile.ci.junit]
+path = "junit.xml"
+store-success-output = false
+store-failure-output = true
+report-skipped = "all"

@@ -5,6 +5,10 @@ inputs:
     description: Optional Cargo utility listed in .github/ci-tools.toml.
     required: false
     default: ''
+  cache-suffix:
+    description: Optional suffix (including its separator) for other compilation modes.
+    required: false
+    default: ''
 runs:
   using: composite
   steps:
@@ -23,7 +27,7 @@ runs:
       with:
         # Keep fallback restores within the exact toolchain, even after updates.
         prefix-key: agent-v1-${{ hashFiles('rust-toolchain.toml') }}
-        key: ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+        key: ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}${{ inputs.cache-suffix }}
         cache-bin: 'false'
     - name: Upload verified environment metadata
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

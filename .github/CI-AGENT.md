@@ -11,10 +11,11 @@ does not establish ENS compliance.
 | Field | Value |
 | --- | --- |
 | Repository | `soltecsis/fwcloud-agent` |
-| Working branch | `237-chore-integrate-shellcheck-into-fwcloud-agent-ci` |
+| Working branch | `238-chore-generate-test-reports-and-establish-reproducible-rust-coverage` |
 | Integration target | `ENS` |
 | Phase 1 implementation baseline | `c8fbe38`, existing `ENS` tip at that delivery |
 | Phase 2 script baseline | `2cdfefcef2a6cc887baa979971872de36e21ddf6` |
+| Reporting implementation base | `127ebb9e589d5f4261320824f8cf153943cc2401` |
 | Execution environment | GitHub Actions, `ubuntu-24.04` hosted runners |
 | Evidence retention | 90 days requested for environment metadata, coverage and ShellCheck; 14 days for packages |
 | Last updated | 2026-11-06 |
@@ -41,8 +42,8 @@ reset or force-pushed. The current working branch starts from the ENS tip.
   the runner's Rustup; retain no archived `actions-rs/*` actions.
 - Build and test using committed `Cargo.lock`. Reject dependency changes
   requiring regeneration until the updated lockfile is committed.
-- Separate quality and tests. Use `agent-ci` as the stable Phase 1 status
-  requiring both; retain audit and coverage as additional package prerequisites.
+- Separate quality and tests. `agent-ci` requires both, and `test` now includes
+  reporting and the mandatory coverage gate. Packages also require dependency audit.
 - Keep existing package layouts, destinations, distribution lists and
   main-push-only external publication restrictions. Full publication policy
   remains Phase 8 work.
@@ -56,7 +57,7 @@ reset or force-pushed. The current working branch starts from the ENS tip.
 | --- | --- | --- | --- |
 | 1 | Reproducible CI foundation | Implemented locally; GitHub acceptance pending | Positive and negative PR checks, event/concurrency verification and reviewed evidence |
 | 2 | ShellCheck for plugins and Debian maintenance scripts | Implemented locally; GitHub acceptance pending | Baseline reviewed without exclusions; exercise blocking shell checks in Actions |
-| 3 | Test reports and reference coverage | Pending | Valid reports tied to run/revision; reviewed reference coverage and threshold |
+| 3 | Test reports and reference coverage (API Phase 2) | Implemented and verified locally; hosted acceptance pending | Valid artifacts tied to run/revision; reviewed baseline and hosted performance comparison |
 | 4 | Uncovered routes and security tests | Pending | Deterministic route and security tests without destructive system operations |
 | 5 | Gitleaks and initial history audit | Pending | Incremental/history scope verified; redacted reports and reviewed exceptions |
 | 6 | Trivy and CycloneDX SBOM | Pending | Dependency inventory, HIGH/CRITICAL policy and reviewed audit exceptions |
@@ -69,6 +70,9 @@ references for this delivery remain pending. The earlier foundation is recorded
 in PR #245; it does not prove acceptance of these changes.
 
 ## 4. Phase 1 — Reproducible CI foundation
+
+This section retains the Phase 1 implementation and validation history. Section 6
+supersedes its test/coverage commands, artifacts and package dependency layout.
 
 ### 4.1. Files and changes
 
@@ -108,7 +112,7 @@ change the developer's global default. Setup verifies and prints the actual
 Rust/Cargo releases (`rustc 1.99.1`, `cargo 1.99.1`) and component
 compiler provenance.
 
-Required quality and test commands are:
+The Phase 1 quality and test commands were (section 6 replaces the test commands):
 
 ```bash
 cargo fmt --all -- --check
@@ -124,7 +128,8 @@ otherwise resolve dependencies. Every job using Cargo also finishes with
 `git diff --exit-code -- Cargo.lock` under `always()`, including on
 failure. CI never runs `cargo update`.
 
-Cargo utilities remain pinned in `ci-tools.toml`:
+Cargo utilities remain pinned in `ci-tools.toml` (Tarpaulin is retained only for
+historical comparisons; the workflow no longer installs or runs it):
 
 | Utility | Exact release |
 | --- | --- |
@@ -483,7 +488,271 @@ locally; it is **not yet validated in CI**.
 - [ ] Review the lower-severity remediation follow-up and any proposed
   exclusions before progressively tightening the threshold.
 
-## 6. Updating this record
+## 6. Test reports and reference coverage — API modernization Phase 2
+
+This implements Issue #238, Phase 3 in the Agent roadmap above. It follows the
+aggregate-only reporting approach in FWCloud API `ENS`
+[`scripts/ci-reports.cjs`](https://github.com/soltecsis/fwcloud-api/blob/ENS/scripts/ci-reports.cjs),
+using Python's standard library for XML, JSON, hashing and validation.
+
+### 6.1. Pinned tools and installation
+
+| Input | Exact version | Installation |
+| --- | --- | --- |
+| Rust / Cargo | `1.99.1` | Existing shared Phase 1 action |
+| LLVM tools | `llvm-tools-preview` from Rust `1.99.1` | `rustup component add --toolchain 1.99.1 llvm-tools-preview` |
+| `cargo-nextest` | `0.9.151` | Official Linux x86_64 release archive |
+| `cargo-llvm-cov` | `0.9.1` | Official Linux x86_64 release archive |
+
+`.github/report-tools.toml` pins the complete download URLs and SHA-256 digests.
+`scripts/install-report-tools.py` verifies each archive before reading its single
+regular binary, installs under `$RUNNER_TEMP/agent-report-tools/bin`, verifies the
+CLI release, and adds it to `GITHUB_PATH`. Archives are never extracted wholesale.
+The release digests were checked against GitHub's official release asset API.
+Installation does not compile Cargo utilities or resolve their dependencies.
+
+The exact release manifests declare minimum Rust versions
+[`1.91` for Nextest](https://github.com/nextest-rs/nextest/blob/cargo-nextest-0.9.151/Cargo.toml)
+and [`1.87` for cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov/blob/v0.9.1/Cargo.toml).
+Both were exercised with Rust `1.99.1` locally. LLVM is taken from that compiler,
+not from an independently versioned system installation. The workflow continues
+to use `ubuntu-24.04` x86_64. Other architectures require separately reviewed pins.
+
+### 6.2. One test execution, discovery and doctests
+
+`scripts/test_ci.py build` removes old test/coverage/JUnit outputs, cleans LLVM
+workspace coverage data, builds instrumented binaries without running test
+bodies, and compares Cargo and Nextest listings. Cargo dependency resolution uses
+`--locked` throughout. `show-env` supplies the same instrumentation to the build
+and discovery commands. `CARGO_LLVM_COV_TARGET_DIR` is explicitly `target/` for
+both the build and execution; otherwise LLVM's wrapper chooses a different
+directory and recompiles dependencies. The Cargo cache has a reporting-tool
+suffix separate from quality builds. Raw profiles produced by discovery are
+removed before execution. Report directories and counters are never reused as
+coverage evidence from the cache.
+
+The only command that executes test bodies is:
+
+```bash
+cargo llvm-cov nextest --profile ci --locked --no-tests=fail --no-report
+```
+
+The CI profile in `../.config/nextest.toml` disables fail-fast and retries,
+stores failure output, suppresses successful output, and reports all skipped
+tests. It uses one test thread because existing tests share
+`./etc/openvpn_status_sampling.json`; `serial_test` mutexes do not synchronize
+the separate processes created by Nextest. Parallel execution exposed three
+filesystem races locally. Serial execution passed all 93 tests; no tests were
+removed, skipped or retried to obtain that result.
+
+Cargo and Nextest both discover **93 tests across 18 binaries** on the tracked
+application baseline. `cargo test --doc --locked -- --list` discovers **zero
+doctests**, consistent with the original Actions log. Listings execute no test
+bodies. Each CI execution compares the complete test-name multiset, records its
+SHA-256 and count, and requires zero doctests. New doctests therefore fail the
+discovery check with an explicit policy message until their execution and
+reporting are implemented; they are never silently omitted by Nextest.
+
+Five former inline `#[cfg(test)] mod tests` bodies are moved unchanged into
+`src/config_tests.rs`, `src/utils/files_list_tests.rs`,
+`src/utils/http_files_tests.rs`, `src/utils/openvpn_dir_tests.rs` and
+`src/workers/openvpn_status_collector_tests.rs`. `#[path]` keeps their original
+module names and private-item access. Their bodies were compared with the
+pre-migration source after deindentation and Rustfmt reflow; they match exactly.
+This allows stable LLVM coverage to exclude test code without disabling tests
+or enabling nightly coverage attributes.
+
+### 6.3. Coverage scope, formats and policy
+
+After the one execution, `scripts/test_ci.py reports` attempts every export,
+even if another export or the runner failed. It uses only `cargo llvm-cov report`
+and never reruns tests. All exports and the console gate use identical filename
+exclusions: tests, examples, benchmarks, generated/build/vendor paths and
+`*_tests.rs` / `*-tests.rs`, in addition to LLVM's default dependency exclusions.
+The validator requires original tracked `.rs` files under `src/`.
+
+| Report | Path |
+| --- | --- |
+| Nextest JUnit source | `target/nextest/ci/junit.xml` |
+| Published JUnit | `reports/tests/junit.xml` |
+| Command results, discovery and phase durations | `reports/tests/execution.json` |
+| LCOV | `reports/coverage/lcov.info` |
+| Native LLVM JSON, without redundant functions | `reports/coverage/coverage.json` |
+| Derived aggregate line metrics and minimum | `reports/coverage/coverage-summary.json` |
+| HTML report and its assets | `reports/coverage/html/index.html` |
+| Coverage identity, checksum and validation | `reports/coverage/analysis.json` |
+| Aggregate execution metadata | `reports/metadata.json` |
+
+The existing minimum remains **line coverage >= 20%**. The console command
+`cargo llvm-cov report --fail-under-lines 20` enforces it, and the validator
+independently applies the same minimum to unrounded native JSON aggregate line
+metrics. Zero executable lines, missing data and calculation failures fail CI.
+Dependencies and test-only files cannot increase the gated percentage.
+
+Rust `1.99.1` exports LLVM JSON `3.1.0`; the validator also understands the `2.x`
+layout with the same required fields. LLVM counts macro expansion lines in
+LCOV `LF`/`LH` and JSON summaries; the number of physical `DA` records may be
+smaller. Validation checks physical line ranges and coverage bounds, then
+compares every file's declared LCOV totals with native JSON and sums the totals.
+It preserves LLVM's measurements and never creates artificial source lines.
+
+LCOV source paths and JSON file names are normalized only after verifying their
+absolute paths lie inside the resolved checkout root. Paths outside that root,
+traversal, absolute published LCOV paths, symlinks, missing originals, untracked
+generated sources and nonapplication paths fail validation. Published LCOV uses
+only `SF:src/...rs`, retaining original line numbers for the planned Phase 7
+SonarQube import. No SonarQube job or import acceptance is claimed here.
+
+The tracked obsolete `cobertura.xml` is deleted. `/cobertura.xml` and `/reports/`
+are ignored. Each run regenerates its coverage from fresh counters.
+
+### 6.4. Validation, provenance and failure handling
+
+`scripts/ci_reports.py` verifies JUnit XML structure, declared and actual counts,
+at least one executed test, failures, skips and suite errors. DTD/entity payloads
+are rejected. It requires successful recorded clean/build/discovery/test/export/
+normalization/gate commands and complete execution metadata; a passing partial
+JUnit cannot hide a failed or interrupted runner. Every command's exit status
+remains separate, and the workflow has no `continue-on-error` on these stages.
+
+The validator also requires LCOV, valid JSON aggregate/file metrics, HTML,
+positive executable source coverage, the 20% minimum, agreement between formats,
+and SHA-256 digests bound to the produced reports. It derives
+`coverage-summary.json`, `metadata.json` and `analysis.json` during validation.
+Invalid or missing evidence generates failed metadata and fails the job.
+
+The actual `git rev-parse HEAD` must match `ANALYSIS_COMMIT`, and Git must confirm
+the checkout root. Metadata records repository, commit, event/ref, run ID,
+attempt, Rust/Cargo/runner/coverage-tool versions, command/test status, counts,
+coverage, timings and validation errors. PR checkouts retain the PR head as
+their analyzed commit; `GITHUB_SHA`'s synthetic merge commit is never substituted.
+Execution records from another commit, run, attempt or tool version are rejected.
+
+Only after normalization are the exact published LCOV bytes hashed.
+`analysis.json` records that SHA-256, producing attempt, identity, versions,
+coverage, test status, validation result and `accepted_baseline`. Existing
+analysis with a different identity, producer or checksum is rejected. Only a
+complete successful validation sets `accepted_baseline: true`; forceful runner
+termination leaves failure/incomplete evidence, never an accepted baseline.
+
+`GITHUB_STEP_SUMMARY` contains only the analyzed commit, aggregate test counts,
+execution status, line percentage, minimum and validation status. Individual
+test names, assertions, stack traces and source code are excluded from it and
+from validation error messages. JUnit may contain failure details; artifact
+visibility and organization privacy/retention review remain applicable.
+
+### 6.5. Artifacts and gates
+
+Both uploads run under `always()`, request 90-day retention, reject absent upload
+inputs, and use immutable `actions/upload-artifact` commit
+`ea165f8d65b6e75b540449e92b4886f43607fa02` (`v4.6.2`).
+
+- `agent-tests-<RUN_ID>-<ATTEMPT>` contains `tests/` (JUnit and execution receipt)
+  and `metadata.json`, under the common `reports/` upload root.
+- `agent-coverage-<RUN_ID>` contains the contents of `reports/coverage/` and uses
+  `overwrite: true`. `analysis.json` identifies the actual producing attempt.
+
+Available failed evidence is retained without changing the original test or
+coverage failure. A later job may consume an earlier valid producing attempt of
+the same run if the producer was not rerun; its consumer must verify identity,
+accepted status and checksum. If the producer is rerun and fails, its overwritten
+artifact is failed evidence and cannot become a fallback baseline. Forceful
+termination may prevent uploads entirely and does not waive validation.
+
+The separate `coverage` job is removed. Both DEB and RPM depend on `agent-ci`
+and `security_audit`; coverage now gates packages through `agent-ci -> test`.
+External publication remains restricted to the existing main-push conditions.
+
+### 6.6. Reference measurements and outstanding hosted acceptance
+
+The reported **667 seconds is not an established baseline**. Actual successful
+GitHub Actions executions were inspected on 2026-11-06:
+
+| Previous run | Analyzed revision | Test job | Coverage job | Sum |
+| --- | --- | --- | --- | --- |
+| [42184497510](https://github.com/soltecsis/fwcloud-agent/actions/runs/42184497510) | `2b2d4777bfc079dfc3bad710c410e74a6e1baeff` | 42 s | 587 s | 629 s |
+| [42178784330](https://github.com/soltecsis/fwcloud-agent/actions/runs/42178784330) | `2cdfefcef2a6cc887baa979971872de36e21ddf6` | 188 s | 495 s | 683 s |
+| [42029990388](https://github.com/soltecsis/fwcloud-agent/actions/runs/42029990388) | `d35bcd1b5b8ce5d8da67a4dddc3d66763804941b` | 195 s | 460 s | 655 s |
+
+The primary reference is attempt 1 of run `42184497510`, using `ubuntu-24.04`,
+runner image `20261101.360.1`, Rust `1.99.1`, Tarpaulin `0.37.5`, and the same
+93-test application suite. Its logs report **60.90% (721/1,184 lines)**.
+The subsequent application base `127ebb9` merges that ShellCheck-only change.
+
+| Primary reference component | Measured duration / source |
+| --- | --- |
+| Previous standalone test setup | 22 s, Actions step timestamps |
+| Previous standalone application build | 4 s, Actions step timestamps |
+| Previous test step including test compilation | 12 s, Actions step timestamps |
+| Coverage tool installation | 149.21 s, log timestamps from package install to completion |
+| Complete coverage setup including toolchain/cache/environment artifact | 174 s, Actions step timestamps |
+| Coverage application compilation | 170.03 s, log `Building project` to `Finished test` |
+| Traced execution and collection | About 235.09 s, build completion to coverage results |
+| Coverage summary / XML generation | Included in the 405 s coverage step; no separate reliable timer |
+| Coverage artifact generation/upload | 1 s, Actions step timestamps |
+| Previous jobs summed / longest job | 629 s / 587 s |
+| Replacement hosted job and uploads | **Pending first execution of the implementation** |
+
+Local verification uses `/tmp/fwcloud-agent-report-source`, exported from the
+tracked application base plus these reporting changes, excluding unrelated
+untracked application files. Rust and LLVM tools are isolated under `/tmp`;
+compilation uses two workers and disables debug symbols to limit disk usage.
+The local context uses synthetic run `1`/attempt `3` for validator exercises;
+it is not a hosted run or evidence for a committed implementation revision.
+
+| Local verification on 2026-11-06 | Result |
+| --- | --- |
+| Verified binary installation, LLVM already installed | 2.66 s |
+| Initial instrumented cold build | 185.90 s |
+| Cargo/Nextest discovery | 93 tests each; zero doctests; about 1.16 s warm |
+| Corrected warm instrumented build | 0.47 s; execution reused it without recompiling |
+| Single serial Nextest execution | 93 passed, zero failures/skips; 2.37 s runner / 2.93 s command |
+| LCOV / JSON / HTML / console processing | About 0.76 s combined, before normalization/validation |
+| Report validation | Passed; about 0.11 s |
+| LLVM line coverage | **62.06% (1,086/1,750)**, minimum unchanged at 20% |
+| Failed execution probe | 90 passed / 3 failed; JUnit and all coverage exports retained; validation failed and baseline rejected |
+| Validator, runner, installer, performance and existing helper tests | 63 passed; negative coverage/report/provenance cases included |
+| Real Nextest reporting fixture | One passed, one failed, one skipped; failure retained and successful output suppressed |
+| Rustfmt / all-target Clippy with `-D warnings` | Passed after the module moves |
+| Actionlint `1.7.7` | Passed |
+| `Cargo.lock` | Unchanged |
+
+The observed coverage difference is **+1.16 percentage points** versus hosted
+Tarpaulin, with different executable line denominators. Instrumentation,
+macro/async handling and test-code exclusion differ. This is a provisional
+cross-environment comparison; it is not proof of a coverage improvement or an
+accepted hosted reference baseline. The 20% minimum is unchanged.
+
+The implementation is **not accepted as performance-complete** until comparable
+hosted executions verify no increase. Installation avoids utility compilation;
+instrumented build and execution share the same target directory; caches remain
+optional. Timings for clean/build/discovery/test/each export/normalization are
+recorded in the execution receipt, installation in `reports/ci/report-tools.json`,
+and validation in `metadata.json`. Actions step timestamps provide setup and
+artifact generation/upload times.
+
+After publishing the implementation for CI, capture comparable runs and use:
+
+```bash
+gh run view 42184497510 --repo soltecsis/fwcloud-agent --json jobs,headSha,url > previous.json
+gh run view <NEW_RUN_ID> --repo soltecsis/fwcloud-agent --json jobs,headSha,url > replacement.json
+python3 .github/scripts/ci_performance.py previous.json replacement.json
+```
+
+The comparison rejects incomplete/failed runs and reports both summed job time
+and the previous longest job to expose a wall-time regression hidden by adding
+parallel jobs. Record cold/warm cache state, runner image, exact implementation
+SHA, tool installation, compilation, execution, report processing and both
+uploads. Investigate regressions before closing this phase.
+
+- [ ] Record implementation commit/PR, successful hosted run and reviewed artifacts.
+- [ ] Verify failed-test, missing-report and sub-20% probes fail hosted `test` and `agent-ci`.
+- [ ] Confirm artifact overwrite/rerun identity and visibility/retention behavior in GitHub.
+- [ ] Record a validated hosted LLVM baseline, checksum and Tarpaulin comparison.
+- [ ] Measure replacement hosted cold/warm runs against the reference and confirm no regression.
+- [ ] Record reviewer and acceptance date. Local timings do not satisfy these items.
+
+## 7. Updating this record
 
 Update this document with each delivery. Record the exact revision, commands,
 environment, results, limitations, PR/run/artifact links and reviewer. Keep
