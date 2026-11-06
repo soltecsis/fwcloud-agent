@@ -24,9 +24,10 @@ mod common;
 
 #[tokio::test]
 async fn interfaces_api_call_exists() {
-    let url = format!("{}/api/v1/openvpn/update/status", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/update/status", app);
 
-    let res = reqwest::Client::new().put(url).send().await.unwrap();
+    let res = app.client().put(url).send().await.unwrap();
 
     assert_ne!(res.status().as_u16(), 400);
     assert_ne!(res.status().as_u16(), 404);

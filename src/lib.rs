@@ -29,6 +29,9 @@ mod errors;
 pub mod routes;
 mod utils;
 mod workers;
+pub use errors::FwcError;
+pub use utils::cmd::{CommandExecutor, SystemCommands};
+pub use utils::ws::WsData;
 
 use actix_web::{dev::Server, middleware, web, App, HttpServer};
 use env_logger::Env;
@@ -59,15 +62,17 @@ pub fn run(config: Config, listener: TcpListener) -> Result<Server, std::io::Err
 
     info!("Listening on: {}:{}", config.bind_ip, config.bind_port);
 
-    OpenVPNStatusSamplingConfig::load_or_create(config.etc_dir)?;
+    OpenVPNStatusSamplingConfig::load_or_create(&config.etc_dir)?;
 
     let cfg = Arc::new(config);
     let cfg_main_thread = cfg.clone();
 
     // Start workers threads.
     let openvpn_st_collector = OpenVPNStCollector::new(&cfg);
+    let (openvpn_st_collector_channel, collector_worker) = openvpn_st_collector.start(cfg.clone());
     let workers_channels = WorkersChannels {
-        openvpn_st_collector: openvpn_st_collector.start(cfg.clone()),
+        openvpn_st_collector: openvpn_st_collector_channel,
+        _collector_worker: collector_worker,
     };
 
     let server = HttpServer::new(move || {

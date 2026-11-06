@@ -1,78 +1,71 @@
 use super::*;
 use crate::errors::Result;
-use rand::RngExt;
-use serial_test::serial;
 use std::env;
 use uuid::Uuid;
 
-fn collector_factory(env_list: Vec<(&str, String)>, change_paths: bool) -> OpenVPNStCollectorInner {
-    let api_config_file = OpenVPNStatusSamplingConfig::path("./etc");
-    let _ = fs::remove_file(&api_config_file);
-
-    for v in env_list.iter() {
-        env::set_var(v.0, &v.1);
+struct TestCollector {
+    inner: OpenVPNStCollectorInner,
+    root: tempfile::TempDir,
+}
+impl std::ops::Deref for TestCollector {
+    type Target = OpenVPNStCollectorInner;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
-
-    env::set_var("API_KEY", "d64c88318c8f213f427af857d0013f93");
-    let cfg = Arc::new(Config::new().unwrap());
-
-    for v in env_list.iter() {
-        if v.0 == "OPENVPN_STATUS_FILES" {
-            let status_files: Vec<String> =
-                v.1.split(',')
-                    .filter(|file| !file.is_empty())
-                    .map(|file| String::from(file.trim()))
-                    .collect();
-            let sampling_interval = env_list
-                .iter()
-                .find(|v| v.0 == "OPENVPN_STATUS_SAMPLING_INTERVAL")
-                .and_then(|v| v.1.parse::<u64>().ok())
-                .unwrap_or(DEFAULT_SAMPLING_INTERVAL);
-            let request_max_lines = env_list
-                .iter()
-                .find(|v| v.0 == "OPENVPN_STATUS_REQUEST_MAX_LINES")
-                .and_then(|v| v.1.parse::<usize>().ok())
-                .unwrap_or(DEFAULT_REQUEST_MAX_LINES);
-            let cache_max_size = env_list
-                .iter()
-                .find(|v| v.0 == "OPENVPN_STATUS_CACHE_MAX_SIZE")
-                .and_then(|v| v.1.parse::<usize>().ok())
-                .unwrap_or(DEFAULT_CACHE_MAX_SIZE);
-
-            OpenVPNStatusSamplingConfig {
-                status_files: status_files
-                    .into_iter()
-                    .map(|path| OpenVPNStatusFileConfig {
-                        path,
-                        sampling_interval,
-                        request_max_lines,
-                        cache_max_size,
-                    })
-                    .collect(),
-            }
-            .save(cfg.etc_dir)
-            .unwrap();
-        }
+}
+impl std::ops::DerefMut for TestCollector {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
-
-    for v in env_list.iter() {
-        env::remove_var(v.0);
+}
+impl Drop for TestCollector {
+    fn drop(&mut self) {
+        let _ = remove_collector_files(&self.inner);
     }
-
-    let mut collector = OpenVPNStCollectorInner::new(&cfg);
-
-    if change_paths {
-        for inx in 0..collector.len() {
-            collector.openvpn_status_files[inx].tmp_file = collector.openvpn_status_files[inx]
-                .tmp_file
-                .replace("./tmp/", "./tests/playground/tmp/");
-            collector.openvpn_status_files[inx].cache_file = collector.openvpn_status_files[inx]
-                .cache_file
-                .replace("./data/", "./tests/playground/data/");
-        }
+}
+fn config_fixture() -> (tempfile::TempDir, Config) {
+    let root = tempfile::Builder::new()
+        .prefix("collector-")
+        .tempdir_in("tests/playground/tmp")
+        .unwrap();
+    let path = |name| root.path().join(name).to_str().unwrap().to_owned();
+    let config =
+        Config::with_runtime_dirs(path("etc"), path("tmp"), path("data"), path("plugins")).unwrap();
+    (root, config)
+}
+fn collector_factory(options: Vec<(&str, String)>, _change_paths: bool) -> TestCollector {
+    let (root, cfg) = config_fixture();
+    let value = |name| {
+        options
+            .iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| value.as_str())
+    };
+    let files = value("OPENVPN_STATUS_FILES").unwrap_or("");
+    OpenVPNStatusSamplingConfig {
+        status_files: files
+            .split(',')
+            .filter(|file| !file.is_empty())
+            .map(|path| OpenVPNStatusFileConfig {
+                path: path.trim().into(),
+                sampling_interval: value("OPENVPN_STATUS_SAMPLING_INTERVAL")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(DEFAULT_SAMPLING_INTERVAL),
+                request_max_lines: value("OPENVPN_STATUS_REQUEST_MAX_LINES")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(DEFAULT_REQUEST_MAX_LINES),
+                cache_max_size: value("OPENVPN_STATUS_CACHE_MAX_SIZE")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(DEFAULT_CACHE_MAX_SIZE),
+            })
+            .collect(),
     }
-
-    collector
+    .save(&cfg.etc_dir)
+    .unwrap();
+    TestCollector {
+        inner: OpenVPNStCollectorInner::new(&cfg),
+        root,
+    }
 }
 
 fn status_files_list_factory(n: usize) -> Vec<String> {
@@ -123,23 +116,20 @@ fn remove_collector_files(collector: &OpenVPNStCollectorInner) -> Result<()> {
 }
 
 #[test]
-#[serial]
 fn generates_empty_openvpn_status_file_vector_without_api_config() {
     let collector = collector_factory(vec![], false);
     assert_eq!(collector.openvpn_status_files.len(), 0);
 }
 
 #[test]
-#[serial]
 fn empty_openvpn_status_file_vector_if_config_option_is_empty() {
     let collector = collector_factory(vec![("OPENVPN_STATUS_FILES", String::from(""))], false);
     assert_eq!(collector.openvpn_status_files.len(), 0);
 }
 
 #[test]
-#[serial]
 fn customized_openvpn_status_files_config() {
-    let n = rand::rng().random_range(0..5);
+    let n = 3;
     let list = status_files_list_factory(n);
     let collector = collector_factory(vec![("OPENVPN_STATUS_FILES", list.join(","))], false);
     assert_eq!(collector.openvpn_status_files.len(), n);
@@ -148,11 +138,19 @@ fn customized_openvpn_status_files_config() {
         assert_eq!(&collector.openvpn_status_files[inx].st_file, file);
         assert_eq!(
             collector.openvpn_status_files[inx].tmp_file,
-            format!("./tmp/{}.tmp", file.replace('/', "_"))
+            format!(
+                "{}/tmp/{}.tmp",
+                collector.root.path().display(),
+                file.replace('/', "_")
+            )
         );
         assert_eq!(
             collector.openvpn_status_files[inx].cache_file,
-            format!("./data/{}.data", file.replace('/', "_"))
+            format!(
+                "{}/data/{}.data",
+                collector.root.path().display(),
+                file.replace('/', "_")
+            )
         );
         assert_eq!(collector.openvpn_status_files[inx].last_update, 0);
         assert_eq!(
@@ -167,12 +165,9 @@ fn customized_openvpn_status_files_config() {
 }
 
 #[test]
-#[serial]
 fn should_apply_api_sampling_parameters_per_file() -> Result<()> {
-    let api_config_file = OpenVPNStatusSamplingConfig::path("./etc");
-    let _ = fs::remove_file(&api_config_file);
-    env::set_var("API_KEY", "d64c88318c8f213f427af857d0013f93");
-    let cfg = Arc::new(Config::new().unwrap());
+    let (_root, cfg) = config_fixture();
+    let api_config_file = OpenVPNStatusSamplingConfig::path(&cfg.etc_dir);
     let list = status_files_list_factory(2);
 
     OpenVPNStatusSamplingConfig {
@@ -191,7 +186,7 @@ fn should_apply_api_sampling_parameters_per_file() -> Result<()> {
             },
         ],
     }
-    .save(cfg.etc_dir)?;
+    .save(&cfg.etc_dir)?;
 
     let collector = OpenVPNStCollectorInner::new(&cfg);
     assert_eq!(collector.openvpn_status_files.len(), 2);
@@ -202,7 +197,7 @@ fn should_apply_api_sampling_parameters_per_file() -> Result<()> {
     assert_eq!(collector.openvpn_status_files[1].sampling_interval, 45);
     assert_eq!(collector.openvpn_status_files[1].cache_max_size, 2097152);
 
-    let config = OpenVPNStatusSamplingConfig::load(cfg.etc_dir)?.unwrap();
+    let config = OpenVPNStatusSamplingConfig::load(&cfg.etc_dir)?.unwrap();
     assert_eq!(config.request_max_lines_for_path(&list[0]), 200);
     assert_eq!(config.request_max_lines_for_path(&list[1]), 500);
     assert_eq!(
@@ -210,13 +205,11 @@ fn should_apply_api_sampling_parameters_per_file() -> Result<()> {
         DEFAULT_REQUEST_MAX_LINES
     );
 
-    env::remove_var("API_KEY");
     fs::remove_file(api_config_file)?;
     Ok(())
 }
 
 #[test]
-#[serial]
 fn should_wait_for_file_sampling_interval() -> Result<()> {
     let list = status_files_list_factory(1);
     let mut collector = collector_factory(
@@ -261,7 +254,6 @@ fn should_wait_for_file_sampling_interval() -> Result<()> {
 }
 
 #[test]
-#[serial]
 fn should_ignore_fist_sample_set() -> Result<()> {
     let list = status_files_list_factory(1);
     let mut collector = collector_factory(vec![("OPENVPN_STATUS_FILES", list.join(","))], true);
@@ -284,7 +276,6 @@ fn should_ignore_fist_sample_set() -> Result<()> {
 }
 
 #[test]
-#[serial]
 fn should_append_to_cache_file_if_timestamp_changes() -> Result<()> {
     let list = status_files_list_factory(1);
     let mut collector = collector_factory(vec![("OPENVPN_STATUS_FILES", list.join(","))], true);
@@ -336,7 +327,6 @@ fn should_append_to_cache_file_if_timestamp_changes() -> Result<()> {
 }
 
 #[test]
-#[serial]
 fn should_not_append_to_cache_file_if_timestamp_is_equal() -> Result<()> {
     let list = status_files_list_factory(1);
     let mut collector = collector_factory(vec![("OPENVPN_STATUS_FILES", list.join(","))], true);
@@ -374,7 +364,6 @@ fn should_not_append_to_cache_file_if_timestamp_is_equal() -> Result<()> {
 }
 
 #[test]
-#[serial]
 fn control_cache_file_size() -> Result<()> {
     let list = status_files_list_factory(1);
     let mut collector = collector_factory(
@@ -642,7 +631,6 @@ fn should_parse_structured_status_with_reordered_extended_columns() {
 }
 
 #[test]
-#[serial]
 fn should_preserve_sampling_semantics_for_structured_status_formats() -> Result<()> {
     for delimiter in [',', '\t'] {
         let list = status_files_list_factory(1);
@@ -694,7 +682,6 @@ fn should_preserve_sampling_semantics_for_structured_status_formats() -> Result<
 }
 
 #[test]
-#[serial]
 fn should_not_write_partial_cache_for_malformed_structured_status_files() -> Result<()> {
     for delimiter in [',', '\t'] {
         let list = status_files_list_factory(1);

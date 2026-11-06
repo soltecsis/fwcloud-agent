@@ -114,7 +114,7 @@ async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result
         // Only for debug purposes. It is useful for verify that the mutex makes its work.
         //thread::sleep(time::Duration::from_millis(10_000));
 
-        HttpFiles::new(cfg.tmp_dir, true)
+        HttpFiles::new(&cfg.tmp_dir, true)
             .files_upload(payload)
             .await?;
 
@@ -136,7 +136,7 @@ async fn dir_ensure(
         let _mutex_data = mutex.lock().await;
         debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
 
-        openvpn_dir.create()?;
+        openvpn_dir.create_with_executor(cfg.command_executor.as_ref())?;
 
         debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
     } // Mutex scope end.
@@ -194,6 +194,8 @@ async fn files_read(
     let _mutex_data = mutex.lock().await;
     debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
 
+    files_list.validate_paths()?;
+
     if !files_list.dir_exists() {
         return Err(FwcError::DirNotFound);
     }
@@ -221,6 +223,7 @@ async fn files_sha256(
     mut files_list: web::Json<FilesList>,
     cfg: web::Data<Arc<Config>>,
 ) -> Result<HttpResponse> {
+    files_list.validate_paths()?;
     let result: String;
 
     // Mutex scope start.
@@ -264,6 +267,8 @@ async fn get_status(
     mut files_list: web::Json<FilesList>,
     cfg: web::Data<Arc<Config>>,
 ) -> Result<HttpResponse> {
+    files_list.validate_paths()?;
+
     let mut result: Vec<String>;
 
     // Mutex scope start.
@@ -279,10 +284,10 @@ async fn get_status(
         }
 
         let status_file_path = files_list.path(0);
-        let max_lines = PersistedOpenVPNStatusSamplingConfig::load_or_create(cfg.etc_dir)?
+        let max_lines = PersistedOpenVPNStatusSamplingConfig::load_or_create(&cfg.etc_dir)?
             .request_max_lines_for_path(&status_file_path);
         let file_name = format!("{}.data", status_file_path).replace('/', "_");
-        files_list.chdir(cfg.data_dir);
+        files_list.chdir(&cfg.data_dir);
         files_list.rename(0, &file_name);
 
         result = files_list.head_remove(0, max_lines)?;
@@ -325,11 +330,11 @@ async fn status_sampling_update(
         let _mutex_data = mutex.lock().await;
         debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
 
-        collector.replace_status_files(&status_files, cfg.tmp_dir, cfg.data_dir);
+        collector.replace_status_files(&status_files, &cfg.tmp_dir, &cfg.data_dir);
         PersistedOpenVPNStatusSamplingConfig {
             status_files: status_files.clone(),
         }
-        .save(cfg.etc_dir)?;
+        .save(&cfg.etc_dir)?;
 
         debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
     }
@@ -352,7 +357,7 @@ async fn status_sampling_show(cfg: web::Data<Arc<Config>>) -> Result<HttpRespons
         let _mutex_data = mutex.lock().await;
         debug!("OpenVPN mutex locked (thread id: {})", thread_id::get());
 
-        persisted_config = PersistedOpenVPNStatusSamplingConfig::load_or_create(cfg.etc_dir)?;
+        persisted_config = PersistedOpenVPNStatusSamplingConfig::load_or_create(&cfg.etc_dir)?;
 
         debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
     }
@@ -367,6 +372,8 @@ async fn status_sampling_show(cfg: web::Data<Arc<Config>>) -> Result<HttpRespons
 
 #[put("/openvpn/get/status/rt")]
 async fn get_status_rt(files_list: web::Json<FilesList>) -> Result<HttpResponse> {
+    files_list.validate_paths()?;
+
     // Only one OpenVPN status file must be indicated in the request.
     if files_list.len() != 1 {
         return Err(FwcError::OnlyOneFileExpected);

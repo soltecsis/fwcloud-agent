@@ -46,7 +46,7 @@ async fn files_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result
         // Only for debug purposes. It is useful for verify that the mutex makes its work.
         //thread::sleep(time::Duration::from_millis(10_000));
 
-        HttpFiles::new(cfg.tmp_dir, true)
+        HttpFiles::new(&cfg.tmp_dir, true)
             .files_upload(payload)
             .await?;
 

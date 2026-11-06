@@ -29,9 +29,10 @@ mod common;
 // `cargo expand --test health_check` (<- name of the test file)
 #[tokio::test]
 async fn get_info() {
-    let url = format!("{}/api/v1/info", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/info", app);
 
-    let res = reqwest::Client::new().get(url).send().await.unwrap();
+    let res = app.client().get(url).send().await.unwrap();
 
     assert_eq!(res.status().as_u16(), 200);
     let body = res.text().await.unwrap();

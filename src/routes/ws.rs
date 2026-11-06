@@ -24,7 +24,7 @@ use actix_web::{get, web, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use log::debug;
 use std::sync::Mutex;
-use std::{sync::Arc, thread, time::Duration};
+use std::{sync::Arc, time::Duration};
 use uuid::Uuid;
 
 use crate::config::Config;
@@ -55,6 +55,9 @@ async fn websocket(
     stream: web::Payload,
     cfg: web::Data<Arc<Config>>,
 ) -> Result<HttpResponse> {
+    // Validate the upgrade before allocating connection state.
+    ws::handshake(&req).map_err(|error| FwcError::BadRequest(error.to_string()))?;
+
     // WebSockets map mutex start.
     {
         debug!("Locking ws map mutex (thread id: {})", thread_id::get());
@@ -131,7 +134,7 @@ async fn websocket_test(
             debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
         }
         seconds -= 1;
-        thread::sleep(Duration::from_secs(1));
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
     {
         debug!("Locking ws data mutex (thread id: {})", thread_id::get());

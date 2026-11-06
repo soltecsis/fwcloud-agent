@@ -30,6 +30,34 @@ use subprocess::{Exec, Redirection};
 use crate::errors::{FwcError, Result};
 use crate::utils::ws::WsData;
 
+/// Per-application command execution; tests can record requests without spawning processes.
+pub trait CommandExecutor: Send + Sync {
+    fn run(&self, cmd: &str, args: &[&str]) -> Result<HttpResponse>;
+    fn run_ws(
+        &self,
+        cmd: &str,
+        args: &[&str],
+        data: &Arc<Mutex<WsData>>,
+        finish: bool,
+    ) -> Result<HttpResponse>;
+}
+
+pub struct SystemCommands;
+impl CommandExecutor for SystemCommands {
+    fn run(&self, cmd: &str, args: &[&str]) -> Result<HttpResponse> {
+        run_cmd(cmd, args)
+    }
+    fn run_ws(
+        &self,
+        cmd: &str,
+        args: &[&str],
+        data: &Arc<Mutex<WsData>>,
+        finish: bool,
+    ) -> Result<HttpResponse> {
+        run_cmd_ws(cmd, args, data, finish)
+    }
+}
+
 pub fn run_cmd(cmd: &str, args: &[&str]) -> Result<HttpResponse> {
     let output = Exec::cmd(cmd)
         .args(args)

@@ -25,7 +25,7 @@ use validator::Validate;
 
 use crate::config::Config;
 use crate::errors::{FwcError, Result};
-use crate::utils::cmd::{run_cmd, run_cmd_ws};
+
 use crate::utils::myregex::{ALPHA_NUM, NETWORK_INTERFACE_NAME};
 use crate::utils::ws::WsData;
 
@@ -141,7 +141,7 @@ async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Resul
                         .clone();
                     debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
                 }
-                let res = run_cmd_ws(cmd, &args, &ws_data, true)?;
+                let res = cfg.command_executor.run_ws(cmd, &args, &ws_data, true)?;
                 {
                     debug!("Locking ws map mutex (thread id: {})", thread_id::get());
                     let mut ws_map = cfg.ws_map.lock().unwrap();
@@ -150,7 +150,7 @@ async fn plugin(plugin: web::Json<Plugin>, cfg: web::Data<Arc<Config>>) -> Resul
                 }
                 res
             }
-            None => run_cmd(cmd, &args)?,
+            None => cfg.command_executor.run(cmd, &args)?,
         };
 
         debug!("Releasing plugins mutex (thread id: {})", thread_id::get());

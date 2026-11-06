@@ -37,7 +37,7 @@ async fn config_upload(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Resul
         let _mutex_data = mutex.lock().await;
         debug!("Daemon mutex locked (thread id: {})", thread_id::get());
 
-        HttpFiles::new(cfg.tmp_dir, true)
+        HttpFiles::new(&cfg.tmp_dir, true)
             .files_upload(payload)
             .await?;
 

@@ -28,6 +28,40 @@ use std::path::Path;
 
 use crate::errors::{FwcError, Result};
 
+// Reject traversal and symlinks before touching any member of a requested file list.
+pub fn validate_directory(dir: &str) -> Result<()> {
+    if dir.is_empty()
+        || dir.chars().any(char::is_control)
+        || Path::new(dir)
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err(FwcError::BadRequest("Invalid directory path".into()));
+    }
+    let mut ancestor = std::path::PathBuf::new();
+    for part in Path::new(dir).components() {
+        ancestor.push(part);
+        if fs::symlink_metadata(&ancestor).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err(FwcError::BadRequest(
+                "Symbolic links are not allowed".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_filename(name: &str) -> Result<()> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains(['/', '\\'])
+        || name.chars().any(char::is_control)
+    {
+        return Err(FwcError::BadRequest("Invalid file name".into()));
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 pub struct FilesList {
     dir: String,
@@ -35,7 +69,21 @@ pub struct FilesList {
 }
 
 impl FilesList {
+    pub fn validate_paths(&self) -> Result<()> {
+        validate_directory(&self.dir)?;
+        for name in &self.files {
+            validate_filename(name)?;
+            validate_directory(&self.path_for_name(name))?;
+        }
+        Ok(())
+    }
+
+    fn path_for_name(&self, name: &str) -> String {
+        format!("{}/{}", self.dir, name)
+    }
+
     pub fn remove(&self) -> Result<()> {
+        self.validate_paths()?;
         if !self.dir_exists() {
             return Err(FwcError::DirNotFound);
         }

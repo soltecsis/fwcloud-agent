@@ -22,28 +22,21 @@
 
 mod common;
 
-use serial_test::serial;
 use std::fs;
 
-const API_CONFIG_FILE: &str = "./etc/openvpn_status_sampling.json";
-
-fn remove_api_config_file() {
-    let _ = fs::remove_file(API_CONFIG_FILE);
-}
-
 #[tokio::test]
-#[serial]
 async fn openvpn_status_sampling_accepts_valid_config() {
-    remove_api_config_file();
-    let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/status/sampling", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header("Content-Type", "application/json")
         .body(
             serde_json::json!({
                 "status_files": [{
-                    "path": "/run/openvpn/server.status",
+                    "path": app.path("server.status").to_str().unwrap(),
                     "sampling_interval": 30,
                     "request_max_lines": 1000,
                     "cache_max_size": 10485760
@@ -61,49 +54,50 @@ async fn openvpn_status_sampling_accepts_valid_config() {
     assert_eq!(body["accepted"], true);
     assert_eq!(
         body["status_files"][0]["path"],
-        "/run/openvpn/server.status"
+        app.path("server.status").to_str().unwrap()
     );
     assert_eq!(body["status_files"][0]["sampling_interval"], 30);
     assert_eq!(body["status_files"][0]["request_max_lines"], 1000);
     assert_eq!(body["status_files"][0]["cache_max_size"], 10485760);
 
-    let persisted: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(API_CONFIG_FILE).unwrap()).unwrap();
+    let persisted: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(app.path("etc/openvpn_status_sampling.json")).unwrap(),
+    )
+    .unwrap();
     assert!(persisted.get("enabled").is_none());
     assert_eq!(
         persisted["status_files"][0]["path"],
-        "/run/openvpn/server.status"
+        app.path("server.status").to_str().unwrap()
     );
-    remove_api_config_file();
 }
 
 #[tokio::test]
-#[serial]
 async fn openvpn_status_sampling_creates_initial_config() {
-    remove_api_config_file();
-    let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/status/sampling", app);
 
-    let res = reqwest::Client::new().get(url).send().await.unwrap();
+    let res = app.client().get(url).send().await.unwrap();
     assert_eq!(res.status().as_u16(), 200);
 
     let body: serde_json::Value = serde_json::from_str(&res.text().await.unwrap()).unwrap();
     assert_eq!(body["accepted"], true);
     assert_eq!(body["status_files"].as_array().unwrap().len(), 0);
 
-    let persisted: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(API_CONFIG_FILE).unwrap()).unwrap();
+    let persisted: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(app.path("etc/openvpn_status_sampling.json")).unwrap(),
+    )
+    .unwrap();
     assert!(persisted.get("enabled").is_none());
     assert_eq!(persisted["status_files"].as_array().unwrap().len(), 0);
-    remove_api_config_file();
 }
 
 #[tokio::test]
-#[serial]
 async fn openvpn_status_sampling_rejects_relative_paths() {
-    remove_api_config_file();
-    let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/status/sampling", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header("Content-Type", "application/json")
         .body(
@@ -122,16 +116,15 @@ async fn openvpn_status_sampling_rejects_relative_paths() {
         .unwrap();
 
     assert_eq!(res.status().as_u16(), 400);
-    remove_api_config_file();
 }
 
 #[tokio::test]
-#[serial]
 async fn openvpn_status_sampling_rejects_empty_paths() {
-    remove_api_config_file();
-    let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/status/sampling", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header("Content-Type", "application/json")
         .body(
@@ -150,22 +143,21 @@ async fn openvpn_status_sampling_rejects_empty_paths() {
         .unwrap();
 
     assert_eq!(res.status().as_u16(), 400);
-    remove_api_config_file();
 }
 
 #[tokio::test]
-#[serial]
 async fn openvpn_status_sampling_rejects_zero_sampling_parameters() {
-    remove_api_config_file();
-    let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/status/sampling", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header("Content-Type", "application/json")
         .body(
             serde_json::json!({
                 "status_files": [{
-                    "path": "/run/openvpn/server.status",
+                    "path": app.path("server.status").to_str().unwrap(),
                     "sampling_interval": 0,
                     "request_max_lines": 1000,
                     "cache_max_size": 10485760
@@ -178,22 +170,21 @@ async fn openvpn_status_sampling_rejects_zero_sampling_parameters() {
         .unwrap();
 
     assert_eq!(res.status().as_u16(), 400);
-    remove_api_config_file();
 }
 
 #[tokio::test]
-#[serial]
 async fn openvpn_status_sampling_rejects_missing_sampling_parameters() {
-    remove_api_config_file();
-    let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/status/sampling", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header("Content-Type", "application/json")
         .body(
             serde_json::json!({
                 "status_files": [{
-                    "path": "/run/openvpn/server.status",
+                    "path": app.path("server.status").to_str().unwrap(),
                     "request_max_lines": 1000,
                     "cache_max_size": 10485760
                 }]
@@ -205,22 +196,21 @@ async fn openvpn_status_sampling_rejects_missing_sampling_parameters() {
         .unwrap();
 
     assert_eq!(res.status().as_u16(), 400);
-    remove_api_config_file();
 }
 
 #[tokio::test]
-#[serial]
 async fn openvpn_status_sampling_rejects_unknown_fields() {
-    remove_api_config_file();
-    let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/status/sampling", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header("Content-Type", "application/json")
         .body(
             serde_json::json!({
                 "status_files": [{
-                    "path": "/run/openvpn/server.status",
+                    "path": app.path("server.status").to_str().unwrap(),
                     "sampling_interval": 30,
                     "request_max_lines": 1000,
                     "cache_max_size": 10485760,
@@ -234,29 +224,28 @@ async fn openvpn_status_sampling_rejects_unknown_fields() {
         .unwrap();
 
     assert_eq!(res.status().as_u16(), 400);
-    remove_api_config_file();
 }
 
 #[tokio::test]
-#[serial]
 async fn openvpn_status_sampling_deduplicates_valid_paths() {
-    remove_api_config_file();
-    let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/status/sampling", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header("Content-Type", "application/json")
         .body(
             serde_json::json!({
                 "status_files": [
                     {
-                        "path": "/run/openvpn/server.status",
+                        "path": app.path("server.status").to_str().unwrap(),
                         "sampling_interval": 30,
                         "request_max_lines": 1000,
                         "cache_max_size": 10485760
                     },
                     {
-                        "path": "/run/openvpn/server.status",
+                        "path": app.path("server.status").to_str().unwrap(),
                         "sampling_interval": 30,
                         "request_max_lines": 1000,
                         "cache_max_size": 10485760
@@ -275,18 +264,17 @@ async fn openvpn_status_sampling_deduplicates_valid_paths() {
     assert_eq!(body["status_files"].as_array().unwrap().len(), 1);
     assert_eq!(
         body["status_files"][0]["path"],
-        "/run/openvpn/server.status"
+        app.path("server.status").to_str().unwrap()
     );
-    remove_api_config_file();
 }
 
 #[tokio::test]
-#[serial]
 async fn openvpn_status_sampling_disable_clears_paths() {
-    remove_api_config_file();
-    let url = format!("{}/api/v1/openvpn/status/sampling", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/status/sampling", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header("Content-Type", "application/json")
         .body(
@@ -303,23 +291,22 @@ async fn openvpn_status_sampling_disable_clears_paths() {
 
     let body: serde_json::Value = serde_json::from_str(&res.text().await.unwrap()).unwrap();
     assert_eq!(body["status_files"].as_array().unwrap().len(), 0);
-    remove_api_config_file();
 }
 
 #[tokio::test]
-#[serial]
 async fn openvpn_status_sampling_show_returns_applied_config() {
-    remove_api_config_file();
-    let base_url = common::spawn_app(None);
+    let app = common::spawn_app(None);
+    let base_url = &app;
     let url = format!("{}/api/v1/openvpn/status/sampling", base_url);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(&url)
         .header("Content-Type", "application/json")
         .body(
             serde_json::json!({
                 "status_files": [{
-                    "path": "/run/openvpn/server.status",
+                    "path": app.path("server.status").to_str().unwrap(),
                     "sampling_interval": 30,
                     "request_max_lines": 1000,
                     "cache_max_size": 10485760
@@ -332,15 +319,13 @@ async fn openvpn_status_sampling_show_returns_applied_config() {
         .unwrap();
     assert_eq!(res.status().as_u16(), 200);
 
-    let res = reqwest::Client::new().get(url).send().await.unwrap();
+    let res = app.client().get(url).send().await.unwrap();
     assert_eq!(res.status().as_u16(), 200);
 
     let body: serde_json::Value = serde_json::from_str(&res.text().await.unwrap()).unwrap();
     assert_eq!(body["accepted"], true);
     assert_eq!(
         body["status_files"][0]["path"],
-        "/run/openvpn/server.status"
+        app.path("server.status").to_str().unwrap()
     );
-
-    remove_api_config_file();
 }

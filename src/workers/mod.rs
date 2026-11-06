@@ -27,4 +27,5 @@ pub mod openvpn_status_collector;
 #[derive(Clone)]
 pub struct WorkersChannels {
     pub openvpn_st_collector: Sender<u8>,
+    pub _collector_worker: std::sync::Arc<openvpn_status_collector::CollectorWorker>,
 }

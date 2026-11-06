@@ -29,9 +29,10 @@ use fwcloud_agent::routes::plugin::Plugin;
 
 #[tokio::test]
 async fn plugin_without_header_neither_data() {
-    let url = format!("{}/api/v1/plugin", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/plugin", app);
 
-    let res = reqwest::Client::new().post(url).send().await.unwrap();
+    let res = app.client().post(url).send().await.unwrap();
 
     assert_eq!(res.status().as_u16(), 400);
     let body = res.text().await.unwrap();
@@ -40,9 +41,11 @@ async fn plugin_without_header_neither_data() {
 
 #[tokio::test]
 async fn plugin_without_data() {
-    let url = format!("{}/api/v1/plugin", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/plugin", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .post(url)
         .header(CONTENT_TYPE, "application/json")
         .send()
@@ -59,7 +62,8 @@ async fn plugin_without_data() {
 
 #[tokio::test]
 async fn plugin_with_invalid_data() {
-    let url = format!("{}/api/v1/plugin", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/plugin", app);
     let test_cases = vec![
         (
             Plugin {
@@ -148,7 +152,8 @@ async fn plugin_with_invalid_data() {
     ];
 
     for (invalid_data, error_message) in test_cases {
-        let res = reqwest::Client::new()
+        let res = app
+            .client()
             .post(&url)
             .header(CONTENT_TYPE, "application/json")
             .body(serde_json::to_string(&invalid_data).unwrap())
@@ -157,7 +162,7 @@ async fn plugin_with_invalid_data() {
             .unwrap();
 
         let expected_status_code = match invalid_data.ws_id {
-            Some(_ws_id) => 500,
+            Some(_ws_id) => 404,
             None => 400,
         };
         assert_eq!(res.status().as_u16(), expected_status_code);
@@ -168,7 +173,8 @@ async fn plugin_with_invalid_data() {
 
 #[tokio::test]
 async fn test_plugin_enable_and_disable() {
-    let url = format!("{}/api/v1/plugin", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/plugin", app);
     let test_cases = vec![
         (
             Plugin {
@@ -203,7 +209,8 @@ async fn test_plugin_enable_and_disable() {
     ];
 
     for (data, answer) in test_cases {
-        let res = reqwest::Client::new()
+        let res = app
+            .client()
             .post(&url)
             .header(CONTENT_TYPE, "application/json")
             .body(serde_json::to_string(&data).unwrap())

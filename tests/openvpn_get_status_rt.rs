@@ -26,9 +26,10 @@ use reqwest::header::CONTENT_TYPE;
 
 #[tokio::test]
 async fn openvpn_get_status_rt_without_header_neither_data() {
-    let url = format!("{}/api/v1/openvpn/get/status/rt", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/get/status/rt", app);
 
-    let res = reqwest::Client::new().put(url).send().await.unwrap();
+    let res = app.client().put(url).send().await.unwrap();
 
     assert_eq!(res.status().as_u16(), 400);
     let body = res.text().await.unwrap();
@@ -37,9 +38,11 @@ async fn openvpn_get_status_rt_without_header_neither_data() {
 
 #[tokio::test]
 async fn openvpn_get_status_rt_without_data() {
-    let url = format!("{}/api/v1/openvpn/get/status/rt", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/get/status/rt", app);
 
-    let res = reqwest::Client::new()
+    let res = app
+        .client()
         .put(url)
         .header(CONTENT_TYPE, "application/json")
         .send()

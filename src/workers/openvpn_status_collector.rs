@@ -231,7 +231,7 @@ impl OpenVPNStCollectorInner {
             openvpn_status_files: vec![],
         };
 
-        let status_files = match OpenVPNStatusSamplingConfig::load_or_create(cfg.etc_dir) {
+        let status_files = match OpenVPNStatusSamplingConfig::load_or_create(&cfg.etc_dir) {
             Ok(config) => config.effective_status_files(),
             Err(err) => {
                 error!("Loading OpenVPN status sampling API config ({err})");
@@ -242,7 +242,7 @@ impl OpenVPNStCollectorInner {
         // Create the list of OpenVPN status files.
         for file in status_files.iter() {
             data.openvpn_status_files
-                .push(OpenVPNStFile::new(file, cfg.tmp_dir, cfg.data_dir));
+                .push(OpenVPNStFile::new(file, &cfg.tmp_dir, &cfg.data_dir));
         }
 
         data
@@ -653,6 +653,20 @@ impl OpenVPNStCollectorInner {
     }
 }
 
+pub struct CollectorWorker {
+    sender: Sender<u8>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl Drop for CollectorWorker {
+    fn drop(&mut self) {
+        let _ = self.sender.send(2);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 impl OpenVPNStCollector {
     pub fn new(cfg: &Config) -> Self {
         OpenVPNStCollector {
@@ -672,12 +686,12 @@ impl OpenVPNStCollector {
             .replace_status_files(status_files, tmp_dir, data_dir);
     }
 
-    pub fn start(&self, cfg: Arc<Config>) -> Sender<u8> {
+    pub fn start(&self, cfg: Arc<Config>) -> (Sender<u8>, Arc<CollectorWorker>) {
         let local_self = self.inner.clone();
 
         let (tx, rx) = mpsc::channel();
 
-        thread::spawn(move || {
+        let thread = thread::spawn(move || {
             block_on(async {
                 info!(
                     "Starting OpenVPN status data collector thread (id: {})",
@@ -687,11 +701,14 @@ impl OpenVPNStCollector {
                     info!("List of OpenVPN status files is empty")
                 }
 
+                let mut force = false;
                 loop {
-                    let mut force = false;
-                    while rx.try_recv().unwrap_or(0) == 1 {
-                        debug!("OpenVPN status data update requested");
-                        force = true;
+                    loop {
+                        match rx.try_recv() {
+                            Ok(1) => force = true,
+                            Ok(2) | Err(mpsc::TryRecvError::Disconnected) => return,
+                            _ => break,
+                        }
                     }
 
                     // Start of mutex scope.
@@ -710,12 +727,23 @@ impl OpenVPNStCollector {
                         debug!("Releasing OpenVPN mutex (thread id: {})", thread_id::get());
                     } // End of mutex scope.
 
-                    thread::sleep(time::Duration::from_secs(1));
+                    force = false;
+                    match rx.recv_timeout(time::Duration::from_secs(1)) {
+                        Ok(2) | Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                        Ok(1) => force = true,
+                        _ => (),
+                    }
                 }
             })
         });
 
-        tx
+        (
+            tx.clone(),
+            Arc::new(CollectorWorker {
+                sender: tx,
+                thread: Some(thread),
+            }),
+        )
     }
 }
 

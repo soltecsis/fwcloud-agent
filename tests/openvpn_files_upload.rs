@@ -24,14 +24,27 @@ mod common;
 
 #[tokio::test]
 async fn openvpn_files_upload_without_data() {
-    let url = format!("{}/api/v1/openvpn/files/upload", common::spawn_app(None));
+    let app = common::spawn_app(None);
+    let url = format!("{}/api/v1/openvpn/files/upload", app);
 
-    let res = reqwest::Client::new().post(url).send().await.unwrap();
+    let res = app.client().post(url).send().await.unwrap();
 
-    assert_eq!(res.status().as_u16(), 500);
+    assert_eq!(res.status().as_u16(), 400);
     let body = res.text().await.unwrap();
-    assert_eq!(
-        body,
-        "{\"message\":\"Destination directory parameter not found in multipart/form-data stream\"}"
-    );
+    assert_eq!(body, "{\"message\":\"Could not find Content-Type header\"}");
+}
+
+#[tokio::test]
+async fn upload_success() {
+    common::files::upload_success("openvpn/files/upload").await;
+}
+
+#[tokio::test]
+async fn upload_validation() {
+    common::files::upload_validation("openvpn/files/upload").await;
+}
+
+#[tokio::test]
+async fn authorization_prevents_side_effects() {
+    common::files::authorization("openvpn/files/upload", Some("openvpn/files/remove")).await;
 }
