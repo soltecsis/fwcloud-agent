@@ -966,7 +966,133 @@ actual `agent-tests-<RUN_ID>-<ATTEMPT>` and `agent-coverage-<RUN_ID>` links,
 closing hosted acceptance. The earlier Issue 3 run and synthetic local receipt
 must not be represented as execution of these new tests on GitHub.
 
-## 8. Phase 5 — Packaged API credential remediation
+## 8. Phase 5 — Git and distribution secret scanning
+
+### 8.1. Scanner integrity and suppression policy
+
+Gitleaks is pinned to **8.30.1**. Each scan job downloads the official
+`gitleaks_8.30.1_linux_x64.tar.gz` release, verifies SHA-256
+`551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb`
+before reading the archive, extracts only its regular `gitleaks` member, and
+requires `gitleaks version` to equal `8.30.1`. Download, integrity, extraction
+and version failures fail the job. The local release download and installed
+binary were independently verified on 2026-11-06.
+
+`.gitleaks.toml` requires `v8.30.1` and extends default rules. The scanner helper
+validates the entire parsed configuration against that policy; additional
+rules, disabled rules, extensions, allowlists and alternate settings are rejected.
+No baseline or suppression exception is approved. Root ignore files (including
+dangling symlinks) and nested `.gitleaksignore` files are rejected, including
+untracked files outside the Git object store.
+Extracted packages containing an ignore file are rejected as well.
+
+Every invocation passes an empty temporary ignore file, an explicit validated
+configuration, `--ignore-gitleaks-allow`, `--redact=100`, `--timeout=300`,
+`--log-level=error`, `--no-banner` and `--no-color`. Ambient `GITLEAKS_*` and
+`GIT_*` settings are removed from subprocess environments. No repository or
+packaged configuration can change the scanner policy. Git external diff and
+text-conversion commands are disabled, and `--text` prevents a repository binary
+attribute from hiding a diff. `scripts/gitleaks-rule-ids.json` is the
+rule ID catalog from the official `v8.30.1` default configuration; it restricts
+what the metadata collector may publish and does not suppress scanner findings.
+Changes to the workflow, policy or helpers still require code review and the
+branch protections planned in Phase 9; a PR can modify its own workflow code.
+
+### 8.2. Event-aware Git scope
+
+`secrets` / `FWCloud-Agent Secrets` runs with a 15-minute timeout, read-only
+repository permissions, exact `ANALYSIS_COMMIT` checkout, no persisted Git
+credentials and `fetch-depth: 0`. It has no distribution credentials.
+
+| Event | Validated scope | Metadata category |
+| --- | --- | --- |
+| Internal or fork PR | Actual `merge-base(base.sha, head.sha)..head.sha` | `pull-request` |
+| Existing branch push | `before..after` | `push` |
+| New branch push (40 zeroes in `before`) | History reachable from `after` | `new-branch-history` |
+| `workflow_dispatch` | All available refs with `--all` | `full-history` |
+
+The helper validates full lowercase commit IDs before invoking Git, verifies
+commit objects, checkout identity and non-shallow history, and rejects missing
+refs, unsupported events and ambiguous merge bases. The PR merge ref is never
+used as the analyzed revision. Native Git failures are fatal. The sanitized
+range and `git rev-list --count` are retained as `logOptions` and `commitCount`.
+`--diff-merges=first-parent` also inspects changes introduced by merge resolution.
+A later deletion does not hide a secret added earlier in the selected range.
+
+### 8.3. Actual package contents and publication ordering
+
+The shared `.github/actions/scan-secrets` action scans DEB and RPM files generated
+by their respective build jobs, before either approved package artifact upload.
+The package glob must identify exactly one nonempty regular file within the
+checkout. Missing, empty, ambiguous, symlinked, malformed or incomplete packages
+fail. SHA-256 binds each successful extraction/scan to its package bytes.
+
+DEB payload and control archives are obtained with `dpkg-deb --fsys-tarfile` and
+`--ctrl-tarfile`, without installation. RPM digests are checked with
+`rpmkeys --checksig --nosignature` (CI packages are unsigned), and the payload
+is decoded using `rpm2cpio` and a strict `newc` reader. RPM scriptlets are queried
+with `rpm -qp --scripts` and included in the scan. Neither format is installed
+on the runner. Tar and CPIO readers reject absolute/traversing paths, duplicate
+members, symlinks, hardlinks, special devices and malformed/truncated content;
+CPIO trailers and CRC variants are validated. Extracted files are private regular
+files under an isolated temporary directory, which is deleted after scanning.
+
+`gitleaks dir` scans the extracted filesystem and installation scripts, including
+the packaged `.env`, credential configuration helper and plugin shell scripts.
+Intermediate archive copies are removed before scanning. Missing expected
+configuration/helper/plugin content fails. The scope is `distribution`, with
+separate `packageType` and `packageSha256` fields for DEB and RPM.
+
+Both packaging jobs require `quality`, `test`, `security_audit` and `secrets`.
+`agent-ci` requires those four jobs plus `deb-package` and `rpm-package`; failure,
+cancellation, skipping or an absent result fails the aggregate. All four external
+publishers retain their trusted `soltecsis/fwcloud-agent` / `push` / `main`
+restriction and require both package jobs and `agent-ci`. Publication credentials
+remain confined to those publishers. Packaging does not depend on `agent-ci`,
+so this graph has no cycle. Rust dependency audit, ShellCheck, test reporting,
+coverage gate, immutable action pins and lockfile checks remain mandatory.
+
+### 8.4. Private reports and sanitized evidence
+
+The API report collector and CI context helper were adapted into
+`scripts/gitleaks-report.cjs` and `scripts/ci-context.cjs`. Only validated CI
+identity, scanner version, scope/range/count, package type/digest, native exit
+code, diagnostic byte count, status, finding count, known default rule IDs and
+fixed error categories are retained. Arbitrary scanner output, JSON parse errors,
+matched text, secret values, source paths and source locations are never copied.
+
+| Status | Evidence required |
+| --- | --- |
+| `success` | Valid JSON array, zero findings, native exit 0, no diagnostics, valid identity and scope |
+| `findings` | Valid nonempty array of known rule IDs, native exit 1, no diagnostics, valid context |
+| `error` | Missing/invalid/inconsistent evidence, invalid context, diagnostic output or execution failure |
+
+Scanner stdout/stderr are captured without printing. Nonempty output at error
+log level fails validation even if the native exit code is 0 or findings exist;
+this prevents partial Git/scanner failures from becoming success or ordinary
+findings. The scan step returns the native scanner code. The collector fails
+separately on findings or errors. No `continue-on-error` is used.
+
+Detailed JSON reports are temporary, created under private directories, deleted
+by the collector, and removed again by an unconditional cleanup step before
+publication. Stale reports/metadata are removed before setup. Only a collector
+that has written fresh sanitized metadata signals readiness for upload. Upload
+also requires successful cleanup; `if-no-files-found: error` rejects missing
+metadata. Upload success cannot override an earlier step failure.
+
+| Artifact | Sole file | Requested retention |
+| --- | --- | --- |
+| `agent-secrets-<RUN_ID>-<ATTEMPT>` | `reports/secrets/metadata.json` | 90 days |
+| `agent-secrets-deb-<RUN_ID>-<ATTEMPT>` | `reports/secrets-deb/metadata.json` | 90 days |
+| `agent-secrets-rpm-<RUN_ID>-<ATTEMPT>` | `reports/secrets-rpm/metadata.json` | 90 days |
+
+GitHub may shorten retention to repository limits. The upload action is pinned
+to `ea165f8d65b6e75b540449e92b4886f43607fa02`. The Actions summary contains only
+the analyzed commit, run/attempt, scan category, version, outcome, finding count
+and rule IDs. Raw reports, extraction directories and source locations are never
+published in these scanning artifacts.
+
+### 8.5. Example credential decision and operator impact
 
 **Implemented remediation:** replace the static example with an unmistakable,
 low-entropy, 64-character placeholder. The default-rule initial scan confirmed
@@ -1003,11 +1129,97 @@ tests never print keys. Changing this repository does not rotate an installation
 that has not upgraded. Review of active deployments, secure recovery of new
 credentials, any incident response, and owner approval remain operator tasks.
 
+### 8.6. Initial historical audit — local evidence and pending hosted acceptance
 
-Local validation passed seven installation/upgrade tests and 55 Rust library
-tests, including runtime rejection of the placeholder. Changed installation
-scripts passed the pinned ShellCheck error policy; Clippy passed for the library
-and agent binary with warnings denied. Hosted package validation remains pending.
+On 2026-11-06 the verified binary and final history-scanning helper were run
+locally against available history at
+`7ffe3a5ee83e37c7791bb231de394ee3c8a9e631`, with `--all`, default rules and all
+suppression protections. The branch has **518 reachable commits**; all **106 local
+refs** collectively expose **778 commits**. These measured scopes replace the
+approximate 504-commit estimate for this checkout. Hosted checkout may expose a
+different ref set and must record its own `commitCount`.
+
+The complete local scan returned native exit **1**, zero scanner diagnostic bytes,
+and **15 findings**, all `generic-api-key`. This count includes merge-resolution
+diffs; an earlier exploratory scan without merge diffs reported 8 and is
+superseded. Aggregate contextual triage identified 2 example-configuration
+occurrences, 4 test-fixture occurrences and 9 other occurrences. These are scan
+occurrences, not a count of distinct credentials. Context is insufficient to
+approve a false positive. No finding has been suppressed or formally accepted.
+The known historical example can authenticate wherever an operator retained it;
+its deployment exposure is therefore a genuine security risk. Validity and
+ownership of the remaining historical candidates require confidential review.
+No active service credentials were tested, rotated or revoked in this work.
+
+Only aggregate metadata remains in ignored local `reports/secrets/metadata.json`,
+SHA-256 `84a413f7ce8b173015d6ed362974a5b454bccea8a6bfc2e1383a695e518d0b04`.
+Its run `240` / attempt `1` is **synthetic local context**, not a GitHub execution
+or uploaded artifact. Detailed reports were deleted. Implementation changes are
+local and are not represented as a published implementation commit.
+
+**The requested initial `workflow_dispatch` audit is not yet completed on GitHub.**
+It requires publishing this implementation to a branch, dispatching `main.yml`
+with that ref, and retaining/reviewing its `agent-secrets-<RUN_ID>-<ATTEMPT>`
+artifact. Do not dispatch the old workflow and describe it as this implementation.
+Record the actual implementation SHA, run URL, artifact URL/digest, scanned
+commit count, reviewer and acceptance date here after that execution.
+
+Responsible security reviewer / deployment owner: **pending assignment**.
+Final genuine/false-positive classification, verification of credential validity,
+rotation/revocation records and exposure assessment are **pending**. A historical
+scan must continue to report `findings` while affected history remains reachable.
+Rotation does not remove Git history. No history rewrite is authorized or
+performed; any proposed history remediation needs a separate reviewed decision.
+This phase must not be marked fully accepted until hosted audit and operational
+remediation/review are recorded.
+
+### 8.7. Completed automated validation and remaining evidence
+
+Local validation uses synthetic credentials and private fixtures only:
+
+- 88 Python CI tests passed with real Gitleaks/package integration enabled,
+  including event ranges, invalid refs/events, forbidden suppressions, checksum
+  failures, native exit preservation, strict extraction, missing/invalid packages,
+  installation/upgrade behavior, aggregate failure propagation and acyclic gates.
+- Actual generated DEB and RPM fixtures passed when clean and failed with
+  synthetic secrets in each of their `.env`, plugin payload and installation
+  script scopes. No fixture package was installed.
+- A synthetic PR history adding then removing a secret still failed; inline
+  `gitleaks:allow` and a repository binary diff attribute did not suppress it.
+  A secret introduced only by merge
+  resolution also failed.
+- Seven Node report-helper tests passed, including malformed/missing evidence,
+  inconsistent status, partial failures, context validation, fixed aggregate
+  fields and absence of secrets/paths/source locations from publication.
+- The complete proposed change was committed only in an isolated temporary
+  checkout and scanned as `before..head`: native exit 0, zero findings and no
+  diagnostics. This validates the new change, not the exposed earlier history.
+- 55 Rust library tests passed, including runtime rejection of the template
+  placeholder. Existing unrelated untracked OpenVPN work was left unchanged.
+- Actionlint validated the workflow. Changed installation scripts passed the
+  pinned ShellCheck error policy. Clippy passed for the library and agent binary
+  with warnings denied. Rust formatting was checked for changed Rust
+  files. Full hosted package builds and the hosted workflow remain pending.
+
+Reproduce the core checks with:
+
+```bash
+python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+node --test scripts/gitleaks-report.test.cjs
+cargo test --locked --lib
+```
+
+The ordinary `quality` job runs Python helper tests and Node report tests; the
+four actual-scanner integration tests require the verified binary plus `rpm`,
+`rpmkeys`, `rpmbuild`, `rpm2cpio` and `dpkg-deb`. They run mandatorily in `secrets`
+with `RUN_SECRET_INTEGRATION=1`, and missing tools fail rather than skip there.
+Locally they were exercised with Gitleaks 8.30.1, dpkg-deb and RPM 6.0.1 unpacked
+under `/tmp`; CI uses Ubuntu 24.04's package inspection tools. Installation tests
+execute the real DEB/RPM post-install bodies against temporary roots and service
+stubs, with a synthetic legacy fingerprint in the copied helper. No real key is
+embedded in test fixtures or logged. Hosted run/artifact retention, external
+publication blocking and the production package build result still need their
+execution references before rollout acceptance.
 
 ## 9. Updating this record
 

@@ -35,6 +35,8 @@ jobs:
       - uses: ./.github/actions/setup-rust
       - name: Verify CI helpers
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - name: Verify secret report helper
+        run: node --test scripts/gitleaks-report.test.cjs
       - name: Rustfmt
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -124,10 +126,30 @@ jobs:
         if: ${{ always() }}
         run: git diff --exit-code -- Cargo.lock
 
+  secrets:
+    name: FWCloud-Agent Secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.ANALYSIS_COMMIT }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install non-installing package inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y rpm cpio
+      - uses: ./.github/actions/scan-secrets
+        with:
+          kind: history
+          report-directory: reports/secrets
+          artifact-name: agent-secrets-${{ github.run_id }}-${{ github.run_attempt }}
+
   agent-ci:
     name: agent-ci
     if: ${{ always() }}
-    needs: [quality, test]
+    needs: [quality, test, security_audit, secrets, deb-package, rpm-package]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -140,7 +162,7 @@ jobs:
           import os
           import sys
 
-          expected = {"quality", "test"}
+          expected = {"quality", "test", "security_audit", "secrets", "deb-package", "rpm-package"}
           results = json.loads(os.environ["REQUIRED_RESULTS"])
           if set(results) != expected:
               sys.exit("Missing or unexpected required jobs")
@@ -152,7 +174,7 @@ jobs:
           PY
 
   deb-package:
-    needs: [agent-ci, security_audit]
+    needs: [quality, test, security_audit, secrets]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: DEB package
@@ -177,6 +199,13 @@ jobs:
       - name: Verify the committed lockfile is unchanged
         if: ${{ always() }}
         run: git diff --exit-code -- Cargo.lock
+      - name: Scan generated DEB package
+        if: ${{ always() }}
+        uses: ./.github/actions/scan-secrets
+        with:
+          kind: deb
+          report-directory: reports/secrets-deb
+          artifact-name: agent-secrets-deb-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload DEB package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -186,7 +215,7 @@ jobs:
           if-no-files-found: error
 
   rpm-package:
-    needs: [agent-ci, security_audit]
+    needs: [quality, test, security_audit, secrets]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: RPM package
@@ -204,7 +233,7 @@ jobs:
       - name: Install package build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y rpm libssl-dev pkg-config musl-tools build-essential
+          sudo apt-get install --no-install-recommends -y rpm cpio libssl-dev pkg-config musl-tools build-essential
       - name: Install the MUSL target for the pinned toolchain
         run: rustup target add --toolchain "$RUSTUP_TOOLCHAIN" x86_64-unknown-linux-musl
       - name: Build the RPM binary from locked sources
@@ -214,6 +243,13 @@ jobs:
       - name: Verify the committed lockfile is unchanged
         if: ${{ always() }}
         run: git diff --exit-code -- Cargo.lock
+      - name: Scan generated RPM package
+        if: ${{ always() }}
+        uses: ./.github/actions/scan-secrets
+        with:
+          kind: rpm
+          report-directory: reports/secrets-rpm
+          artifact-name: agent-secrets-rpm-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload RPM package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
