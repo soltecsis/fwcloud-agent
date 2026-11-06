@@ -39,6 +39,19 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Install and verify ShellCheck
+        run: python3 .github/scripts/shellcheck-ci.py install
+      - name: Analyze packaged shell scripts
+        id: shellcheck
+        run: python3 .github/scripts/shellcheck-ci.py analyze
+      - name: Upload ShellCheck evidence
+        if: ${{ always() && steps.shellcheck.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agent-shellcheck-${{ env.ANALYSIS_COMMIT }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/shellcheck/
+          retention-days: 90
+          if-no-files-found: error
       - name: Verify the committed lockfile is unchanged
         if: ${{ always() }}
         run: git diff --exit-code -- Cargo.lock

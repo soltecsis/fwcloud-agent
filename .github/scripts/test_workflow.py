@@ -103,5 +103,27 @@ class PackagingGateTests(unittest.TestCase):
                     self.assertNotIn("secrets.", section)
 
 
+class ShellCheckWorkflowTests(unittest.TestCase):
+    def test_shellcheck_is_mandatory_after_rust_quality_checks(self):
+        quality = WORKFLOW.read_text().split("\n  quality:\n", 1)[1].split("\n  security_audit:\n", 1)[0]
+        commands = (
+            "cargo fmt --all -- --check",
+            "cargo clippy --all-targets --locked -- -D warnings",
+            "python3 .github/scripts/shellcheck-ci.py install",
+            "python3 .github/scripts/shellcheck-ci.py analyze",
+        )
+        positions = [quality.index(command) for command in commands]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("name: FWCloud-Agent Quality", quality)
+        self.assertIn("timeout-minutes: 20", quality)
+        self.assertNotIn("continue-on-error", quality)
+        for step in quality.split("      - name: ")[1:]:
+            if "shellcheck-ci.py" in step:
+                self.assertNotIn("if:", step)
+        self.assertIn("always() && steps.shellcheck.outcome != 'skipped'", quality)
+        self.assertIn("path: reports/shellcheck/", quality)
+        self.assertIn("if-no-files-found: error", quality)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -11,14 +11,15 @@ does not establish ENS compliance.
 | Field | Value |
 | --- | --- |
 | Repository | `soltecsis/fwcloud-agent` |
-| Working branch | `236-chore-establish-a-reproducible-ci-foundation-for-fwcloud-agent` |
+| Working branch | `237-chore-integrate-shellcheck-into-fwcloud-agent-ci` |
 | Integration target | `ENS` |
-| Implementation baseline | `c8fbe38`, existing `ENS` tip |
+| Phase 1 implementation baseline | `c8fbe38`, existing `ENS` tip at that delivery |
+| Phase 2 script baseline | `2cdfefcef2a6cc887baa979971872de36e21ddf6` |
 | Execution environment | GitHub Actions, `ubuntu-24.04` hosted runners |
-| Evidence retention | 90 days requested for environment metadata and coverage; 14 days for packages |
-| Last updated | 2026-11-05 |
+| Evidence retention | 90 days requested for environment metadata, coverage and ShellCheck; 14 days for packages |
+| Last updated | 2026-11-06 |
 
-### Baseline verification
+### Phase 1 baseline verification
 
 Before this delivery, the remote
 [`devel...ENS` comparison](https://github.com/soltecsis/fwcloud-agent/compare/devel...ENS)
@@ -54,7 +55,7 @@ reset or force-pushed. The current working branch starts from the ENS tip.
 | Phase | Scope | Status | Closure requirement |
 | --- | --- | --- | --- |
 | 1 | Reproducible CI foundation | Implemented locally; GitHub acceptance pending | Positive and negative PR checks, event/concurrency verification and reviewed evidence |
-| 2 | ShellCheck for maintained plugins | Pending | Reviewed scope and justified exclusions; required shell checks |
+| 2 | ShellCheck for plugins and Debian maintenance scripts | Implemented locally; GitHub acceptance pending | Baseline reviewed without exclusions; exercise blocking shell checks in Actions |
 | 3 | Test reports and reference coverage | Pending | Valid reports tied to run/revision; reviewed reference coverage and threshold |
 | 4 | Uncovered routes and security tests | Pending | Deterministic route and security tests without destructive system operations |
 | 5 | Gitleaks and initial history audit | Pending | Incremental/history scope verified; redacted reports and reviewed exceptions |
@@ -168,7 +169,7 @@ analysis revision.
 
 | Job | Responsibility | Timeout |
 | --- | --- | --- |
-| `quality` / `FWCloud-Agent Quality` | Setup/cache, helper tests, Rustfmt, Clippy across all targets with warnings denied | 20 minutes |
+| `quality` / `FWCloud-Agent Quality` | Setup/cache, helper tests, Rustfmt, Clippy across all targets with warnings denied, verified ShellCheck installation and shell analysis | 20 minutes |
 | `test` / `FWCloud-Agent Test` | Setup/cache, locked application build and automated tests | 30 minutes |
 | `agent-ci` | Always evaluate `quality` and `test`; require exactly both results to be `success` | 5 minutes |
 | `security_audit` | Pinned `cargo audit --file Cargo.lock` | 30 minutes |
@@ -305,7 +306,184 @@ and the Phase 3 reference coverage review remain pending.
 - [ ] Configure and verify branch protection requiring successful `agent-ci`.
 - [ ] Complete subsequent phases before accepting the full security/publication gate.
 
-## 5. Updating this record
+## 5. Phase 2 — ShellCheck
+
+### 5.1. Installation and scope
+
+`scripts/shellcheck-ci.py` installs the official Linux x86_64
+[ShellCheck v0.11.0 release](https://github.com/koalaman/shellcheck/releases/tag/v0.11.0).
+The exact archive is `shellcheck-v0.11.0.linux.x86_64.tar.xz`, downloaded from
+`https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz`.
+Its required SHA-256 is:
+
+```text
+8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+```
+
+Installation checks the downloaded archive with Python's SHA-256 implementation
+before extracting it under `RUNNER_TEMP/agent-shellcheck`. It executes the
+extracted binary's `--version` and requires the exact line `version: 0.11.0`
+before exporting `SHELLCHECK` through `GITHUB_ENV`. Download, checksum,
+extraction, execution and version failures fail the step. No distribution
+ShellCheck package is installed and no root privileges are required.
+
+Analysis discovers `plugins/**/*.sh` recursively, including `plugins/lib.sh`
+and newly added plugin files. It explicitly requires each of
+`.deb/maintainer-scripts/preinst`, `postinst`, `prerm` and `postrm` despite
+their lack of an extension. Missing plugin directories, an empty plugin scope,
+unreadable directory traversal, invalid plugin inputs or any missing maintenance
+script fail analysis. Paths are passed as individual process arguments, including
+paths containing spaces.
+
+The measured scope is **27 files**: 23 plugin scripts and four maintenance
+scripts. Of these, 22 declare Bash and five declare POSIX `sh`: the four Debian
+scripts plus `plugins/openvpn-2fa/check_2fa.sh`. No global shell override is used.
+`--norc` and an empty `SHELLCHECK_OPTS` keep ambient configuration from changing
+the interpreter or hiding findings. ShellCheck reads scripts as static input;
+it does not execute or source them in a shell.
+
+### 5.2. Measured initial baseline
+
+On 2026-11-06, the checksum-verified binary analyzed the complete scope from
+`2cdfefcef2a6cc887baa979971872de36e21ddf6`, before enabling the error gate.
+No plugin or maintenance script was modified. The initial command used
+`--norc --severity=style --format=json1` with all 27 paths and an empty
+`SHELLCHECK_OPTS`.
+
+| Severity | Findings |
+| --- | --- |
+| `error` | 0 |
+| `warning` | 40 |
+| `info` | 52 |
+| `style` | 58 |
+| Total | 150 |
+
+| Rule | Severity | Count | Review and remediation direction |
+| --- | --- | --- | --- |
+| `SC2086` | `info` | 49 | Review unquoted expansion and unintended splitting/globbing, including package maintenance paths |
+| `SC2006` | `style` | 35 | Replace legacy backticks with `$(...)` |
+| `SC2166` | `warning` | 25 | Replace ambiguous test `-a`/`-o` expressions with separate conditions |
+| `SC2181` | `style` | 20 | Prefer testing command status directly |
+| `SC2164` | `warning` | 6 | Check failed directory changes before subsequent file operations |
+| `SC2034` | `warning` | 5 | Distinguish library globals consumed by callers from unused assignments |
+| `SC2003` | `style` | 3 | Review arithmetic using legacy `expr` |
+| `SC2046` | `warning` | 2 | Quote command substitutions used in an OS test and an ntopng download URL |
+| `SC2028` | `info` | 1 | Use `printf` for escape handling in the GeoIP message |
+| `SC2103` | `info` | 1 | Review working-directory restoration in Web Safety |
+| `SC2154` | `warning` | 1 | OpenVPN supplies `common_name` at runtime; verify the deployment contract |
+| `SC2269` | `info` | 1 | Redundant `SERVER_CN` self-assignment in the OpenVPN 2FA helper |
+| `SC2319` | `warning` | 1 | Web Safety error reporting reads the status of the intervening condition |
+
+The review distinguishes these cases:
+
+- Actionable defects: `plugins/websafety/websafety.sh:181` reports `$?` after
+  `[ $? -ne 0 ]`, losing the certificate-generation command's status (`SC2319`).
+  Six unchecked `cd` calls in Web Safety, DNS Safety and GeoIP (`SC2164`)
+  can allow later operations to run in the wrong directory.
+- Quoting and condition findings (`SC2046`, `SC2086`, `SC2166`) need
+  case-by-case corrections. Assumptions about distribution strings, fixed
+  directories or URLs do not constitute accepted exclusions.
+- Context-dependent findings: `RELEASE` and `DIST_NUMBER` in `plugins/lib.sh`
+  are consumed by plugins such as Zeek, although the library's standalone
+  analysis reports them as unused (`SC2034`). `common_name` in
+  `plugins/openvpn-2fa/check_2fa.sh:6` is expected from OpenVPN's environment
+  (`SC2154`). This does not justify removing the other unused assignments in
+  CrowdSec or DNS Safety without review.
+- Style recommendations and the redundant `SERVER_CN` assignment remain
+  visible remediation work. This integration changes no script behavior.
+
+These are measured findings, not an allowlist. No existing finding was
+suppressed or automatically approved.
+
+### 5.3. Mandatory policy and evidence
+
+The selected initial blocking severity is **`error`**, adopting the requested
+policy after measuring zero errors and reviewing the 150 lower-severity
+findings. This permits an immediate required gate while preserving the
+remediation backlog.
+
+`quality` retains its job ID, name and 20-minute timeout. After the existing
+helper tests it runs Rustfmt, Clippy, ShellCheck installation and verification,
+then ShellCheck analysis. Analysis first runs the complete informational scan
+at `--severity=style`, writes all findings and counts, then runs the same file
+list with `--severity=error`. A blocking finding or tool failure fails
+`quality`. The existing `agent-ci` aggregate requires `quality == success`,
+so such a failure also prevents aggregate success.
+
+Only ShellCheck exit codes `0` (completed without findings) and `1` (completed
+with findings) are valid for the informational scan. All other exit codes,
+missing executables, invalid JSON and inconsistent findings/status fail analysis.
+The blocking scan propagates every nonzero exit code. See the
+[v0.11.0 manual](https://github.com/koalaman/shellcheck/blob/v0.11.0/shellcheck.1.md)
+for interpreter selection and exit-code definitions.
+
+Every completed informational scan prints every finding to the job log and
+writes `reports/shellcheck/findings.json`, `summary.json` and `summary.md`.
+The summary includes the complete file inventory, severity and rule counts,
+version, archive checksum, analyzed SHA, run ID and attempt. Counts also appear
+in the Actions job summary. The pinned upload action retains
+`agent-shellcheck-<sha>-<run>-<attempt>` for 90 days, including when the
+subsequent blocking scan fails. An attempted analysis without evidence also
+fails the upload step. No ShellCheck job or `continue-on-error` is added.
+
+The threshold is a fixed code setting, with no automatic fallback or baseline
+allowlist. In a separate remediation delivery, address the actionable warnings
+first, remeasure the complete scope and review changing the threshold to
+`warning`. Review that follow-up during Phase 9 evidence verification before
+promotion. After warnings are resolved or individually reviewed, consider
+`info` and then `style` through explicit changes with positive and negative CI
+evidence at each threshold. New findings never lower the threshold automatically.
+
+### 5.4. Exclusions
+
+**Accepted exclusions: none.** All 27 files and all default rule findings remain
+in scope. This delivery adds no disable directives, rule exclusions or
+repository-wide suppressions.
+
+Any future exclusion must be reviewed individually and recorded here with the
+exact file or narrow scope, rule ID, technical justification and the name of the
+person accepting it. Prefer correcting the script. Runtime assumptions and
+deferred lower-severity findings above are not accepted exclusions.
+
+### 5.5. Local verification and pending CI acceptance
+
+Local checks use the pinned official binary as an ordinary user. Reports are
+local evidence and do not establish GitHub Actions acceptance.
+
+| Check | Local result |
+| --- | --- |
+| Implemented installer against the official release | Passed: archive checksum and installed `0.11.0` verified |
+| Complete analysis and error gate | Passed: 27 files, baseline counts unchanged, zero blocking findings |
+| CI helper/workflow regression suite | 33 tests passed, including download/extraction failure, checksum mismatch before extraction, wrong version, invalid reports, exit codes `2`/`3`/`4` and execution failure |
+| Recursive discovery and required maintenance inputs | Covered by regression tests, including paths with spaces, empty scope and missing maintenance scripts |
+| Required aggregate failure handling | Existing aggregate command rejects failed, skipped, cancelled and missing required results |
+| Real blocking probe in an isolated copy | A new nested plugin produced `SC1049`, `SC1050`, `SC1072` and `SC1073`; analysis failed and the actual `agent-ci` command rejected the resulting quality failure |
+| New clean plugin and static-only analysis | Passed: automatically reported 28 files; a script containing a `touch` command did not create its marker |
+| Interpreter probe in an isolated copy | Array syntax reported `SC3030` in POSIX `preinst`; the same array syntax in a Bash plugin produced no finding |
+| Real missing-input and executable probes | Analysis rejected missing `postrm` and a nonexistent ShellCheck executable |
+| Workflow YAML, Python syntax and patch whitespace | Passed; mandatory order, timeout and aggregate dependencies verified |
+
+Run the installed helper locally using:
+
+```bash
+SHELLCHECK=/path/to/verified/shellcheck python3 .github/scripts/shellcheck-ci.py analyze
+python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+```
+
+Implementation commit, PR, corresponding Actions run/artifact links, reviewer
+and acceptance date are **pending**. The integration is implemented and tested
+locally; it is **not yet validated in CI**.
+
+- [ ] Record the implementation commit/PR and a successful Actions `quality`
+  execution with its ShellCheck artifact and all 27 files.
+- [ ] Introduce an error-level finding in a temporary nested plugin revision;
+  verify `quality` and `agent-ci` both fail in Actions and retain the evidence.
+- [ ] Remove the probe, verify the required checks succeed and record both run
+  references. Confirm shebang-based interpreter selection and the file inventory.
+- [ ] Review the lower-severity remediation follow-up and any proposed
+  exclusions before progressively tightening the threshold.
+
+## 6. Updating this record
 
 Update this document with each delivery. Record the exact revision, commands,
 environment, results, limitations, PR/run/artifact links and reviewer. Keep
