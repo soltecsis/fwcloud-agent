@@ -413,6 +413,8 @@ pub struct CrowdSecServiceStatus {
     pub installed: bool,
     pub running: bool,
     pub version: Option<String>,
+    pub state: CrowdSecHealthState,
+    pub message: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -420,6 +422,7 @@ pub struct CrowdSecServiceStatus {
 pub enum CrowdSecHealthState {
     Unknown,
     Ready,
+    NotApplicable,
     NotConfigured,
     ReauthenticationRequired,
     Unavailable,
@@ -473,22 +476,15 @@ pub struct CrowdSecFirewallBouncerStatus {
 }
 
 #[derive(Debug, Serialize)]
-pub struct CrowdSecStatusWarning {
-    pub component: String,
-    pub message: String,
-}
-
-#[derive(Debug, Serialize)]
 pub struct CrowdSecStatusResponse {
     pub crowdsec: CrowdSecServiceStatus,
     pub ipset_installed: bool,
     pub lapi: CrowdSecHealthStatus,
-    pub community_blocklist: CrowdSecHealthStatus,
-    pub community_blocklist_enrollment: CrowdSecConsoleEnrollmentState,
     pub firewall_bouncer: CrowdSecFirewallBouncerStatus,
     pub active_decisions: CrowdSecStatusCount,
     pub installed_collections: CrowdSecStatusCount,
-    pub warnings: Vec<CrowdSecStatusWarning>,
+    pub ipv4_blacklist_entries: CrowdSecStatusCount,
+    pub ipv6_blacklist_entries: CrowdSecStatusCount,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]

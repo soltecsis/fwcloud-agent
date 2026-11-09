@@ -1868,6 +1868,32 @@ async fn ipset_address_counters(name: &str) -> Result<Vec<CrowdSecFirewallBounce
     ))
 }
 
+pub async fn ipset_entry_count(name: &str) -> Result<u64> {
+    let output = run_ipset(&["save", name]).await?;
+
+    if !output.status.success() {
+        return Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to inspect FWCloud CrowdSec blacklist IPSet entries",
+        ));
+    }
+
+    Ok(parse_ipset_entry_count(
+        String::from_utf8_lossy(&output.stdout).as_ref(),
+        name,
+    ))
+}
+
+fn parse_ipset_entry_count(output: &str, name: &str) -> u64 {
+    output
+        .lines()
+        .filter(|line| {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            fields.len() >= 3 && fields[0] == "add" && fields[1] == name
+        })
+        .count() as u64
+}
+
 fn parse_ipset_address_counters(
     output: &str,
     name: &str,
@@ -3253,7 +3279,7 @@ mod tests {
         iptables_blocking_chain_is_compatible, nftables_blacklist_set_is_compatible,
         nftables_bouncer_service_action, nftables_counter_is_compatible,
         nftables_counter_validation_arguments, nftables_set_only_configuration_contents,
-        non_selected_firewall_backend, parse_ipset_address_counters,
+        non_selected_firewall_backend, parse_ipset_address_counters, parse_ipset_entry_count,
         parse_iptables_blocking_chain_counter, parse_nftables_address_counters,
         managed_bouncer_name_from_contents, parse_nftables_counter, pending_backend_contents,
         pending_backend_from_contents, pending_policy_status, reject_local_bouncer,
@@ -3410,6 +3436,13 @@ mod tests {
         assert_eq!(counters[0].address, "192.0.2.2");
         assert_eq!(counters[0].packets, 3);
         assert_eq!(counters[0].bytes, 240);
+    }
+
+    #[test]
+    fn counts_all_ipset_entries_without_exposing_addresses() {
+        let output = "create crowdsec-blacklists hash:ip family inet hashsize 1024 maxelem 150000 counters\nadd crowdsec-blacklists 192.0.2.1 timeout 0 packets 0 bytes 0\nadd crowdsec-blacklists 192.0.2.2 timeout 0 packets 3 bytes 240\nadd other-set 192.0.2.3 timeout 0 packets 1 bytes 80\n";
+
+        assert_eq!(parse_ipset_entry_count(output, IPSET_V4_BLACKLIST), 2);
     }
 
     #[test]
