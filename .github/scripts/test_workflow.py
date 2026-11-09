@@ -37,7 +37,7 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_all_mandatory_controls_are_required_even_after_failure(self):
-        self.assertEqual(set(self.required), {"quality", "test", "security_audit", "secrets", "deb-package", "rpm-package"})
+        self.assertEqual(set(self.required), {"quality", "test", "security_audit", "secrets", "sca", "deb-package", "rpm-package"})
         self.assertIn("if: ${{ always() }}", self.aggregate)
         self.assertNotIn("continue-on-error", self.aggregate)
 
@@ -77,7 +77,7 @@ class PackagingGateTests(unittest.TestCase):
     def test_packages_preserve_audit_and_coverage_gates(self):
         for job in ("deb-package", "rpm-package"):
             with self.subTest(job=job):
-                self.assertEqual(self.needs(job), {"quality", "test", "security_audit", "secrets"})
+                self.assertEqual(self.needs(job), {"quality", "test", "security_audit", "secrets", "sca"})
                 self.assertNotIn("if:", self.jobs[job].split("steps:", 1)[0])
 
     def test_dependency_graph_does_not_reference_removed_jobs(self):
@@ -145,7 +145,7 @@ class ShellCheckWorkflowTests(unittest.TestCase):
 
 class ReportingWorkflowTests(unittest.TestCase):
     def test_reports_and_both_uploads_run_after_failed_execution(self):
-        section = WORKFLOW.read_text().split("\n  test:\n", 1)[1].split("\n  agent-ci:\n", 1)[0]
+        section = WORKFLOW.read_text().split("\n  test:\n", 1)[1].split("\n  secrets:\n", 1)[0]
         self.assertNotIn("continue-on-error", section)
         self.assertIn("always() && steps.test_build.outcome != 'skipped'", section)
         self.assertIn("python3 .github/scripts/ci_reports.py", section)
