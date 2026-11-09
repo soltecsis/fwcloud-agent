@@ -420,6 +420,7 @@ pub struct CrowdSecServiceStatus {
 pub enum CrowdSecHealthState {
     Unknown,
     Ready,
+    NotApplicable,
     NotConfigured,
     ReauthenticationRequired,
     Unavailable,
@@ -488,6 +489,8 @@ pub struct CrowdSecStatusResponse {
     pub firewall_bouncer: CrowdSecFirewallBouncerStatus,
     pub active_decisions: CrowdSecStatusCount,
     pub installed_collections: CrowdSecStatusCount,
+    pub ipv4_blacklist_entries: CrowdSecStatusCount,
+    pub ipv6_blacklist_entries: CrowdSecStatusCount,
     pub warnings: Vec<CrowdSecStatusWarning>,
 }
 

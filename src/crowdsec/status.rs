@@ -88,6 +88,8 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
         community_blocklist_status().await;
     let active_decisions = active_decision_count().await;
     let installed_collections = installed_collection_count().await;
+    let (ipv4_blacklist_entries, ipv6_blacklist_entries) =
+        managed_blacklist_entry_counts(bouncer_backend).await;
     let warnings = status_warnings(
         &packages,
         bouncer_backend,
@@ -121,8 +123,51 @@ pub async fn status() -> Result<CrowdSecStatusResponse> {
         },
         active_decisions,
         installed_collections,
+        ipv4_blacklist_entries,
+        ipv6_blacklist_entries,
         warnings,
     })
+}
+
+async fn managed_blacklist_entry_counts(
+    backend: CrowdSecFirewallBackend,
+) -> (CrowdSecStatusCount, CrowdSecStatusCount) {
+    if backend == CrowdSecFirewallBackend::Nftables {
+        return (
+            non_ipset_count_status("CrowdSec Firewall Bouncer uses NFTables instead of IPSet"),
+            non_ipset_count_status("CrowdSec Firewall Bouncer uses NFTables instead of IPSet"),
+        );
+    }
+
+    (
+        ipset_entry_count(bouncers::IPSET_V4_BLACKLIST, "IPv4").await,
+        ipset_entry_count(bouncers::IPSET_V6_BLACKLIST, "IPv6").await,
+    )
+}
+
+async fn ipset_entry_count(name: &str, address_family: &str) -> CrowdSecStatusCount {
+    match bouncers::ipset_entry_count(name).await {
+        Ok(count) => CrowdSecStatusCount {
+            count: Some(count),
+            limit: None,
+            truncated: false,
+            state: CrowdSecHealthState::Ready,
+            message: format!("{count} entries in CrowdSec {address_family} blacklist IPSet"),
+        },
+        Err(_) => count_error_status(&format!(
+            "Unable to count entries in CrowdSec {address_family} blacklist IPSet"
+        )),
+    }
+}
+
+fn non_ipset_count_status(message: &str) -> CrowdSecStatusCount {
+    CrowdSecStatusCount {
+        count: None,
+        limit: None,
+        truncated: false,
+        state: CrowdSecHealthState::NotApplicable,
+        message: message.to_string(),
+    }
 }
 
 fn unavailable_package_status() -> CrowdSecPackageStatus {
@@ -602,6 +647,8 @@ mod tests {
             },
             active_decisions: ready_count(),
             installed_collections: ready_count(),
+            ipv4_blacklist_entries: ready_count(),
+            ipv6_blacklist_entries: ready_count(),
             warnings: vec![],
         };
 

@@ -1868,6 +1868,32 @@ async fn ipset_address_counters(name: &str) -> Result<Vec<CrowdSecFirewallBounce
     ))
 }
 
+pub async fn ipset_entry_count(name: &str) -> Result<u64> {
+    let output = run_ipset(&["save", name]).await?;
+
+    if !output.status.success() {
+        return Err(FwcError::crowdsec(
+            FIREWALL_INTEGRATION_INVALID,
+            "Unable to inspect FWCloud CrowdSec blacklist IPSet entries",
+        ));
+    }
+
+    Ok(parse_ipset_entry_count(
+        String::from_utf8_lossy(&output.stdout).as_ref(),
+        name,
+    ))
+}
+
+fn parse_ipset_entry_count(output: &str, name: &str) -> u64 {
+    output
+        .lines()
+        .filter(|line| {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            fields.len() >= 3 && fields[0] == "add" && fields[1] == name
+        })
+        .count() as u64
+}
+
 fn parse_ipset_address_counters(
     output: &str,
     name: &str,
