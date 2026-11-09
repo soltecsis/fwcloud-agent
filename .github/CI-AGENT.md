@@ -11,14 +11,14 @@ does not establish ENS compliance.
 | Field | Value |
 | --- | --- |
 | Repository | `soltecsis/fwcloud-agent` |
-| Working branch | `239-test-cover-untested-system-management-routes-with-isolated-integration-tests` |
+| Working branch | `ENS` (Phase 6 delivery; earlier sections retain their historical context) |
 | Integration target | `ENS` |
 | Phase 1 implementation baseline | `c8fbe38`, existing `ENS` tip at that delivery |
 | Phase 2 script baseline | `2cdfefcef2a6cc887baa979971872de36e21ddf6` |
 | Reporting implementation base | `127ebb9e589d5f4261320824f8cf153943cc2401` |
 | Execution environment | GitHub Actions, `ubuntu-24.04` hosted runners |
 | Evidence retention | 90 days requested for environment metadata, coverage and ShellCheck; 14 days for packages |
-| Last updated | 2026-11-06 |
+| Last updated | 2026-11-09 |
 
 ### Phase 1 baseline verification
 
@@ -59,8 +59,8 @@ reset or force-pushed. The current working branch starts from the ENS tip.
 | 2 | ShellCheck for plugins and Debian maintenance scripts | Implemented locally; GitHub acceptance pending | Baseline reviewed without exclusions; exercise blocking shell checks in Actions |
 | 3 | Test reports and reference coverage (API Phase 2) | Implemented and verified locally; hosted acceptance pending | Valid artifacts tied to run/revision; reviewed baseline and hosted performance comparison |
 | 4 | Uncovered routes and security tests | Implemented and verified locally; hosted execution pending | Deterministic route and security tests without destructive system operations |
-| 5 | Gitleaks and initial history audit | Pending | Incremental/history scope verified; redacted reports and reviewed exceptions |
-| 6 | Trivy and CycloneDX SBOM | Pending | Dependency inventory, HIGH/CRITICAL policy and reviewed audit exceptions |
+| 5 | Gitleaks and initial history audit | Integrated in ENS (PR #251) | Historical operational review remains tracked in section 8 |
+| 6 | Trivy and CycloneDX SBOM | Implemented locally; hosted acceptance pending | Dependency inventory, HIGH/CRITICAL policy and reviewed audit exceptions |
 | 7 | SonarQube Cloud and Quality Gate | Pending | Rust analysis, Clippy/coverage import, required gate and fork/Dependabot policy |
 | 8 | Conditional package publication | Pending | Complete security gate, source/artifact provenance and package integrity verification |
 | 9 | Branch protection, evidence review and promotion | Pending | Required final `agent-ci`, reviewed evidence, promotion and devel alignment |
@@ -1221,7 +1221,120 @@ embedded in test fixtures or logged. Hosted run/artifact retention, external
 publication blocking and the production package build result still need their
 execution references before rollout acceptance.
 
-## 9. Updating this record
+## 9. Phase 6 — Cargo SCA and CycloneDX inventory
+
+The implementation builds on ENS `02560a668aeddb30201c8704543fbb279103be8a`,
+which integrates Phase 5 via PR #251. The new `sca` job complements, rather than
+replaces, the mandatory `cargo audit --file Cargo.lock` job. Both package builders
+require `sca`; `agent-ci` also requires it explicitly. Failures, skipped jobs,
+cancellation, absent evidence and scanner/database errors cannot satisfy the gate.
+Existing main-push-only external publication conditions remain unchanged.
+
+### 9.1. Tool integrity, scope and policy
+
+`.github/scripts/trivy-ci.py` pins official Trivy **0.76.2**, Linux x86_64 archive
+SHA-256 `bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf`.
+The release asset API digest and actual downloaded archive were verified locally.
+Installation reads only the regular executable member after checksum verification;
+both installation and scanning verify the exact CLI version. The original Python
+adapter and regression tests are retained to follow the existing Agent ENS CI
+style. The uncommitted Bash/Node alternative was withdrawn at the owner's request;
+the existing Gitleaks Node evidence helper is unchanged.
+
+The scanner receives private copies of only `Cargo.toml` and `Cargo.lock` after
+checking HEAD against `ANALYSIS_COMMIT` and rejecting modifications to either
+input. No Cargo build or dependency resolution is invoked. Trivy-specific ambient
+environment settings are removed, configuration and ignore files are explicitly
+empty, and scanning runs outside the checkout. Repository scanner suppressions
+therefore do not apply. Only the vulnerability scanner and library packages are
+enabled: Gitleaks remains responsible for secrets and ShellCheck for shell code.
+
+The JSON inventory includes all detected packages and all severities. **HIGH and
+CRITICAL findings fail the job, including findings without a fix.** Lower and
+UNKNOWN severities remain visible in reports and aggregate counts. No Trivy
+exception or blanket suppression is introduced. The existing cargo-audit exception
+`RUSTSEC-2026-0258` is not copied to Trivy; its owner, applicability and expiry still
+require a separately documented review, not an implicit approval by this change.
+
+Trivy parses Cargo manifests and removes development-only dependencies; shared
+runtime/transitive dependencies may remain. The pinned binary's help explicitly
+limits `--include-dev-deps` to npm, yarn and gradle, **not Cargo**. The actual Cargo
+scan omits development-only `reqwest` and `serial_test`; shared/transitive
+`actix-codec`, `actix-http` and `tempfile` remain. No claim is made that the npm flag
+includes Rust test dependencies. The full-lockfile cargo-audit check is retained.
+Trivy converts the same completed JSON scan to CycloneDX, avoiding a
+second scan with a potentially different advisory snapshot. Validation requires
+nonempty Cargo and CycloneDX inventories, matching package names **and versions**,
+the expected report schema/producer and identifiable downloaded DB metadata.
+The Python adapter enforces HIGH/CRITICAL from the complete JSON result and returns
+1 on blocking findings. Scanner, conversion or validation failures also fail the
+job and cannot produce successful metadata; this is not the API's native-policy
+exit-code convention.
+
+### 9.2. Evidence and coverage limitations
+
+`agent-sca-<RUN_ID>-<ATTEMPT>` retains `reports/sca/` for 90 days, with an
+unconditional upload and missing-input failure:
+
+- `trivy.json`: complete vulnerability and detected dependency inventory.
+- `sbom.cdx.json`: CycloneDX inventory converted from that scan.
+- `metadata.json`: source SHA, repository, run/attempt, scanner/archive identity,
+  input SHA-256 values, report digests, DB timestamps/metadata digest, severity
+  counts, package count and success/findings/error status.
+
+Errors after scan entry write failed metadata; tool output is not copied into the
+public summary. Installation failure still fails the job even if no report exists.
+The summary contains only status and aggregate severities. Reports are source
+dependency evidence, **not an attestation of the compiled binary or installed OS**.
+The mutable vulnerability DB is refreshed normally; recorded metadata identifies
+the observation, not a claim of byte-reproducible advisory results.
+
+This phase does not audit shell behavior, packages downloaded/installed by plugin
+scripts, or every target-specific/feature-selected compiled dependency. In
+particular, `openssl` uses `vendored`: a clean crate report does not establish full
+coverage of embedded native OpenSSL vulnerabilities. Binary inventory using
+`cargo-auditable`, native-library verification and representative deployment
+inventories remain separate possible improvements. No build changes are made for
+those purposes here.
+
+### 9.3. Local validation and hosted acceptance
+
+The verified Trivy binary was executed against the unmodified ENS Cargo inputs:
+**251 detected Cargo packages**, **252 CycloneDX components** (the Cargo packages
+plus the `Cargo.lock` application component), and **zero reported vulnerabilities**
+in this scan's scope.
+The restored Python pipeline is validated locally with the verified Trivy binary,
+isolated Cargo inputs, SBOM conversion and receipt validation. Its receipt uses
+**synthetic local context**, not a GitHub execution. It does not claim that the
+uncommitted workflow has executed in Actions. Reports are ignored working outputs.
+
+Automated regression tests cover checksum mismatch, missing/incomplete inventories,
+producer/version mismatch, malformed severity, HIGH/CRITICAL without fixes,
+scanner failure, missing reports, evidence digests and mandatory workflow wiring.
+Existing aggregate tests exercise every required job's failure/skip/cancel/missing
+states and verify the graph is acyclic. No Rust source, Cargo dependency/lockfile,
+package format, deployment or publication credential was changed.
+
+The Python suite completes **99 tests: 94 passed, five skipped**. The skipped
+tests are existing optional integration/tool prerequisites, not a bypass of the
+Trivy control. The nine Trivy Python tests cover clean/failed evidence, inventories,
+versions, severity validation, blocking HIGH/CRITICAL without fixes, input/report
+hashes, scanner failures, missing reports, checksum mismatch and workflow wiring.
+The eight existing Gitleaks Node tests, Actionlint 1.7.7 and patch whitespace checks
+also pass.
+
+The initial Python implementation also scanned an isolated vulnerable OpenSSL
+0.10.38 Cargo fixture with the real DB (six HIGH, six MEDIUM, one LOW): exit 1,
+`status: findings`, with both reports retained. Git identity alone was stubbed for
+that synthetic uncommitted fixture; no application dependency was changed. This
+is local negative evidence, not a hosted run.
+
+Before closing hosted acceptance, record the implementation PR/commit, a successful
+Actions run and reviewed artifact digests, confirm failure propagation and package
+blocking, and review the remaining cargo-audit exception. This is not an ENS
+compliance certification.
+
+## 10. Updating this record
 
 Update this document with each delivery. Record the exact revision, commands,
 environment, results, limitations, PR/run/artifact links and reviewer. Keep

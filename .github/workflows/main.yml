@@ -146,10 +146,32 @@ jobs:
           report-directory: reports/secrets
           artifact-name: agent-secrets-${{ github.run_id }}-${{ github.run_attempt }}
 
+  sca:
+    name: FWCloud-Agent Trivy and SBOM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.ANALYSIS_COMMIT }}
+          persist-credentials: false
+      - name: Install checksum-verified Trivy
+        run: python3 .github/scripts/trivy-ci.py install
+      - name: Scan Cargo dependencies and generate CycloneDX
+        run: python3 .github/scripts/trivy-ci.py scan
+      - name: Upload dependency evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agent-sca-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/sca/
+          retention-days: 90
+          if-no-files-found: error
+
   agent-ci:
     name: agent-ci
     if: ${{ always() }}
-    needs: [quality, test, security_audit, secrets, deb-package, rpm-package]
+    needs: [quality, test, security_audit, secrets, sca, deb-package, rpm-package]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -162,7 +184,7 @@ jobs:
           import os
           import sys
 
-          expected = {"quality", "test", "security_audit", "secrets", "deb-package", "rpm-package"}
+          expected = {"quality", "test", "security_audit", "secrets", "sca", "deb-package", "rpm-package"}
           results = json.loads(os.environ["REQUIRED_RESULTS"])
           if set(results) != expected:
               sys.exit("Missing or unexpected required jobs")
@@ -174,7 +196,7 @@ jobs:
           PY
 
   deb-package:
-    needs: [quality, test, security_audit, secrets]
+    needs: [quality, test, security_audit, secrets, sca]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: DEB package
@@ -215,7 +237,7 @@ jobs:
           if-no-files-found: error
 
   rpm-package:
-    needs: [quality, test, security_audit, secrets]
+    needs: [quality, test, security_audit, secrets, sca]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: RPM package
