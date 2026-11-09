@@ -474,24 +474,15 @@ pub struct CrowdSecFirewallBouncerStatus {
 }
 
 #[derive(Debug, Serialize)]
-pub struct CrowdSecStatusWarning {
-    pub component: String,
-    pub message: String,
-}
-
-#[derive(Debug, Serialize)]
 pub struct CrowdSecStatusResponse {
     pub crowdsec: CrowdSecServiceStatus,
     pub ipset_installed: bool,
     pub lapi: CrowdSecHealthStatus,
-    pub community_blocklist: CrowdSecHealthStatus,
-    pub community_blocklist_enrollment: CrowdSecConsoleEnrollmentState,
     pub firewall_bouncer: CrowdSecFirewallBouncerStatus,
     pub active_decisions: CrowdSecStatusCount,
     pub installed_collections: CrowdSecStatusCount,
     pub ipv4_blacklist_entries: CrowdSecStatusCount,
     pub ipv6_blacklist_entries: CrowdSecStatusCount,
-    pub warnings: Vec<CrowdSecStatusWarning>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
