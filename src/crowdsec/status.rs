@@ -358,7 +358,7 @@ async fn service_is_running(service: &str) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::crowdsec_version_from_output;
+    use super::{crowdsec_service_health, crowdsec_version_from_output, non_ipset_count_status};
     use crate::crowdsec::{
         bouncers::{
             CrowdSecBouncerIntegrationState, CrowdSecBouncerIntegrationStatus, CrowdSecIpSetStatus,
@@ -414,6 +414,32 @@ mod tests {
             crowdsec_version_from_output(output).as_deref(),
             Some("v1.7.0")
         );
+    }
+
+    #[test]
+    fn reports_service_health_without_aggregate_warnings() {
+        let package_error = crowdsec_service_health(
+            false,
+            false,
+            Some("Unable to determine CrowdSec package status"),
+            None,
+        );
+        let package_missing = crowdsec_service_health(false, false, None, None);
+        let service_inactive = crowdsec_service_health(true, false, None, None);
+        let ready = crowdsec_service_health(true, true, None, None);
+
+        assert_eq!(package_error.state, CrowdSecHealthState::Error);
+        assert_eq!(package_missing.state, CrowdSecHealthState::NotConfigured);
+        assert_eq!(service_inactive.state, CrowdSecHealthState::Unavailable);
+        assert_eq!(ready.state, CrowdSecHealthState::Ready);
+    }
+
+    #[test]
+    fn reports_nftables_blacklist_counts_as_not_applicable() {
+        let count = non_ipset_count_status("CrowdSec Firewall Bouncer uses NFTables instead of IPSet");
+
+        assert_eq!(count.count, None);
+        assert_eq!(count.state, CrowdSecHealthState::NotApplicable);
     }
 
     #[test]
