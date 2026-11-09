@@ -10,6 +10,7 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
+import uuid
 
 
 VERSION = "0.76.2"
@@ -22,7 +23,39 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+EVIDENCE = ("trivy.json", "sbom.cdx.json", "metadata.json", "install.log",
+            "scan.log", "sbom.log", "blocking.txt")
+
+
+def publish_log(name, text):
+    print(f"--- Trivy {name} ---", flush=True)
+    # Scanner output is diagnostic data, never GitHub workflow commands.
+    token = uuid.uuid4().hex
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::stop-commands::{token}", flush=True)
+    print(text, end="" if text.endswith("\n") else "\n", flush=True)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::{token}::", flush=True)
+
+
 def install():
+    output = ROOT / "reports/sca"
+    output.mkdir(parents=True, exist_ok=True)
+    for name in EVIDENCE:
+        (output / name).unlink(missing_ok=True)
+    text = f"Installing checksum-pinned Trivy {VERSION}.\n"
+    try:
+        install_binary()
+        text += f"Archive SHA-256 verified: {SHA256}\nInstalled CLI version verified: {VERSION}\n"
+    except Exception:
+        text += "Installation failed during download, archive verification, extraction or CLI verification.\n"
+        raise
+    finally:
+        (output / "install.log").write_text(text)
+        publish_log("installation", text)
+
+
+def install_binary():
     directory = Path(os.environ["RUNNER_TEMP"]) / "agent-trivy"
     directory.mkdir(parents=True, exist_ok=True)
     with urllib.request.urlopen(URL, timeout=120) as response:
@@ -71,18 +104,76 @@ def validate(report, sbom):
     return counts
 
 
+def run_stage(command, directory, env, output, name, filename, metadata):
+    """Retain and display native diagnostics, including partial timeout output."""
+    state = {"status": "error", "exitCode": None}
+    metadata["stages"][name] = state
+    text = ""
+    try:
+        result = subprocess.run(command, cwd=directory, env=env, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600)
+        text = result.stdout or ""
+        state["exitCode"] = result.returncode
+        if result.returncode:
+            raise ValueError("Trivy stage failed")
+        state["status"] = "success"
+    except subprocess.TimeoutExpired as error:
+        partial = error.stdout or b""
+        text = partial.decode("utf-8", errors="replace") if isinstance(partial, bytes) else partial
+        text += "\nTrivy stage timed out.\n"
+        raise
+    except OSError:
+        text = "Unable to execute Trivy.\n"
+        raise
+    finally:
+        (output / filename).write_text(text)
+        publish_log(name, text)
+
+
+def summary_text(metadata):
+    stages = metadata["stages"]
+    counts = metadata.get("severityCounts")
+    text = (f"## Agent Cargo SCA\n\nStatus: **{metadata['status']}**\n\n"
+            f"Analyzed commit: `{metadata.get('sourceCommit', 'unavailable')}`\n\n"
+            f"Configured Trivy: {VERSION}; verified CLI: {metadata.get('installedVersion', 'unavailable')}\n\n"
+            f"Database updated: {metadata.get('database', {}).get('UpdatedAt', 'unavailable')}\n\n"
+            f"Packages: {metadata.get('packageCount', 'unavailable')}; "
+            f"blocking findings (HIGH/CRITICAL): {metadata.get('blockingFindingCount', 'unavailable')}\n\n"
+            "| Severity | Findings |\n| --- | --- |\n")
+    for severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"):
+        text += f"| {severity} | {counts.get(severity, 0) if counts is not None else 'unavailable'} |\n"
+    text += "\n| Stage | Result | Native exit code |\n| --- | --- | --- |\n"
+    for name, state in stages.items():
+        text += f"| {name} | {state['status']} | {state.get('exitCode', '—')} |\n"
+    if metadata.get("errorStage"):
+        text += f"\nIncomplete analysis at **{metadata['errorStage']}**; this is not a clean scan.\n"
+    return text + ("\nDetailed results: job logs and the `agent-sca` artifact "
+                   "(`install.log`, `scan.log`, `sbom.log`, `blocking.txt` when available).\n")
+
+
 def scan():
     output = ROOT / "reports/sca"
     output.mkdir(parents=True, exist_ok=True)
-    for name in ("trivy.json", "sbom.cdx.json", "metadata.json"):
+    for name in EVIDENCE:
+        if name == "install.log":
+            continue
         (output / name).unlink(missing_ok=True)
     metadata = {"status": "error", "scannerVersion": VERSION,
                 "scannerArchiveSha256": SHA256,
                 "scope": "Cargo source dependencies; not compiled binary or host inventory",
                 "repository": os.environ.get("GITHUB_REPOSITORY"),
                 "runId": os.environ.get("GITHUB_RUN_ID"),
-                "runAttempt": os.environ.get("GITHUB_RUN_ATTEMPT")}
+                "runAttempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+                "stages": {name: {"status": "not-run"} for name in
+                           ("installation", "preparation", "scan", "sbom", "blocking-table", "validation")}}
+    stage = "installation"
     try:
+        installed = os.environ.get("INSTALL_RESULT", "success")
+        metadata["stages"][stage]["status"] = installed if installed == "success" else "error"
+        if installed != "success":
+            raise ValueError("Installation did not succeed")
+        stage = "preparation"
+        metadata["stages"][stage]["status"] = "error"
         head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         if head != os.environ["ANALYSIS_COMMIT"]:
             raise ValueError("Analysis revision mismatch")
@@ -93,6 +184,7 @@ def scan():
         version = json.loads(subprocess.check_output([binary, "--version", "--format", "json"], env=env))
         if version["Version"] != VERSION:
             raise ValueError("Unexpected Trivy version")
+        metadata["installedVersion"] = version["Version"]
         with tempfile.TemporaryDirectory(prefix="agent-sca-", dir=os.environ["RUNNER_TEMP"]) as temporary:
             directory = Path(temporary)
             for name in ("Cargo.toml", "Cargo.lock"):
@@ -108,11 +200,15 @@ def scan():
             ignore.write_text("")
             common = [binary, "--config", str(config), "--cache-dir", str(Path(os.environ["RUNNER_TEMP"]) / "agent-trivy-cache")]
             commands = [
-                common + ["fs", "--scanners", "vuln", "--pkg-types", "library", "--list-all-pkgs", "--ignorefile", str(ignore), "--format", "json", "--output", str(output / "trivy.json"), str(directory)],
-                common + ["convert", "--format", "cyclonedx", "--output", str(output / "sbom.cdx.json"), str(output / "trivy.json")],
+                ("scan", "scan.log", common + ["fs", "--scanners", "vuln", "--pkg-types", "library", "--list-all-pkgs", "--no-progress", "--ignore-unfixed=false", "--exit-code", "0", "--ignorefile", str(ignore), "--format", "json", "--output", str(output / "trivy.json"), str(directory)]),
+                ("sbom", "sbom.log", common + ["convert", "--format", "cyclonedx", "--output", str(output / "sbom.cdx.json"), str(output / "trivy.json")]),
+                ("blocking-table", "blocking.txt", common + ["convert", "--format", "table", "--scanners", "vuln", "--severity", "HIGH,CRITICAL", "--exit-code", "0", str(output / "trivy.json")]),
             ]
-            for command in commands:
-                subprocess.run(command, cwd=directory, env=env, check=True, capture_output=True, timeout=600)
+            metadata["stages"]["preparation"]["status"] = "success"
+            for stage, filename, command in commands:
+                run_stage(command, directory, env, output, stage, filename, metadata)
+        stage = "validation"
+        metadata["stages"][stage]["status"] = "error"
         report = json.loads((output / "trivy.json").read_text())
         sbom = json.loads((output / "sbom.cdx.json").read_text())
         counts = validate(report, sbom)
@@ -122,15 +218,23 @@ def scan():
             raise ValueError("Missing vulnerability database identity")
         blocked = counts.get("HIGH", 0) + counts.get("CRITICAL", 0)
         metadata.update(status="findings" if blocked else "success", severityCounts=counts,
+                        blockingFindingCount=blocked,
                         database=db, databaseMetadataSha256=digest(database),
                         packageCount=sum(len(item["Packages"]) for item in report["Results"] if item.get("Type") == "cargo"),
-                        reports={name: digest(output / name) for name in ("trivy.json", "sbom.cdx.json")})
+                        reports={name: digest(output / name) for name in EVIDENCE
+                                 if name != "metadata.json" and (output / name).is_file()})
+        metadata["stages"][stage]["status"] = "success"
         return 1 if blocked else 0
+    except Exception:
+        metadata["errorStage"] = stage
+        raise
     finally:
         (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+        text = summary_text(metadata)
+        print(text, flush=True)
         if os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
-                summary.write(f"## Agent Cargo SCA\n\nStatus: {metadata['status']}\n\nSeverity counts: {json.dumps(metadata.get('severityCounts', {}))}\n")
+                summary.write(text)
 
 
 if __name__ == "__main__":

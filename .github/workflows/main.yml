@@ -156,8 +156,12 @@ jobs:
           ref: ${{ env.ANALYSIS_COMMIT }}
           persist-credentials: false
       - name: Install checksum-verified Trivy
+        id: install_trivy
         run: python3 .github/scripts/trivy-ci.py install
       - name: Scan Cargo dependencies and generate CycloneDX
+        if: ${{ always() }}
+        env:
+          INSTALL_RESULT: ${{ steps.install_trivy.outcome }}
         run: python3 .github/scripts/trivy-ci.py scan
       - name: Upload dependency evidence
         if: ${{ always() }}
