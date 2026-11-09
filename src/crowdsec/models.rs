@@ -413,6 +413,8 @@ pub struct CrowdSecServiceStatus {
     pub installed: bool,
     pub running: bool,
     pub version: Option<String>,
+    pub state: CrowdSecHealthState,
+    pub message: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
