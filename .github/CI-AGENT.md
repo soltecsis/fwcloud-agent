@@ -11,14 +11,14 @@ does not establish ENS compliance.
 | Field | Value |
 | --- | --- |
 | Repository | `soltecsis/fwcloud-agent` |
-| Working branch | `ENS` (Phase 6 delivery; earlier sections retain their historical context) |
+| Working branch | `integrateAgentSonarQualityGate` (earlier sections retain their historical context) |
 | Integration target | `ENS` |
 | Phase 1 implementation baseline | `c8fbe38`, existing `ENS` tip at that delivery |
 | Phase 2 script baseline | `2cdfefcef2a6cc887baa979971872de36e21ddf6` |
 | Reporting implementation base | `127ebb9e589d5f4261320824f8cf153943cc2401` |
 | Execution environment | GitHub Actions, `ubuntu-24.04` hosted runners |
 | Evidence retention | 90 days requested for environment metadata, coverage and ShellCheck; 14 days for packages |
-| Last updated | 2026-11-09 |
+| Last updated | 2026-11-10 |
 
 ### Phase 1 baseline verification
 
@@ -60,8 +60,8 @@ reset or force-pushed. The current working branch starts from the ENS tip.
 | 3 | Test reports and reference coverage (API Phase 2) | Implemented and verified locally; hosted acceptance pending | Valid artifacts tied to run/revision; reviewed baseline and hosted performance comparison |
 | 4 | Uncovered routes and security tests | Implemented and verified locally; hosted execution pending | Deterministic route and security tests without destructive system operations |
 | 5 | Gitleaks and initial history audit | Integrated in ENS (PR #251) | Historical operational review remains tracked in section 8 |
-| 6 | Trivy and CycloneDX SBOM | Implemented locally; hosted acceptance pending | Dependency inventory, HIGH/CRITICAL policy and reviewed audit exceptions |
-| 7 | SonarQube Cloud and Quality Gate | Pending | Rust analysis, Clippy/coverage import, required gate and fork/Dependabot policy |
+| 6 | Trivy and CycloneDX SBOM | Integrated according to repository owner | Historical evidence and limitations remain in section 9 |
+| 7 | SonarQube Cloud and Quality Gate | Implemented locally; remote configuration and hosted acceptance pending | Native Rust/Clippy/LCOV import, required gate and fork/Dependabot policy |
 | 8 | Conditional package publication | Pending | Complete security gate, source/artifact provenance and package integrity verification |
 | 9 | Branch protection, evidence review and promotion | Pending | Required final `agent-ci`, reviewed evidence, promotion and devel alignment |
 
@@ -1334,7 +1334,174 @@ Actions run and reviewed artifact digests, confirm failure propagation and packa
 blocking, and review the remaining cargo-audit exception. This is not an ENS
 compliance certification.
 
-## 10. Updating this record
+## 10. Phase 7 — SonarQube Cloud and the Rust Quality Gate
+
+### 10.1. Implementation and required project configuration
+
+This delivery starts at local `bb39b3671c165845f3865a6ba4089f8177965318`, which
+contains the Trivy implementation and follow-up fixes. The owner confirms Trivy
+is integrated. A new branch, `integrateAgentSonarQualityGate`, preserves that base;
+no remote merge revision or hosted result is inferred from local refs.
+
+The implementation follows the API's official-scanner/same-run-evidence design,
+using Python adapters to match the Agent CI. No Rust application source,
+dependency, lockfile, coverage minimum or publication destination is changed.
+
+Configure these repository settings before running a trusted analysis:
+
+| Setting | Requirement |
+| --- | --- |
+| `sonar.projectKey` in `sonar-project.properties` | `soltecsis_fwcloud-agent`; the scanner reads the file directly, as in the API |
+| Actions secret `SONAR_TOKEN` | Token authorized for this project; confined to the official scanner step |
+| `sonar.organization` in `sonar-project.properties` | `soltecsis`, matching the existing FWCloud projects |
+| GitHub binding | Bind the Sonar project to `soltecsis/fwcloud-agent` and grant the Sonar GitHub app repository access for PR decoration |
+| Analysis mode | CI-based analysis, not a competing automatic analysis |
+| Quality Gate / code-new policy | Apply and review the organization's required gate and reference-branch baseline; do not weaken coverage/security conditions |
+
+Static configuration has a single source of truth: `sonar-project.properties`.
+The adapter validates the file's literal project key and organization for evidence
+and dashboard-link validation, but does not re-emit either as a `-D` override.
+Missing, empty, invalid or duplicate identifiers fail preparation. No Actions
+variables `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION` or `SONAR_REFERENCE_BRANCH`
+are required or read by this workflow/adapter; existing values do not override the
+file. Java property escaping/interpolation is not supported for these identifiers:
+keep them as literal values, as in the API.
+
+Configure and review the new-code definition in Sonar, including any reference
+branch and its own baseline. No `sonar.newCode.referenceBranch` override is passed
+by CI. Analyze the baseline branch before relying on comparisons or PR decoration.
+For PRs, native `sonar.pullrequest.*` parameters still use the actual PR head
+branch and target base. Only SCM revision, branch or PR context is passed
+dynamically; the token and server URL retain their existing scanner environment.
+
+Remote project availability, token permissions and baseline configuration remain
+unverified. The Sonar project/plan must permit the required branch and PR analyses.
+Configuring the app, secret, quality profile,
+gate and branch protection is an owner/admin task; this change does not provision
+remote resources or certify ENS compliance.
+
+### 10.2. Native reports and identity checks
+
+`quality` replaces its existing Clippy invocation with
+`python3 .github/scripts/sonar_ci.py clippy`. The adapter invokes exactly:
+
+```bash
+cargo clippy --all-targets --locked --message-format=json -- -D warnings
+```
+
+This is the same mandatory lint execution, not a second Clippy run. Its original
+exit code is preserved. The receipt checks actual Rust against the pinned release,
+validates the Cargo JSON stream and a successful `build-finished` record, and
+binds `clippy.json` to the verified revision, repository, event/ref, run and attempt.
+`agent-clippy-<RUN_ID>` uploads `clippy.json` and `analysis.json` for 90 days,
+including failed evidence. It overwrites a prior producing attempt so a failed
+rerun cannot leave a successful fallback report. The raw compiler JSON may contain
+diagnostic source snippets; artifact visibility/retention needs the same review
+as JUnit. It is never copied to the Sonar summary or aggregate Sonar artifact.
+
+The Sonar job downloads `agent-clippy-<RUN_ID>` and the existing
+`agent-coverage-<RUN_ID>` directly from the same workflow run. Before scanning,
+`sonar_ci.py prepare` requires:
+
+- The checkout HEAD equals `ANALYSIS_COMMIT`; inputs belong to the same repository,
+  revision, event/ref and run. Producer attempts are positive and not newer than
+  the consumer attempt; coverage's producer receipt must be internally consistent.
+- Coverage is accepted, tests succeeded, validation succeeded without errors,
+  tool versions match current pins, and the LCOV digest matches the exact bytes.
+- Reuse of the existing strict LCOV validator: original tracked `src/*.rs` paths,
+  complete nonempty records, physical source bounds and valid totals. Symlinks
+  anywhere in analyzed `src`/`tests` trees are rejected.
+- Clippy succeeded with exit code 0, the pinned Rust release and a matching JSON
+  digest; partial streams and compiler-error records cannot count as success.
+
+`sonar-project.properties` imports those files natively with
+`sonar.rust.lcov.reportPaths=coverage-input/lcov.info` and
+`sonar.rust.clippyReport.reportPaths=clippy-input/clippy.json`. No coverage
+conversion, coverage merger, generic test-format converter or additional test
+execution is introduced. Existing test-only Rust modules are classified as tests,
+not excluded production coverage. The Sonar scope is Rust `src` and `tests`;
+ShellCheck/Gitleaks/Trivy remain responsible for their separate scopes.
+
+### 10.3. Scanner, gates and untrusted pull requests
+
+The official `SonarSource/sonarqube-scan-action` is fixed at
+`d209202bc7d53ff1cc128f7f907dac145c9d6ae9` (the same pin as the API), with CLI
+`8.1.0.6389` and signature verification enabled. Its pinned action manifest was
+checked. Cargo is installed by the existing setup action; checkout uses full
+history and disables persisted Git credentials. Rust is supported natively by
+SonarQube Cloud; no community plugin or C/C++ build wrapper is installed.
+
+`sonar.qualitygate.wait=true` delegates analysis submission, polling and gate
+evaluation to the official scanner. Scanner/preparation failures or a failed gate
+fail the required job. The local **20% global coverage minimum** is unchanged and
+is independent of Sonar's remotely configured **new-code** coverage condition.
+No remote gate result is inferred from a local global coverage percentage.
+
+The graph is acyclic: quality/test/audit/secrets/SCA precede Sonar, then DEB/RPM,
+then `agent-ci`, then the existing main-push-only external publishers. For trusted
+executions, Sonar success is mandatory for packaging and `agent-ci`. Failure,
+cancellation, absence or unexpected skipping cannot satisfy those gates.
+
+As in the API, PRs from forks and Dependabot executions explicitly omit Sonar
+because they have no analysis token. All other controls remain mandatory; the
+aggregate accepts **only `skipped`** for Sonar in that policy case and publishes a
+clear summary notice. Package conditions explicitly allow that omission without
+GitHub's default dependency-skip behavior bypassing the remaining requirements.
+The trusted merged revision is analyzed on its subsequent push. There is no
+`pull_request_target`, workflow chaining, token forwarding to forks or fallback
+that treats missing credentials on a trusted run as optional success.
+
+### 10.4. Evidence, local checks and hosted acceptance
+
+`sonar_ci.py record` runs under `always()` and writes only aggregate metadata:
+source/run identity and producer attempts when verified, input/settings digests,
+scanner/action versions, scan outcome and `PASSED` or `FAILED_OR_INCOMPLETE`.
+A preparation failure cannot become a passed gate. A native dashboard URL is
+retained only for the expected Sonar host/project and permitted branch/PR query.
+The summary records stage/gate status and producer identity. Only
+`reports/sonar/metadata.json` is uploaded as
+`agent-sonarqube-<RUN_ID>-<ATTEMPT>` for 90 days. Tokens, scanner logs, issue
+snippets, raw API responses and `.scannerwork` are not uploaded there.
+
+Local regression tests cover valid previous-attempt producers, wrong revision/
+repository/run/ref/event, future/invalid attempts, rejected coverage, changed or
+missing report bytes, invalid paths/symlinks, tool versions, malformed/failed
+Clippy output, PR arguments, missing settings, aggregate failure propagation,
+package conditions and the fork/Dependabot policy. Fixtures use synthetic CI and
+Sonar identifiers, never a token or production project.
+
+Local checks on 2026-11-10: **118 Python tests (113 passed, five existing optional
+tests skipped)**, eight Gitleaks Node tests, Actionlint 1.7.7 and patch whitespace
+checks pass. The actual Clippy adapter completes successfully with Rust 1.99.1,
+all targets, the unchanged lockfile and denied warnings, and produces a validated
+JSON receipt under synthetic local run `7`/attempt `1`. These are local checks of
+the uncommitted adapter, not a hosted Sonar analysis or a remote Quality Gate.
+
+The normal instrumented reporting pipeline was then executed once: **128/128
+Rust tests passed**, none skipped, zero doctests. Native LLVM coverage is
+**81.17% (1,539/1,896 executable lines)**; JUnit/LCOV/JSON/HTML and the unchanged
+20% minimum pass the existing validator. Local copies of the resulting coverage
+and Clippy artifacts pass the actual Sonar preparation adapter with their real
+digests and synthetic run identity. No tests were rerun by Sonar preparation.
+The project key used for this historical offline smoke check was `local-fixture-agent`
+through the former Actions override, not a real remote project. The follow-up
+configuration alignment removes that override and uses file-based fixture
+identifiers in regression tests. No scanner request was sent; recording a skipped scan
+correctly produces `FAILED_OR_INCOMPLETE`, not a passed Quality Gate.
+
+The file-based configuration follow-up passes **120 Python tests (115 passed,
+five existing optional tests skipped)**, Actionlint 1.7.7 and patch whitespace
+checks. Regression cases verify operation without Actions identifier/reference
+variables, rejection of invalid file identifiers, ignored former overrides, and
+unchanged branch/PR context. Remote analysis and gate acceptance remain pending.
+
+Remote acceptance remains mandatory: confirm the file's project key, configure the token and
+baseline; record a successful Actions run and reviewed artifacts; confirm LCOV and
+Clippy are actually imported, PR decoration works, failed gates block packaging,
+and branch protection requires `agent-ci`. Local tests cannot establish any of
+those server-side results.
+
+## 11. Updating this record
 
 Update this document with each delivery. Record the exact revision, commands,
 environment, results, limitations, PR/run/artifact links and reviewer. Keep
