@@ -241,8 +241,11 @@ class SonarWorkflowTests(unittest.TestCase):
         self.assertIn("sonar.rust.lcov.reportPaths=coverage-input/lcov.info", settings)
         self.assertIn("sonar.rust.clippyReport.reportPaths=clippy-input/clippy.json", settings)
         self.assertNotIn("sonar.coverage.exclusions", settings)
-        self.assertIn("vars.SONAR_PROJECT_KEY", section)
-        self.assertIn("vars.SONAR_REFERENCE_BRANCH", section)
+        self.assertNotIn("vars.SONAR_PROJECT_KEY", section)
+        self.assertNotIn("vars.SONAR_REFERENCE_BRANCH", section)
+        self.assertNotIn("vars.SONAR_ORGANIZATION", section)
+        self.assertIn("sonar.organization=soltecsis", settings)
+        self.assertIn("sonar.projectKey=soltecsis_fwcloud-agent", settings)
         self.assertNotIn("pull_request_target", WORKFLOW.read_text())
 
     def test_fork_dependabot_policy_and_package_failures(self):

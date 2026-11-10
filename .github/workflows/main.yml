@@ -213,8 +213,6 @@ jobs:
       - name: Verify revision, producer identities and native reports
         id: analysis
         env:
-          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
-          SONAR_REFERENCE_BRANCH: ${{ vars.SONAR_REFERENCE_BRANCH }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: python3 .github/scripts/sonar_ci.py prepare
       - name: Official SonarQube scan and Quality Gate

@@ -1351,24 +1351,32 @@ Configure these repository settings before running a trusted analysis:
 
 | Setting | Requirement |
 | --- | --- |
-| Actions variable `SONAR_PROJECT_KEY` | Exact existing Agent project key; mandatory, with no guessed default |
-| Actions variable `SONAR_REFERENCE_BRANCH` | Existing, analyzed baseline branch for non-PR runs; chosen by the owner, not inferred from branch age |
+| `sonar.projectKey` in `sonar-project.properties` | `soltecsis_fwcloud-agent`; the scanner reads the file directly, as in the API |
 | Actions secret `SONAR_TOKEN` | Token authorized for this project; confined to the official scanner step |
-| Sonar organization | `soltecsis`, matching the existing FWCloud projects |
+| `sonar.organization` in `sonar-project.properties` | `soltecsis`, matching the existing FWCloud projects |
 | GitHub binding | Bind the Sonar project to `soltecsis/fwcloud-agent` and grant the Sonar GitHub app repository access for PR decoration |
 | Analysis mode | CI-based analysis, not a competing automatic analysis |
 | Quality Gate / code-new policy | Apply and review the organization's required gate and reference-branch baseline; do not weaken coverage/security conditions |
 
-For the reference branch itself, no self-reference parameter is passed; its own
-new-code definition must be explicitly reviewed on Sonar. Analyze the baseline
-branch before relying on comparisons or PR decoration. For PRs, native
-`sonar.pullrequest.*` parameters use the actual PR head branch and target base;
-the configured non-PR reference is not substituted for that target.
+Static configuration has a single source of truth: `sonar-project.properties`.
+The adapter validates the file's literal project key and organization for evidence
+and dashboard-link validation, but does not re-emit either as a `-D` override.
+Missing, empty, invalid or duplicate identifiers fail preparation. No Actions
+variables `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION` or `SONAR_REFERENCE_BRANCH`
+are required or read by this workflow/adapter; existing values do not override the
+file. Java property escaping/interpolation is not supported for these identifiers:
+keep them as literal values, as in the API.
 
-The project key and baseline remain **unconfirmed remote settings**, not defaults
-invented by this delivery. Missing/invalid settings fail preparation rather than
-silently skip a required analysis. The Sonar project/plan must permit the required
-branch and PR analyses. Configuring the app, secrets, variables, quality profile,
+Configure and review the new-code definition in Sonar, including any reference
+branch and its own baseline. No `sonar.newCode.referenceBranch` override is passed
+by CI. Analyze the baseline branch before relying on comparisons or PR decoration.
+For PRs, native `sonar.pullrequest.*` parameters still use the actual PR head
+branch and target base. Only SCM revision, branch or PR context is passed
+dynamically; the token and server URL retain their existing scanner environment.
+
+Remote project availability, token permissions and baseline configuration remain
+unverified. The Sonar project/plan must permit the required branch and PR analyses.
+Configuring the app, secret, quality profile,
 gate and branch protection is an owner/admin task; this change does not provision
 remote resources or certify ENS compliance.
 
@@ -1475,11 +1483,19 @@ Rust tests passed**, none skipped, zero doctests. Native LLVM coverage is
 20% minimum pass the existing validator. Local copies of the resulting coverage
 and Clippy artifacts pass the actual Sonar preparation adapter with their real
 digests and synthetic run identity. No tests were rerun by Sonar preparation.
-The project key used for this offline smoke check is `local-fixture-agent`, not a
-real remote project. No scanner request was sent; recording a skipped scan
+The project key used for this historical offline smoke check was `local-fixture-agent`
+through the former Actions override, not a real remote project. The follow-up
+configuration alignment removes that override and uses file-based fixture
+identifiers in regression tests. No scanner request was sent; recording a skipped scan
 correctly produces `FAILED_OR_INCOMPLETE`, not a passed Quality Gate.
 
-Remote acceptance remains mandatory: configure the real project key, token and
+The file-based configuration follow-up passes **120 Python tests (115 passed,
+five existing optional tests skipped)**, Actionlint 1.7.7 and patch whitespace
+checks. Regression cases verify operation without Actions identifier/reference
+variables, rejection of invalid file identifiers, ignored former overrides, and
+unchanged branch/PR context. Remote analysis and gate acceptance remain pending.
+
+Remote acceptance remains mandatory: confirm the file's project key, configure the token and
 baseline; record a successful Actions run and reviewed artifacts; confirm LCOV and
 Clippy are actually imported, PR decoration works, failed gates block packaging,
 and branch protection requires `agent-ci`. Local tests cannot establish any of

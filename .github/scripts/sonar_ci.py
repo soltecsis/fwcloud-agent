@@ -94,23 +94,36 @@ def branch(value):
     return value
 
 
+def project_identifiers(path):
+    """Validate the literal project identifiers, not the scanner's full properties syntax."""
+    values = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", "!")):
+            continue
+        match = re.fullmatch(r"(sonar\.organization|sonar\.projectKey)(?:\s*[:=]\s*|\s+)(.*)", line)
+        if match:
+            key, value = match.groups()
+            value = value.strip()
+            require(key not in values and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}", value))
+            values[key] = value
+    require(set(values) == {"sonar.organization", "sonar.projectKey"})
+    return values
+
+
 def prepare(root=ROOT, env=os.environ):
     ci = identity(root, env)
-    key = env.get("SONAR_PROJECT_KEY", "")
-    require(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}", key))
+    identifiers = project_identifiers(root / "sonar-project.properties")
+    key = identifiers["sonar.projectKey"]
     source_branch = branch(env.get("GITHUB_HEAD_REF") or env.get("GITHUB_REF_NAME"))
-    args = [f"-Dsonar.projectKey={key}", f"-Dsonar.scm.revision={ci['source_commit']}"]
+    args = [f"-Dsonar.scm.revision={ci['source_commit']}"]
     if ci["event"] == "pull_request":
         number = env.get("PR_NUMBER", "")
         require(re.fullmatch(r"[1-9][0-9]*", number))
         args.extend([f"-Dsonar.pullrequest.key={number}", f"-Dsonar.pullrequest.branch={source_branch}",
                      f"-Dsonar.pullrequest.base={branch(env.get('GITHUB_BASE_REF'))}"])
     else:
-        reference = branch(env.get("SONAR_REFERENCE_BRANCH"))
         args.append(f"-Dsonar.branch.name={source_branch}")
-        # A reference branch must not refer to itself; its baseline is configured on Sonar.
-        if source_branch != reference:
-            args.append(f"-Dsonar.newCode.referenceBranch={reference}")
     for tree in ("src", "tests"):
         directory = root / tree
         require(directory.is_dir() and not directory.is_symlink())
@@ -135,7 +148,7 @@ def prepare(root=ROOT, env=os.environ):
             clippy_report.get("exit_code") == 0 and
             clippy_report.get("rust") == rust and clippy_report.get("report_sha256") == sha(lint / "clippy.json"))
     clippy_json(lint / "clippy.json")
-    result = {**ci, "projectKey": key, "branch": source_branch,
+    result = {**ci, "projectKey": key, "organization": identifiers["sonar.organization"], "branch": source_branch,
               "coverageProducerAttempt": coverage_attempt, "clippyProducerAttempt": clippy_attempt,
               "lcovSha256": sha(cov / "lcov.info"), "clippySha256": sha(lint / "clippy.json"),
               "settingsSha256": sha(root / "sonar-project.properties"), "preparation": "success"}

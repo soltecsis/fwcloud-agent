@@ -22,14 +22,15 @@ class SonarTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         for directory in ("src", "tests", ".github", "coverage-input", "clippy-input"):
             (self.root / directory).mkdir()
-        for name in ("rust-toolchain.toml", ".github/report-tools.toml", "sonar-project.properties"):
+        for name in ("rust-toolchain.toml", ".github/report-tools.toml"):
             (self.root / name).write_bytes((sonar.ROOT / name).read_bytes())
+        (self.root / "sonar-project.properties").write_text("sonar.organization=test-org\nsonar.projectKey=test_agent\n")
         (self.root / "src/main.rs").write_text("fn main() {}\n")
         (self.root / "coverage-input/lcov.info").write_text("SF:src/main.rs\nDA:1,1\nLF:1\nLH:1\nend_of_record\n")
         (self.root / "clippy-input/clippy.json").write_text('{"reason":"build-finished","success":true}\n')
         self.env = {"ANALYSIS_COMMIT": "a" * 40, "GITHUB_REPOSITORY": "test/agent", "GITHUB_RUN_ID": "100",
                     "GITHUB_RUN_ATTEMPT": "3", "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/ENS",
-                    "GITHUB_REF_NAME": "ENS", "SONAR_PROJECT_KEY": "test_agent", "SONAR_REFERENCE_BRANCH": "devel",
+                    "GITHUB_REF_NAME": "ENS",
                     "GITHUB_OUTPUT": str(self.root / "output"), "GITHUB_STEP_SUMMARY": str(self.root / "summary")}
         ci = {"repository": "test/agent", "source_commit": "a" * 40, "run_id": "100", "run_attempt": "2",
               "event": "push", "ref": "refs/heads/ENS"}
@@ -67,7 +68,11 @@ class SonarTests(unittest.TestCase):
         self.assertEqual(result["clippyProducerAttempt"], "2")
         args = (self.root / "output").read_text()
         self.assertIn("-Dsonar.branch.name=ENS", args)
-        self.assertIn("-Dsonar.newCode.referenceBranch=devel", args)
+        self.assertNotIn("newCode.referenceBranch", args)
+        self.assertNotIn("-Dsonar.projectKey", args)
+        self.assertNotIn("-Dsonar.organization", args)
+        self.assertEqual(result["projectKey"], "test_agent")
+        self.assertEqual(result["organization"], "test-org")
         self.assertNotIn("pullrequest", args)
 
     def test_pull_request_uses_base_not_branch_analysis(self):
@@ -83,16 +88,41 @@ class SonarTests(unittest.TestCase):
         self.assertNotIn("sonar.branch.name", args)
         self.assertNotIn("newCode.referenceBranch", args)
 
-    def test_reference_branch_does_not_reference_itself(self):
-        sonar.prepare(self.root, {**self.env, "SONAR_REFERENCE_BRANCH": "ENS"})
-        self.assertNotIn("newCode.referenceBranch", (self.root / "output").read_text())
+    def test_actions_variables_do_not_override_file_or_new_code_policy(self):
+        result = sonar.prepare(self.root, {**self.env, "SONAR_REFERENCE_BRANCH": "devel",
+                                          "SONAR_PROJECT_KEY": "other_project", "SONAR_ORGANIZATION": "other-org"})
+        args = (self.root / "output").read_text()
+        self.assertNotIn("newCode.referenceBranch", args)
+        self.assertNotIn("projectKey", args)
+        self.assertNotIn("organization", args)
+        self.assertEqual(result["projectKey"], "test_agent")
+        self.assertEqual(result["organization"], "test-org")
 
-    def test_missing_project_key_reference_or_injected_args_fail(self):
-        for change in ({"SONAR_PROJECT_KEY": ""}, {"SONAR_REFERENCE_BRANCH": ""},
-                       {"SONAR_PROJECT_KEY": "x -Dsonar.qualitygate.wait=false"},
-                       {"GITHUB_REF_NAME": "x\ninjected"}, {"ANALYSIS_COMMIT": "b" * 40}):
+    def test_injected_branch_or_wrong_revision_fails(self):
+        for change in ({"GITHUB_REF_NAME": "x\ninjected"}, {"ANALYSIS_COMMIT": "b" * 40}):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 sonar.prepare(self.root, {**self.env, **change})
+
+    def test_missing_empty_invalid_or_duplicate_file_identifiers_fail(self):
+        file = self.root / "sonar-project.properties"
+        for text in ("", "sonar.organization=test-org\n", "sonar.projectKey=test_agent\n",
+                     "sonar.organization=test-org\nsonar.projectKey=\n",
+                     "sonar.organization=test-org\nsonar.projectKey=x -Dsonar.qualitygate.wait=false\n",
+                     "sonar.organization=test-org\nsonar.projectKey=test_agent\nsonar.projectKey:other\n",
+                     "sonar.organization=test-org\nsonar.organization:other\nsonar.projectKey=test_agent\n"):
+            file.write_text(text)
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                sonar.prepare(self.root, self.env)
+        file.unlink()
+        with self.assertRaises(OSError):
+            sonar.prepare(self.root, self.env)
+
+    def test_property_comments_whitespace_and_literal_separators(self):
+        file = self.root / "sonar-project.properties"
+        file.write_text("# comment\n! comment\n\n  sonar.organization : test-org  \nsonar.projectKey = test_agent\n")
+        result = sonar.prepare(self.root, self.env)
+        self.assertEqual(result["projectKey"], "test_agent")
+        self.assertEqual(result["organization"], "test-org")
 
     def test_foreign_failed_or_future_producers_rejected(self):
         for kind in ("coverage", "lint"):
