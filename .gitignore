@@ -16,3 +16,6 @@ __pycache__/
 !/tests/playground/data/.gitkeep
 
 /cobertura.xml
+/.scannerwork/
+/coverage-input/
+/clippy-input/

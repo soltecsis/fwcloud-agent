@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import textwrap
+from types import SimpleNamespace
 import unittest
 
 
@@ -22,10 +23,11 @@ class AggregateTests(unittest.TestCase):
         cls.aggregate = aggregate
         cls.command = textwrap.dedent(aggregate.split("python3 - <<'PY'\n", 1)[1].split("          PY", 1)[0])
 
-    def invoke(self, results):
+    def invoke(self, results, sonar_required="true"):
         return subprocess.run(
             [sys.executable, "-c", self.command],
-            env={**os.environ, "REQUIRED_RESULTS": json.dumps(results)},
+            env={**os.environ, "REQUIRED_RESULTS": json.dumps(results),
+                 "SONAR_REQUIRED": sonar_required, "GITHUB_STEP_SUMMARY": os.devnull},
             capture_output=True, text=True,
         )
 
@@ -37,7 +39,7 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_all_mandatory_controls_are_required_even_after_failure(self):
-        self.assertEqual(set(self.required), {"quality", "test", "security_audit", "secrets", "sca", "deb-package", "rpm-package"})
+        self.assertEqual(set(self.required), {"quality", "test", "security_audit", "secrets", "sca", "sonar", "deb-package", "rpm-package"})
         self.assertIn("if: ${{ always() }}", self.aggregate)
         self.assertNotIn("continue-on-error", self.aggregate)
 
@@ -63,6 +65,18 @@ class AggregateTests(unittest.TestCase):
         results["unreviewed"] = {"result": "success"}
         self.assertNotEqual(self.invoke(results).returncode, 0)
 
+    def test_only_explicitly_optional_sonar_may_be_skipped(self):
+        results = self.successful_results()
+        results["sonar"]["result"] = "skipped"
+        self.assertEqual(self.invoke(results, "false").returncode, 0)
+        for state in ("success", "failure", "cancelled", "", None):
+            results["sonar"]["result"] = state
+            self.assertNotEqual(self.invoke(results, "false").returncode, 0)
+        results["sonar"]["result"] = "skipped"
+        for job in set(self.required) - {"sonar"}:
+            failed = dict(results, **{job: {"result": "skipped"}})
+            self.assertNotEqual(self.invoke(failed, "false").returncode, 0)
+
 
 class PackagingGateTests(unittest.TestCase):
     @classmethod
@@ -77,8 +91,13 @@ class PackagingGateTests(unittest.TestCase):
     def test_packages_preserve_audit_and_coverage_gates(self):
         for job in ("deb-package", "rpm-package"):
             with self.subTest(job=job):
-                self.assertEqual(self.needs(job), {"quality", "test", "security_audit", "secrets", "sca"})
-                self.assertNotIn("if:", self.jobs[job].split("steps:", 1)[0])
+                self.assertEqual(self.needs(job), {"quality", "test", "security_audit", "secrets", "sca", "sonar"})
+                gate = self.jobs[job].split("steps:", 1)[0]
+                for required in ("quality", "test", "security_audit", "secrets", "sca"):
+                    self.assertIn(f"needs.{required}.result == 'success'", gate)
+                self.assertIn("needs.sonar.result == 'success'", gate)
+                self.assertIn("needs.sonar.result == 'skipped'", gate)
+                self.assertIn("github.event_name == 'pull_request'", gate)
 
     def test_dependency_graph_does_not_reference_removed_jobs(self):
         self.assertNotIn("checks", self.jobs)
@@ -116,9 +135,9 @@ class PackagingGateTests(unittest.TestCase):
                 self.assertIn("github.ref == 'refs/heads/main'", self.jobs[job])
                 self.assertIn("github.repository == 'soltecsis/fwcloud-agent'", self.jobs[job])
         for job, section in self.jobs.items():
-            if job not in publishers:
+            if job not in publishers and job != "sonar":
                 with self.subTest(job=job):
-                    self.assertNotIn("secrets.", section)
+                    self.assertNotRegex(section, r"(?<![\w.])secrets\.")
 
 
 class ShellCheckWorkflowTests(unittest.TestCase):
@@ -126,7 +145,7 @@ class ShellCheckWorkflowTests(unittest.TestCase):
         quality = WORKFLOW.read_text().split("\n  quality:\n", 1)[1].split("\n  security_audit:\n", 1)[0]
         commands = (
             "cargo fmt --all -- --check",
-            "cargo clippy --all-targets --locked -- -D warnings",
+            "python3 .github/scripts/sonar_ci.py clippy",
             "python3 .github/scripts/shellcheck-ci.py install",
             "python3 .github/scripts/shellcheck-ci.py analyze",
         )
@@ -169,7 +188,7 @@ class ReportingWorkflowTests(unittest.TestCase):
 
 class SecretsWorkflowTests(unittest.TestCase):
     def test_history_job_uses_exact_head_full_history_and_no_credentials(self):
-        section = WORKFLOW.read_text().split('\n  secrets:\n', 1)[1].split('\n  agent-ci:\n', 1)[0]
+        section = WORKFLOW.read_text().split('\n  secrets:\n', 1)[1].split('\n  sca:\n', 1)[0]
         self.assertIn('name: FWCloud-Agent Secrets', section)
         self.assertIn('timeout-minutes: 15', section)
         self.assertIn('ref: ${{ env.ANALYSIS_COMMIT }}', section)
@@ -197,6 +216,68 @@ class SecretsWorkflowTests(unittest.TestCase):
         quality = WORKFLOW.read_text().split('\n  quality:\n', 1)[1].split('\n  security_audit:\n', 1)[0]
         self.assertIn('node --test scripts/gitleaks-report.test.cjs', quality)
         self.assertIn("python3 -m unittest discover -s .github/scripts -p 'test_*.py'", quality)
+
+
+class SonarWorkflowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        PackagingGateTests.setUpClass.__func__(cls)
+
+    needs = PackagingGateTests.needs
+
+    def test_sonar_transfers_native_reports_and_only_uploads_aggregate_receipt(self):
+        section = self.jobs["sonar"]
+        self.assertEqual(self.needs("sonar"), {"quality", "test", "security_audit", "secrets", "sca"})
+        self.assertIn("fetch-depth: 0", section)
+        self.assertIn("agent-coverage-${{ github.run_id }}", section)
+        self.assertIn("agent-clippy-${{ github.run_id }}", section)
+        self.assertIn("scannerVersion: 8.1.0.6389", section)
+        self.assertIn("skipSignatureVerification: false", section)
+        self.assertIn("path: reports/sonar/metadata.json", section)
+        self.assertNotIn("path: .scannerwork", section)
+        self.assertNotIn("continue-on-error", section)
+        settings = (WORKFLOW.parents[2] / "sonar-project.properties").read_text()
+        self.assertIn("sonar.qualitygate.wait=true", settings)
+        self.assertIn("sonar.rust.lcov.reportPaths=coverage-input/lcov.info", settings)
+        self.assertIn("sonar.rust.clippyReport.reportPaths=clippy-input/clippy.json", settings)
+        self.assertNotIn("sonar.coverage.exclusions", settings)
+        self.assertIn("vars.SONAR_PROJECT_KEY", section)
+        self.assertIn("vars.SONAR_REFERENCE_BRANCH", section)
+        self.assertNotIn("pull_request_target", WORKFLOW.read_text())
+
+    def test_fork_dependabot_policy_and_package_failures(self):
+        def condition(job):
+            expression = self.jobs[job].split("if: >-", 1)[1].split("runs-on:", 1)[0].strip()
+            expression = expression.removeprefix("${{").removesuffix("}}").replace("!cancelled()", "not cancelled()").replace("&&", " and ").replace("||", " or ")
+            return " ".join(expression.split())
+        for event, fork, actor, user in (
+            ("push", False, "developer", "developer"),
+            ("workflow_dispatch", False, "developer", "developer"),
+            ("pull_request", False, "developer", "developer"),
+            ("pull_request", True, "developer", "developer"),
+            ("pull_request", False, "developer", "dependabot[bot]"),
+            ("pull_request", False, "dependabot[bot]", "developer"),
+            ("push", False, "dependabot[bot]", "developer"),
+        ):
+            github = SimpleNamespace(actor=actor, event_name=event, repository="test/agent", event=SimpleNamespace(
+                pull_request=SimpleNamespace(head=SimpleNamespace(repo=SimpleNamespace(full_name="fork/agent" if fork else "test/agent")),
+                                             user=SimpleNamespace(login=user))))
+            required = actor != "dependabot[bot]" and (event != "pull_request" or not fork and user != "dependabot[bot]")
+            namespace = {"github": github, "cancelled": lambda: False}
+            self.assertEqual(eval(condition("sonar"), {"__builtins__": {}}, namespace), required)
+            for job in ("deb-package", "rpm-package"):
+                needs = SimpleNamespace(**{name: SimpleNamespace(result="success") for name in self.needs(job)})
+                namespace["needs"] = needs
+                for outcome in ("success", "skipped", "failure", "cancelled"):
+                    needs.sonar.result = outcome
+                    self.assertEqual(eval(condition(job), {"__builtins__": {}}, namespace),
+                                     outcome == "success" or outcome == "skipped" and not required)
+                needs.sonar.result = "success" if required else "skipped"
+                for name in self.needs(job) - {"sonar"}:
+                    for outcome in ("failure", "skipped", "cancelled"):
+                        getattr(needs, name).result = outcome
+                        self.assertFalse(eval(condition(job), {"__builtins__": {}}, namespace))
+                    getattr(needs, name).result = "success"
 
 
 if __name__ == "__main__":

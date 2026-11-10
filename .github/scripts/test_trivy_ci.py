@@ -51,7 +51,7 @@ class EvidenceTests(unittest.TestCase):
 
     def test_workflow_sca_is_mandatory_and_evidence_survives_failures(self):
         workflow = (Path(__file__).parents[1] / "workflows/main.yml").read_text()
-        sca = workflow.split("\n  sca:\n")[1].split("\n  agent-ci:\n")[0]
+        sca = workflow.split("\n  sca:\n")[1].split("\n  sonar:\n")[0]
         self.assertIn("ref: ${{ env.ANALYSIS_COMMIT }}", sca)
         self.assertIn("persist-credentials: false", sca)
         self.assertIn("trivy-ci.py install", sca)

@@ -40,7 +40,17 @@ jobs:
       - name: Rustfmt
         run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+        id: clippy
+        run: python3 .github/scripts/sonar_ci.py clippy
+      - name: Upload Clippy evidence
+        if: ${{ always() && steps.clippy.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agent-clippy-${{ github.run_id }}
+          path: reports/clippy/
+          overwrite: true
+          retention-days: 90
+          if-no-files-found: error
       - name: Install and verify ShellCheck
         run: python3 .github/scripts/shellcheck-ci.py install
       - name: Analyze packaged shell scripts
@@ -172,35 +182,117 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+  sonar:
+    name: FWCloud-Agent SonarQube
+    needs: [quality, test, security_audit, secrets, sca]
+    # Untrusted PRs have no analysis token. Analyze the merged revision on push.
+    if: >-
+      ${{ github.actor != 'dependabot[bot]' &&
+          (github.event_name != 'pull_request' ||
+           (github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.pull_request.user.login != 'dependabot[bot]')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.ANALYSIS_COMMIT }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+      - name: Download same-run coverage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: agent-coverage-${{ github.run_id }}
+          path: coverage-input
+      - name: Download same-run Clippy evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: agent-clippy-${{ github.run_id }}
+          path: clippy-input
+      - name: Verify revision, producer identities and native reports
+        id: analysis
+        env:
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          SONAR_REFERENCE_BRANCH: ${{ vars.SONAR_REFERENCE_BRANCH }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 .github/scripts/sonar_ci.py prepare
+      - name: Official SonarQube scan and Quality Gate
+        id: scan
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
+        with:
+          scannerVersion: 8.1.0.6389
+          skipSignatureVerification: false
+          args: ${{ steps.analysis.outputs.args }}
+      - name: Record aggregate analysis evidence
+        if: ${{ always() }}
+        env:
+          PREPARE_OUTCOME: ${{ steps.analysis.outcome }}
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+        run: python3 .github/scripts/sonar_ci.py record
+      - name: Upload aggregate Sonar evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agent-sonarqube-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/sonar/metadata.json
+          retention-days: 90
+          if-no-files-found: error
+      - name: Verify the committed lockfile is unchanged
+        if: ${{ always() }}
+        run: git diff --exit-code -- Cargo.lock
+
   agent-ci:
     name: agent-ci
     if: ${{ always() }}
-    needs: [quality, test, security_audit, secrets, sca, deb-package, rpm-package]
+    needs: [quality, test, security_audit, secrets, sca, sonar, deb-package, rpm-package]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require every foundation check to succeed
         env:
           REQUIRED_RESULTS: ${{ toJSON(needs) }}
+          SONAR_REQUIRED: >-
+            ${{ github.actor != 'dependabot[bot]' &&
+                (github.event_name != 'pull_request' ||
+                 (github.event.pull_request.head.repo.full_name == github.repository &&
+                  github.event.pull_request.user.login != 'dependabot[bot]')) }}
         run: |
           python3 - <<'PY'
           import json
           import os
           import sys
 
-          expected = {"quality", "test", "security_audit", "secrets", "sca", "deb-package", "rpm-package"}
+          expected = {"quality", "test", "security_audit", "secrets", "sca", "sonar", "deb-package", "rpm-package"}
           results = json.loads(os.environ["REQUIRED_RESULTS"])
+          if os.environ["SONAR_REQUIRED"] not in ("true", "false"):
+              sys.exit("Invalid Sonar requirement")
           if set(results) != expected:
               sys.exit("Missing or unexpected required jobs")
           for job in sorted(expected):
               result = results[job].get("result")
               print(f"{job}: {result}")
-              if result != "success":
+              required = "skipped" if job == "sonar" and os.environ["SONAR_REQUIRED"] == "false" else "success"
+              if result != required:
                   sys.exit(f"Required job did not succeed: {job}")
+          if os.environ["SONAR_REQUIRED"] == "false":
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                  summary.write("SonarQube omitted: this fork/Dependabot execution has no analysis token.\n")
           PY
 
   deb-package:
-    needs: [quality, test, security_audit, secrets, sca]
+    needs: [quality, test, security_audit, secrets, sca, sonar]
+    if: >-
+      ${{ !cancelled() && needs.quality.result == 'success' && needs.test.result == 'success' &&
+          needs.security_audit.result == 'success' && needs.secrets.result == 'success' &&
+          needs.sca.result == 'success' && (needs.sonar.result == 'success' ||
+          (needs.sonar.result == 'skipped' && (github.actor == 'dependabot[bot]' ||
+           (github.event_name == 'pull_request' &&
+            (github.event.pull_request.head.repo.full_name != github.repository ||
+             github.event.pull_request.user.login == 'dependabot[bot]'))))) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: DEB package
@@ -241,7 +333,15 @@ jobs:
           if-no-files-found: error
 
   rpm-package:
-    needs: [quality, test, security_audit, secrets, sca]
+    needs: [quality, test, security_audit, secrets, sca, sonar]
+    if: >-
+      ${{ !cancelled() && needs.quality.result == 'success' && needs.test.result == 'success' &&
+          needs.security_audit.result == 'success' && needs.secrets.result == 'success' &&
+          needs.sca.result == 'success' && (needs.sonar.result == 'success' ||
+          (needs.sonar.result == 'skipped' && (github.actor == 'dependabot[bot]' ||
+           (github.event_name == 'pull_request' &&
+            (github.event.pull_request.head.repo.full_name != github.repository ||
+             github.event.pull_request.user.login == 'dependabot[bot]'))))) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: RPM package
