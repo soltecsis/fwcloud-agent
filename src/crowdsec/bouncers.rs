@@ -95,10 +95,10 @@ pub const NFTABLES_V4_TABLE: &str = "filter";
 pub const NFTABLES_V4_CHAIN: &str = "INPUT";
 pub const NFTABLES_V6_TABLE: &str = "filter";
 pub const NFTABLES_V6_CHAIN: &str = "INPUT";
-pub const IPTABLES_V4_INPUT_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_IPv4_INPUT.ACC";
-pub const IPTABLES_V4_FORWARD_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_IPv4_FORWARD.ACC";
-pub const IPTABLES_V6_INPUT_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_IPv6_INPUT.ACC";
-pub const IPTABLES_V6_FORWARD_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_IPv6_FORWARD.ACC";
+pub const IPTABLES_V4_INPUT_BLOCKING_CHAIN: &str = "FWC_CROWDSEC4_IN.ACC";
+pub const IPTABLES_V4_FORWARD_BLOCKING_CHAIN: &str = "FWC_CROWDSEC4_FWD.ACC";
+pub const IPTABLES_V6_INPUT_BLOCKING_CHAIN: &str = "FWC_CROWDSEC6_IN.ACC";
+pub const IPTABLES_V6_FORWARD_BLOCKING_CHAIN: &str = "FWC_CROWDSEC6_FWD.ACC";
 pub const NFTABLES_V4_INPUT_BLOCKING_COUNTER: &str = "fwcloud_crowdsec_v4_input";
 pub const NFTABLES_V4_FORWARD_BLOCKING_COUNTER: &str = "fwcloud_crowdsec_v4_forward";
 pub const NFTABLES_V6_INPUT_BLOCKING_COUNTER: &str = "fwcloud_crowdsec_v6_input";
@@ -3448,7 +3448,7 @@ mod tests {
         }
 
         assert!(!iptables_acc_parent_chain_is_compatible(
-            "-A INPUT -m set --match-set crowdsec-blacklists dst -j FWC_CROWDSEC_IPv4_INPUT.ACC\n",
+            "-A INPUT -m set --match-set crowdsec-blacklists dst -j FWC_CROWDSEC4_IN.ACC\n",
             "INPUT",
             IPTABLES_V4_INPUT_BLOCKING_CHAIN,
             IPSET_V4_BLACKLIST,
@@ -3483,7 +3483,7 @@ mod tests {
 
     #[test]
     fn parses_the_single_iptables_acc_blocking_chain_counter() {
-        let output = "Chain FWC_CROWDSEC_IPv4_INPUT.ACC (1 references)\n pkts bytes target     prot opt in     out     source               destination\n   12   840 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0\n";
+        let output = "Chain FWC_CROWDSEC4_IN.ACC (1 references)\n pkts bytes target     prot opt in     out     source               destination\n   12   840 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0\n";
 
         let counter = parse_iptables_acc_blocking_chain_counter(output).unwrap();
 
@@ -3491,7 +3491,7 @@ mod tests {
         assert_eq!(counter.bytes, 840);
 
         assert!(parse_iptables_acc_blocking_chain_counter(
-            "Chain FWC_CROWDSEC_IPv4_INPUT.ACC (1 references)\n   12   840 DROP\n   4   320 DROP\n"
+            "Chain FWC_CROWDSEC4_IN.ACC (1 references)\n   12   840 DROP\n   4   320 DROP\n"
         )
         .is_none());
     }
@@ -3795,18 +3795,18 @@ mod tests {
 
     #[test]
     fn identifies_unmanaged_crowdsec_firewall_rules() {
-        let fwcloud_rules = r#":FWC_CROWDSEC_IPv4_FORWARD.ACC - [0:0]
-:FWC_CROWDSEC_IPv4_INPUT.ACC - [0:0]
--A INPUT -m comment --comment "CrowdSec firewall bouncer compatibility." -m set --match-set crowdsec-blacklists src -j FWC_CROWDSEC_IPv4_INPUT.ACC
--A FORWARD -m comment --comment "CrowdSec firewall bouncer compatibility." -m set --match-set crowdsec-blacklists src -j FWC_CROWDSEC_IPv4_FORWARD.ACC
--A FWC_CROWDSEC_IPv4_FORWARD.ACC -j DROP
--A FWC_CROWDSEC_IPv4_INPUT.ACC -j DROP
-:FWC_CROWDSEC_IPv6_FORWARD.ACC - [0:0]
-:FWC_CROWDSEC_IPv6_INPUT.ACC - [0:0]
--A INPUT -m comment --comment "CrowdSec firewall bouncer compatibility." -m set --match-set crowdsec6-blacklists src -j FWC_CROWDSEC_IPv6_INPUT.ACC
--A FORWARD -m comment --comment "CrowdSec firewall bouncer compatibility." -m set --match-set crowdsec6-blacklists src -j FWC_CROWDSEC_IPv6_FORWARD.ACC
--A FWC_CROWDSEC_IPv6_FORWARD.ACC -j DROP
--A FWC_CROWDSEC_IPv6_INPUT.ACC -j DROP
+        let fwcloud_rules = r#":FWC_CROWDSEC4_FWD.ACC - [0:0]
+:FWC_CROWDSEC4_IN.ACC - [0:0]
+-A INPUT -m comment --comment "CrowdSec firewall bouncer compatibility." -m set --match-set crowdsec-blacklists src -j FWC_CROWDSEC4_IN.ACC
+-A FORWARD -m comment --comment "CrowdSec firewall bouncer compatibility." -m set --match-set crowdsec-blacklists src -j FWC_CROWDSEC4_FWD.ACC
+-A FWC_CROWDSEC4_FWD.ACC -j DROP
+-A FWC_CROWDSEC4_IN.ACC -j DROP
+:FWC_CROWDSEC6_FWD.ACC - [0:0]
+:FWC_CROWDSEC6_IN.ACC - [0:0]
+-A INPUT -m comment --comment "CrowdSec firewall bouncer compatibility." -m set --match-set crowdsec6-blacklists src -j FWC_CROWDSEC6_IN.ACC
+-A FORWARD -m comment --comment "CrowdSec firewall bouncer compatibility." -m set --match-set crowdsec6-blacklists src -j FWC_CROWDSEC6_FWD.ACC
+-A FWC_CROWDSEC6_FWD.ACC -j DROP
+-A FWC_CROWDSEC6_IN.ACC -j DROP
 "#;
         let legacy_rules = "-A INPUT -m set --match-set crowdsec-blacklists src -j DROP\n";
         let unmanaged_rules = "-N CROWDSEC\n-A INPUT -j CROWDSEC\n";
