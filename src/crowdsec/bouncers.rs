@@ -1770,17 +1770,17 @@ pub async fn collect_blocking_statistics(
     match backend {
         CrowdSecFirewallBackend::Iptables => {
             let ipv4_input =
-                iptables_blocking_chain_counter(IPTABLES_COMMAND, IPTABLES_V4_INPUT_BLOCKING_CHAIN)
+                iptables_acc_blocking_chain_counter(IPTABLES_COMMAND, IPTABLES_V4_INPUT_BLOCKING_CHAIN)
                     .await?;
-            let ipv4_forward = iptables_blocking_chain_counter(
+            let ipv4_forward = iptables_acc_blocking_chain_counter(
                 IPTABLES_COMMAND,
                 IPTABLES_V4_FORWARD_BLOCKING_CHAIN,
             )
             .await?;
             let ipv6_input =
-                iptables_blocking_chain_counter(IP6TABLES_COMMAND, IPTABLES_V6_INPUT_BLOCKING_CHAIN)
+                iptables_acc_blocking_chain_counter(IP6TABLES_COMMAND, IPTABLES_V6_INPUT_BLOCKING_CHAIN)
                     .await?;
-            let ipv6_forward = iptables_blocking_chain_counter(
+            let ipv6_forward = iptables_acc_blocking_chain_counter(
                 IP6TABLES_COMMAND,
                 IPTABLES_V6_FORWARD_BLOCKING_CHAIN,
             )
@@ -1820,7 +1820,7 @@ pub async fn collect_blocking_statistics(
     }
 }
 
-async fn iptables_blocking_chain_counter(
+async fn iptables_acc_blocking_chain_counter(
     command: &str,
     chain: &str,
 ) -> Result<CrowdSecFirewallBouncerCounter> {
@@ -1833,7 +1833,7 @@ async fn iptables_blocking_chain_counter(
         ));
     }
 
-    parse_iptables_blocking_chain_counter(String::from_utf8_lossy(&output.stdout).as_ref())
+    parse_iptables_acc_blocking_chain_counter(String::from_utf8_lossy(&output.stdout).as_ref())
         .ok_or_else(|| {
             FwcError::crowdsec(
                 FIREWALL_INTEGRATION_INVALID,
@@ -1842,8 +1842,10 @@ async fn iptables_blocking_chain_counter(
         })
 }
 
-fn parse_iptables_blocking_chain_counter(output: &str) -> Option<CrowdSecFirewallBouncerCounter> {
-    output.lines().find_map(|line| {
+fn parse_iptables_acc_blocking_chain_counter(
+    output: &str,
+) -> Option<CrowdSecFirewallBouncerCounter> {
+    let counters = output.lines().filter_map(|line| {
         let fields = line.split_whitespace().collect::<Vec<_>>();
         if fields.len() >= 3 && fields[2] == "DROP" {
             Some(CrowdSecFirewallBouncerCounter {
@@ -1853,7 +1855,11 @@ fn parse_iptables_blocking_chain_counter(output: &str) -> Option<CrowdSecFirewal
         } else {
             None
         }
-    })
+    });
+
+    let mut counters = counters.peekable();
+    let counter = counters.next()?;
+    counters.next().is_none().then_some(counter)
 }
 
 async fn ipset_address_counters(name: &str) -> Result<Vec<CrowdSecFirewallBouncerAddressCounter>> {
@@ -3308,7 +3314,7 @@ mod tests {
         nftables_bouncer_service_action, nftables_counter_is_compatible,
         nftables_counter_validation_arguments, nftables_set_only_configuration_contents,
         non_selected_firewall_backend, parse_ipset_address_counters, parse_ipset_entry_count,
-        parse_iptables_blocking_chain_counter, parse_nftables_address_counters,
+        parse_iptables_acc_blocking_chain_counter, parse_nftables_address_counters,
         managed_bouncer_name_from_contents, parse_nftables_counter, pending_backend_contents,
         pending_backend_from_contents, pending_policy_status, reject_local_bouncer,
         select_active_backend,
@@ -3455,13 +3461,18 @@ mod tests {
     }
 
     #[test]
-    fn parses_dedicated_iptables_blocking_chain_counters() {
-        let output = "Chain FWC_CROWDSEC_V4_INPUT (0 references)\n pkts bytes target     prot opt in     out     source               destination\n   12   840 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0\n";
+    fn parses_the_single_iptables_acc_blocking_chain_counter() {
+        let output = "Chain FWC_CROWDSEC_IPv4_INPUT.ACC (1 references)\n pkts bytes target     prot opt in     out     source               destination\n   12   840 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0\n";
 
-        let counter = parse_iptables_blocking_chain_counter(output).unwrap();
+        let counter = parse_iptables_acc_blocking_chain_counter(output).unwrap();
 
         assert_eq!(counter.packets, 12);
         assert_eq!(counter.bytes, 840);
+
+        assert!(parse_iptables_acc_blocking_chain_counter(
+            "Chain FWC_CROWDSEC_IPv4_INPUT.ACC (1 references)\n   12   840 DROP\n   4   320 DROP\n"
+        )
+        .is_none());
     }
 
     #[test]
