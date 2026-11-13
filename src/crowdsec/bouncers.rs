@@ -95,10 +95,10 @@ pub const NFTABLES_V4_TABLE: &str = "filter";
 pub const NFTABLES_V4_CHAIN: &str = "INPUT";
 pub const NFTABLES_V6_TABLE: &str = "filter";
 pub const NFTABLES_V6_CHAIN: &str = "INPUT";
-pub const IPTABLES_V4_INPUT_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_V4_INPUT";
-pub const IPTABLES_V4_FORWARD_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_V4_FORWARD";
-pub const IPTABLES_V6_INPUT_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_V6_INPUT";
-pub const IPTABLES_V6_FORWARD_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_V6_FORWARD";
+pub const IPTABLES_V4_INPUT_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_IPv4_INPUT.ACC";
+pub const IPTABLES_V4_FORWARD_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_IPv4_FORWARD.ACC";
+pub const IPTABLES_V6_INPUT_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_IPv6_INPUT.ACC";
+pub const IPTABLES_V6_FORWARD_BLOCKING_CHAIN: &str = "FWC_CROWDSEC_IPv6_FORWARD.ACC";
 pub const NFTABLES_V4_INPUT_BLOCKING_COUNTER: &str = "fwcloud_crowdsec_v4_input";
 pub const NFTABLES_V4_FORWARD_BLOCKING_COUNTER: &str = "fwcloud_crowdsec_v4_forward";
 pub const NFTABLES_V6_INPUT_BLOCKING_COUNTER: &str = "fwcloud_crowdsec_v6_input";
@@ -1697,24 +1697,28 @@ pub async fn validate_blocking_statistics_resources(
         CrowdSecFirewallBackend::Iptables => {
             let ipv4_input = iptables_blocking_chain_is_ready(
                 IPTABLES_COMMAND,
+                "INPUT",
                 IPTABLES_V4_INPUT_BLOCKING_CHAIN,
                 IPSET_V4_BLACKLIST,
             )
             .await?;
             let ipv4_forward = iptables_blocking_chain_is_ready(
                 IPTABLES_COMMAND,
+                "FORWARD",
                 IPTABLES_V4_FORWARD_BLOCKING_CHAIN,
                 IPSET_V4_BLACKLIST,
             )
             .await?;
             let ipv6_input = iptables_blocking_chain_is_ready(
                 IP6TABLES_COMMAND,
+                "INPUT",
                 IPTABLES_V6_INPUT_BLOCKING_CHAIN,
                 IPSET_V6_BLACKLIST,
             )
             .await?;
             let ipv6_forward = iptables_blocking_chain_is_ready(
                 IP6TABLES_COMMAND,
+                "FORWARD",
                 IPTABLES_V6_FORWARD_BLOCKING_CHAIN,
                 IPSET_V6_BLACKLIST,
             )
@@ -2041,6 +2045,7 @@ fn parse_nftables_address_counters(
 
 async fn iptables_blocking_chain_is_ready(
     command: &str,
+    parent_chain: &str,
     chain: &str,
     blacklist: &str,
 ) -> Result<bool> {
@@ -2048,20 +2053,41 @@ async fn iptables_blocking_chain_is_ready(
         return Ok(false);
     }
 
-    let output = run_iptables_chain(command, chain).await?;
-    Ok(output.status.success()
-        && iptables_blocking_chain_is_compatible(
-            String::from_utf8_lossy(&output.stdout).as_ref(),
+    let child_output = run_iptables_chain(command, chain).await?;
+    let parent_output = run_iptables_chain(command, parent_chain).await?;
+
+    Ok(child_output.status.success()
+        && parent_output.status.success()
+        && iptables_acc_blocking_chain_is_compatible(
+            String::from_utf8_lossy(&child_output.stdout).as_ref(),
+            chain,
+        )
+        && iptables_acc_parent_chain_is_compatible(
+            String::from_utf8_lossy(&parent_output.stdout).as_ref(),
+            parent_chain,
             chain,
             blacklist,
         ))
 }
 
-fn iptables_blocking_chain_is_compatible(rules: &str, chain: &str, blacklist: &str) -> bool {
+fn iptables_acc_blocking_chain_is_compatible(rules: &str, chain: &str) -> bool {
     rules
         .lines()
         .map(str::trim)
-        .any(|rule| rule == format!("-A {chain} -m set --match-set {blacklist} src -j DROP"))
+        .any(|rule| rule == format!("-A {chain} -j DROP"))
+}
+
+fn iptables_acc_parent_chain_is_compatible(
+    rules: &str,
+    parent_chain: &str,
+    chain: &str,
+    blacklist: &str,
+) -> bool {
+    rules.lines().map(str::trim).any(|rule| {
+        rule.starts_with(&format!("-A {parent_chain} "))
+            && rule.contains(&format!("-m set --match-set {blacklist} src"))
+            && rule.ends_with(&format!("-j {chain}"))
+    })
 }
 
 async fn nftables_counter_is_ready(family: &str, name: &str) -> Result<bool> {
@@ -2628,34 +2654,35 @@ fn firewall_rules_contain_unmanaged_crowdsec(rules: &str) -> bool {
 }
 
 fn is_fwcloud_managed_firewall_rule(rule: &str) -> bool {
-    is_legacy_fwcloud_blacklist_rule(rule) || is_fwcloud_iptables_blocking_chain_rule(rule)
-}
-
-fn is_legacy_fwcloud_blacklist_rule(rule: &str) -> bool {
-    (rule.starts_with("-a input ") || rule.starts_with("-a forward "))
-        && (rule.contains("--match-set crowdsec-blacklists ")
-            || rule.contains("--match-set crowdsec6-blacklists "))
+    is_fwcloud_iptables_blocking_chain_rule(rule)
 }
 
 fn is_fwcloud_iptables_blocking_chain_rule(rule: &str) -> bool {
     let chains = [
-        (IPTABLES_V4_INPUT_BLOCKING_CHAIN, IPSET_V4_BLACKLIST),
-        (IPTABLES_V4_FORWARD_BLOCKING_CHAIN, IPSET_V4_BLACKLIST),
-        (IPTABLES_V6_INPUT_BLOCKING_CHAIN, IPSET_V6_BLACKLIST),
-        (IPTABLES_V6_FORWARD_BLOCKING_CHAIN, IPSET_V6_BLACKLIST),
+        (IPTABLES_V4_INPUT_BLOCKING_CHAIN, "input", IPSET_V4_BLACKLIST),
+        (
+            IPTABLES_V4_FORWARD_BLOCKING_CHAIN,
+            "forward",
+            IPSET_V4_BLACKLIST,
+        ),
+        (IPTABLES_V6_INPUT_BLOCKING_CHAIN, "input", IPSET_V6_BLACKLIST),
+        (
+            IPTABLES_V6_FORWARD_BLOCKING_CHAIN,
+            "forward",
+            IPSET_V6_BLACKLIST,
+        ),
     ];
 
-    chains.iter().any(|(chain, blacklist)| {
+    chains.iter().any(|(chain, parent_chain, blacklist)| {
         let chain = chain.to_ascii_lowercase();
+        let parent_chain = parent_chain.to_ascii_lowercase();
         let blacklist = blacklist.to_ascii_lowercase();
 
         rule.starts_with(&format!(":{chain} "))
-            || ((rule.starts_with("-a input ") || rule.starts_with("-a forward "))
-                && rule.contains(&format!("-j {chain}")))
-            || (rule.starts_with(&format!("-a {chain} "))
-                && ((rule.contains(&format!("--match-set {blacklist} src"))
-                    && rule.contains("-j drop"))
-                    || rule.ends_with("-j return")))
+            || (rule.starts_with(&format!("-a {parent_chain} "))
+                && rule.contains(&format!("--match-set {blacklist} src"))
+                && rule.ends_with(&format!("-j {chain}")))
+            || rule == format!("-a {chain} -j drop")
     })
 }
 
@@ -3276,7 +3303,8 @@ mod tests {
         emit_legacy_bouncer_resources_result, firewall_rules_contain_unmanaged_crowdsec,
         integration_status,
         legacy_bouncer_ipset_names, legacy_bouncer_jump_chains, local_api_enabled_in_configuration,
-        iptables_blocking_chain_is_compatible, nftables_blacklist_set_is_compatible,
+        iptables_acc_blocking_chain_is_compatible, iptables_acc_parent_chain_is_compatible,
+        nftables_blacklist_set_is_compatible,
         nftables_bouncer_service_action, nftables_counter_is_compatible,
         nftables_counter_validation_arguments, nftables_set_only_configuration_contents,
         non_selected_firewall_backend, parse_ipset_address_counters, parse_ipset_entry_count,
@@ -3377,14 +3405,24 @@ mod tests {
     }
 
     #[test]
-    fn recognizes_only_the_dedicated_iptables_blocking_chain_rule() {
-        assert!(iptables_blocking_chain_is_compatible(
-            "-A FWC_CROWDSEC_V4_INPUT -m set --match-set crowdsec-blacklists src -j DROP\n",
+    fn recognizes_the_iptables_acc_blocking_chain_and_parent_jump() {
+        assert!(iptables_acc_blocking_chain_is_compatible(
+            "-A FWC_CROWDSEC_IPv4_INPUT.ACC -j DROP\n",
+            IPTABLES_V4_INPUT_BLOCKING_CHAIN,
+        ));
+        assert!(!iptables_acc_blocking_chain_is_compatible(
+            "-A FWC_CROWDSEC_IPv4_INPUT.ACC -j RETURN\n",
+            IPTABLES_V4_INPUT_BLOCKING_CHAIN,
+        ));
+        assert!(iptables_acc_parent_chain_is_compatible(
+            "-A INPUT -m comment --comment \"CrowdSec firewall bouncer compatibility.\" -m set --match-set crowdsec-blacklists src -j FWC_CROWDSEC_IPv4_INPUT.ACC\n",
+            "INPUT",
             IPTABLES_V4_INPUT_BLOCKING_CHAIN,
             IPSET_V4_BLACKLIST,
         ));
-        assert!(!iptables_blocking_chain_is_compatible(
-            "-A INPUT -m set --match-set crowdsec-blacklists src -j DROP\n",
+        assert!(!iptables_acc_parent_chain_is_compatible(
+            "-A INPUT -m set --match-set crowdsec-blacklists dst -j FWC_CROWDSEC_IPv4_INPUT.ACC\n",
+            "INPUT",
             IPTABLES_V4_INPUT_BLOCKING_CHAIN,
             IPSET_V4_BLACKLIST,
         ));
@@ -3725,26 +3763,24 @@ mod tests {
 
     #[test]
     fn identifies_unmanaged_crowdsec_firewall_rules() {
-        let fwcloud_rules = r#":FWC_CROWDSEC_V4_FORWARD - [0:0]
-:FWC_CROWDSEC_V4_INPUT - [0:0]
--A INPUT -m comment --comment "CrowdSec firewall bouncer compatibility." -j FWC_CROWDSEC_V4_INPUT
--A FORWARD -m comment --comment "CrowdSec firewall bouncer compatibility." -j FWC_CROWDSEC_V4_FORWARD
--A FWC_CROWDSEC_V4_FORWARD -m set --match-set crowdsec-blacklists src -j DROP
--A FWC_CROWDSEC_V4_FORWARD -j RETURN
--A FWC_CROWDSEC_V4_INPUT -m set --match-set crowdsec-blacklists src -j DROP
--A FWC_CROWDSEC_V4_INPUT -j RETURN
-:FWC_CROWDSEC_V6_FORWARD - [0:0]
-:FWC_CROWDSEC_V6_INPUT - [0:0]
--A INPUT -m comment --comment "CrowdSec firewall bouncer compatibility." -j FWC_CROWDSEC_V6_INPUT
--A FORWARD -m comment --comment "CrowdSec firewall bouncer compatibility." -j FWC_CROWDSEC_V6_FORWARD
--A FWC_CROWDSEC_V6_FORWARD -m set --match-set crowdsec6-blacklists src -j DROP
--A FWC_CROWDSEC_V6_FORWARD -j RETURN
--A FWC_CROWDSEC_V6_INPUT -m set --match-set crowdsec6-blacklists src -j DROP
--A FWC_CROWDSEC_V6_INPUT -j RETURN
+        let fwcloud_rules = r#":FWC_CROWDSEC_IPv4_FORWARD.ACC - [0:0]
+:FWC_CROWDSEC_IPv4_INPUT.ACC - [0:0]
+-A INPUT -m comment --comment "CrowdSec firewall bouncer compatibility." -m set --match-set crowdsec-blacklists src -j FWC_CROWDSEC_IPv4_INPUT.ACC
+-A FORWARD -m comment --comment "CrowdSec firewall bouncer compatibility." -m set --match-set crowdsec-blacklists src -j FWC_CROWDSEC_IPv4_FORWARD.ACC
+-A FWC_CROWDSEC_IPv4_FORWARD.ACC -j DROP
+-A FWC_CROWDSEC_IPv4_INPUT.ACC -j DROP
+:FWC_CROWDSEC_IPv6_FORWARD.ACC - [0:0]
+:FWC_CROWDSEC_IPv6_INPUT.ACC - [0:0]
+-A INPUT -m comment --comment "CrowdSec firewall bouncer compatibility." -m set --match-set crowdsec6-blacklists src -j FWC_CROWDSEC_IPv6_INPUT.ACC
+-A FORWARD -m comment --comment "CrowdSec firewall bouncer compatibility." -m set --match-set crowdsec6-blacklists src -j FWC_CROWDSEC_IPv6_FORWARD.ACC
+-A FWC_CROWDSEC_IPv6_FORWARD.ACC -j DROP
+-A FWC_CROWDSEC_IPv6_INPUT.ACC -j DROP
 "#;
+        let legacy_rules = "-A INPUT -m set --match-set crowdsec-blacklists src -j DROP\n";
         let unmanaged_rules = "-N CROWDSEC\n-A INPUT -j CROWDSEC\n";
 
         assert!(!firewall_rules_contain_unmanaged_crowdsec(fwcloud_rules));
+        assert!(firewall_rules_contain_unmanaged_crowdsec(legacy_rules));
         assert!(firewall_rules_contain_unmanaged_crowdsec(unmanaged_rules));
     }
 
