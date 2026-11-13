@@ -3329,8 +3329,9 @@ mod tests {
         BOUNCER_PACKAGE_TRANSITION_DROP_IN_CONTENT, BOUNCER_PACKAGE_TRANSITION_DROP_IN_PATH,
         BOUNCER_RECONCILIATION_SKIPPED_MESSAGE, IPSET_SETUP_SERVICE_CONTENT,
         IPSET_V4_BLACKLIST, IPSET_V6_BLACKLIST,
-        IPTABLES_V4_INPUT_BLOCKING_CHAIN, NFTABLES_V4_INPUT_BLOCKING_COUNTER,
-        NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
+        IPTABLES_V4_FORWARD_BLOCKING_CHAIN, IPTABLES_V4_INPUT_BLOCKING_CHAIN,
+        IPTABLES_V6_FORWARD_BLOCKING_CHAIN, IPTABLES_V6_INPUT_BLOCKING_CHAIN,
+        NFTABLES_V4_INPUT_BLOCKING_COUNTER, NFTABLES_V4_TABLE, NFTABLES_V6_TABLE,
     };
     use crate::{
         crowdsec::{
@@ -3412,20 +3413,40 @@ mod tests {
 
     #[test]
     fn recognizes_the_iptables_acc_blocking_chain_and_parent_jump() {
-        assert!(iptables_acc_blocking_chain_is_compatible(
-            "-A FWC_CROWDSEC_IPv4_INPUT.ACC -j DROP\n",
-            IPTABLES_V4_INPUT_BLOCKING_CHAIN,
-        ));
-        assert!(!iptables_acc_blocking_chain_is_compatible(
-            "-A FWC_CROWDSEC_IPv4_INPUT.ACC -j RETURN\n",
-            IPTABLES_V4_INPUT_BLOCKING_CHAIN,
-        ));
-        assert!(iptables_acc_parent_chain_is_compatible(
-            "-A INPUT -m comment --comment \"CrowdSec firewall bouncer compatibility.\" -m set --match-set crowdsec-blacklists src -j FWC_CROWDSEC_IPv4_INPUT.ACC\n",
-            "INPUT",
-            IPTABLES_V4_INPUT_BLOCKING_CHAIN,
-            IPSET_V4_BLACKLIST,
-        ));
+        let rules = [
+            ("INPUT", IPTABLES_V4_INPUT_BLOCKING_CHAIN, IPSET_V4_BLACKLIST),
+            (
+                "FORWARD",
+                IPTABLES_V4_FORWARD_BLOCKING_CHAIN,
+                IPSET_V4_BLACKLIST,
+            ),
+            ("INPUT", IPTABLES_V6_INPUT_BLOCKING_CHAIN, IPSET_V6_BLACKLIST),
+            (
+                "FORWARD",
+                IPTABLES_V6_FORWARD_BLOCKING_CHAIN,
+                IPSET_V6_BLACKLIST,
+            ),
+        ];
+
+        for (parent_chain, chain, blacklist) in rules {
+            assert!(iptables_acc_blocking_chain_is_compatible(
+                &format!("-A {chain} -j DROP\n"),
+                chain,
+            ));
+            assert!(!iptables_acc_blocking_chain_is_compatible(
+                &format!("-A {chain} -j RETURN\n"),
+                chain,
+            ));
+            assert!(iptables_acc_parent_chain_is_compatible(
+                &format!(
+                    "-A {parent_chain} -m comment --comment \"CrowdSec firewall bouncer compatibility.\" -m set --match-set {blacklist} src -j {chain}\n"
+                ),
+                parent_chain,
+                chain,
+                blacklist,
+            ));
+        }
+
         assert!(!iptables_acc_parent_chain_is_compatible(
             "-A INPUT -m set --match-set crowdsec-blacklists dst -j FWC_CROWDSEC_IPv4_INPUT.ACC\n",
             "INPUT",
