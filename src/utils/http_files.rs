@@ -143,16 +143,22 @@ impl HttpFiles {
     }
 
     fn backup_policy_script(&self, cfg: &Config) -> Result<Option<PolicyBackup>> {
-        for file in cfg.fwcloud_script_paths.iter() {
+        let backup_name = format!("fwcloud-{}.sh", Local::now().format("%Y%m%d%H%M%S"));
+
+        Self::backup_policy_script_from_paths(&cfg.fwcloud_script_paths, &backup_name)
+    }
+
+    fn backup_policy_script_from_paths(
+        script_paths: &[String],
+        backup_name: &str,
+    ) -> Result<Option<PolicyBackup>> {
+        for file in script_paths.iter() {
             let script_path = Path::new(file);
             if !script_path.is_file() {
                 continue;
             }
 
-            let backup_path = script_path.with_file_name(format!(
-                "fwcloud-{}.sh",
-                Local::now().format("%Y%m%d%H%M%S")
-            ));
+            let backup_path = script_path.with_file_name(backup_name);
             if backup_path.exists() {
                 return Err(FwcError::Internal("Policy backup file already exists"));
             }
@@ -195,11 +201,7 @@ impl HttpFiles {
         );
 
         let recovery_result: Result<()> = (|| {
-            let script_path = Path::new(&policy_backup.script_path);
-            if script_path.is_file() {
-                fs::remove_file(script_path)?;
-            }
-            fs::rename(&policy_backup.backup_path, script_path)?;
+            Self::restore_policy_script(policy_backup)?;
             self.push_websocket_message(
                 cfg,
                 String::from("Previous policy restored. Loading policy."),
@@ -222,6 +224,16 @@ impl HttpFiles {
                 Err(err)
             }
         }
+    }
+
+    fn restore_policy_script(policy_backup: &PolicyBackup) -> Result<()> {
+        let script_path = Path::new(&policy_backup.script_path);
+        if script_path.is_file() {
+            fs::remove_file(script_path)?;
+        }
+        fs::rename(&policy_backup.backup_path, script_path)?;
+
+        Ok(())
     }
 
     fn push_websocket_message(&self, cfg: &Config, message: String) {
@@ -466,6 +478,15 @@ impl Drop for HttpFiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn create_tmp_dir() -> PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("fwcloud-agent-http-files-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).unwrap();
+
+        path
+    }
 
     #[test]
     fn unix_permissions_to_u32() {
@@ -482,5 +503,86 @@ mod tests {
         item.perms = String::from("650");
         item.perms_to_u32();
         assert_eq!(item.perms_u32, 424);
+    }
+
+    #[test]
+    fn policy_backup_renames_existing_script() {
+        let tmp_dir = create_tmp_dir();
+        let script_path = tmp_dir.join("fwcloud.sh");
+        let backup_path = tmp_dir.join("fwcloud-20261116153045.sh");
+        fs::write(&script_path, "previous policy").unwrap();
+
+        let backup = HttpFiles::backup_policy_script_from_paths(
+            &[script_path.to_string_lossy().to_string()],
+            "fwcloud-20261116153045.sh",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(backup.script_path, script_path.to_string_lossy());
+        assert_eq!(backup.backup_path, backup_path);
+        assert!(!script_path.exists());
+        assert_eq!(fs::read_to_string(&backup_path).unwrap(), "previous policy");
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn policy_backup_skips_first_installation() {
+        let tmp_dir = create_tmp_dir();
+        let script_path = tmp_dir.join("fwcloud.sh");
+
+        let backup = HttpFiles::backup_policy_script_from_paths(
+            &[script_path.to_string_lossy().to_string()],
+            "fwcloud-20261116153045.sh",
+        )
+        .unwrap();
+
+        assert!(backup.is_none());
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn policy_backup_does_not_overwrite_existing_backup() {
+        let tmp_dir = create_tmp_dir();
+        let script_path = tmp_dir.join("fwcloud.sh");
+        let backup_path = tmp_dir.join("fwcloud-20261116153045.sh");
+        fs::write(&script_path, "previous policy").unwrap();
+        fs::write(&backup_path, "existing backup").unwrap();
+
+        let result = HttpFiles::backup_policy_script_from_paths(
+            &[script_path.to_string_lossy().to_string()],
+            "fwcloud-20261116153045.sh",
+        );
+
+        assert!(matches!(
+            result,
+            Err(FwcError::Internal("Policy backup file already exists"))
+        ));
+        assert_eq!(fs::read_to_string(&script_path).unwrap(), "previous policy");
+        assert_eq!(fs::read_to_string(&backup_path).unwrap(), "existing backup");
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn policy_restore_replaces_failed_script() {
+        let tmp_dir = create_tmp_dir();
+        let script_path = tmp_dir.join("fwcloud.sh");
+        let backup_path = tmp_dir.join("fwcloud-20261116153045.sh");
+        fs::write(&script_path, "failed policy").unwrap();
+        fs::write(&backup_path, "previous policy").unwrap();
+        let policy_backup = PolicyBackup {
+            script_path: script_path.to_string_lossy().to_string(),
+            backup_path: backup_path.clone(),
+        };
+
+        HttpFiles::restore_policy_script(&policy_backup).unwrap();
+
+        assert!(!backup_path.exists());
+        assert_eq!(fs::read_to_string(&script_path).unwrap(), "previous policy");
+
+        fs::remove_dir_all(tmp_dir).unwrap();
     }
 }

@@ -142,3 +142,36 @@ pub fn run_cmd_ws(
         Err(FwcError::CmdExitStatusNotZero)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::SystemTime;
+
+    fn websocket_data() -> Arc<Mutex<WsData>> {
+        Arc::new(Mutex::new(WsData {
+            created_at: SystemTime::now(),
+            lines: vec![],
+            finished: false,
+        }))
+    }
+
+    #[test]
+    fn run_cmd_ws_keeps_websocket_open_after_a_failed_command() {
+        let ws_data = websocket_data();
+
+        let result = run_cmd_ws("sh", &["-c", "exit 1"], &ws_data, true);
+
+        assert!(matches!(result, Err(FwcError::CmdExitStatusNotZero)));
+        assert!(!ws_data.lock().unwrap().finished);
+    }
+
+    #[test]
+    fn run_cmd_ws_finishes_websocket_after_a_successful_command() {
+        let ws_data = websocket_data();
+
+        run_cmd_ws("sh", &["-c", "exit 0"], &ws_data, true).unwrap();
+
+        assert!(ws_data.lock().unwrap().finished);
+    }
+}
