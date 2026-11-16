@@ -90,11 +90,6 @@ pub fn run_cmd_ws(
 
         // Finish when no more input data.
         if data.is_empty() {
-            if finish_ws {
-                debug!("Locking ws data mutex (thread id: {})", thread_id::get());
-                ws_data.lock().unwrap().finished = true;
-                debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
-            }
             break;
         }
 
@@ -130,6 +125,12 @@ pub fn run_cmd_ws(
     }
 
     if job.wait()?.success() {
+        if finish_ws {
+            debug!("Locking ws data mutex (thread id: {})", thread_id::get());
+            ws_data.lock().unwrap().finished = true;
+            debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
+        }
+
         Ok(HttpResponse::Ok().finish())
     } else {
         error!("Error: Command exit status not 0");

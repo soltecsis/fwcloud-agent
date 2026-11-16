@@ -116,7 +116,7 @@ impl HttpFiles {
 
         // Install de FWCloud script.
         if let Err(err) = self.run_policy_command(&self.files[0].dst_path, "install", cfg, false) {
-            return self.recover_policy(policy_backup.as_ref(), cfg, err);
+            return self.recover_policy(policy_backup.as_ref(), cfg, "install", err);
         }
 
         // Load policy.
@@ -127,19 +127,16 @@ impl HttpFiles {
             .ok_or(FwcError::Internal("Installed policy script not found"));
         let script_path = match script_path {
             Ok(script_path) => script_path,
-            Err(err) => return self.recover_policy(policy_backup.as_ref(), cfg, err),
+            Err(err) => return self.recover_policy(policy_backup.as_ref(), cfg, "install", err),
         };
 
         let res: HttpResponse = match self.run_policy_command(script_path, "start", cfg, true) {
             Ok(start_res) => start_res,
-            Err(err) => return self.recover_policy(policy_backup.as_ref(), cfg, err),
+            Err(err) => return self.recover_policy(policy_backup.as_ref(), cfg, "start", err),
         };
 
         if self.ws_id != Uuid::nil() {
-            debug!("Locking ws map mutex (thread id: {})", thread_id::get());
-            let mut ws_map = cfg.ws_map.lock().unwrap();
-            ws_map.remove(&self.ws_id);
-            debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+            self.remove_websocket(cfg);
         }
 
         Ok(res)
@@ -175,24 +172,96 @@ impl HttpFiles {
         &self,
         policy_backup: Option<&PolicyBackup>,
         cfg: &Config,
+        failed_action: &str,
         original_error: FwcError,
     ) -> Result<HttpResponse> {
         let policy_backup = match policy_backup {
             Some(policy_backup) => policy_backup,
-            None => return Err(original_error),
+            None => {
+                self.push_websocket_message(
+                    cfg,
+                    format!(
+                        "ERROR: Policy {failed_action} failed and no previous policy is available."
+                    ),
+                );
+                self.finish_websocket(cfg);
+                return Err(original_error);
+            }
         };
 
-        let script_path = Path::new(&policy_backup.script_path);
-        if script_path.is_file() {
-            fs::remove_file(script_path)?;
-        }
-        fs::rename(&policy_backup.backup_path, script_path)?;
+        self.push_websocket_message(
+            cfg,
+            format!("ERROR: Policy {failed_action} failed. Restoring previous policy."),
+        );
 
-        if let Err(err) = self.run_policy_command(&policy_backup.script_path, "start", cfg, true) {
-            error!("Policy recovery failed: {}", err);
+        let recovery_result: Result<()> = (|| {
+            let script_path = Path::new(&policy_backup.script_path);
+            if script_path.is_file() {
+                fs::remove_file(script_path)?;
+            }
+            fs::rename(&policy_backup.backup_path, script_path)?;
+            self.push_websocket_message(
+                cfg,
+                String::from("Previous policy restored. Loading policy."),
+            );
+            self.run_policy_command(&policy_backup.script_path, "start", cfg, false)?;
+
+            Ok(())
+        })();
+
+        match recovery_result {
+            Ok(()) => {
+                self.push_websocket_message(cfg, String::from("Previous policy loaded."));
+                self.finish_websocket(cfg);
+                Err(original_error)
+            }
+            Err(err) => {
+                error!("Policy recovery failed: {}", err);
+                self.push_websocket_message(cfg, format!("ERROR: Policy recovery failed: {err}"));
+                self.finish_websocket(cfg);
+                Err(err)
+            }
+        }
+    }
+
+    fn push_websocket_message(&self, cfg: &Config, message: String) {
+        if self.ws_id == Uuid::nil() {
+            return;
         }
 
-        Err(original_error)
+        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+        let ws_data = cfg.ws_map.lock().unwrap().get(&self.ws_id).cloned();
+        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+
+        if let Some(ws_data) = ws_data {
+            debug!("Locking ws data mutex (thread id: {})", thread_id::get());
+            ws_data.lock().unwrap().lines.push(message);
+            debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
+        }
+    }
+
+    fn finish_websocket(&self, cfg: &Config) {
+        if self.ws_id == Uuid::nil() {
+            return;
+        }
+
+        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+        let ws_data = cfg.ws_map.lock().unwrap().get(&self.ws_id).cloned();
+        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+
+        if let Some(ws_data) = ws_data {
+            debug!("Locking ws data mutex (thread id: {})", thread_id::get());
+            ws_data.lock().unwrap().finished = true;
+            debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
+        }
+
+        self.remove_websocket(cfg);
+    }
+
+    fn remove_websocket(&self, cfg: &Config) {
+        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+        cfg.ws_map.lock().unwrap().remove(&self.ws_id);
+        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
     }
 
     fn run_policy_command(
