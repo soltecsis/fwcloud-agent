@@ -22,10 +22,11 @@
 
 use actix_multipart::{Field, Multipart};
 use actix_web::{web, HttpResponse};
+use chrono::Local;
 use futures::{StreamExt, TryStreamExt};
-use log::debug;
+use log::{debug, error};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::{io::Write, os::unix::prelude::PermissionsExt};
 use uuid::Uuid;
@@ -43,6 +44,11 @@ struct FileData {
     dst_path: String,
     dst_name: String,
     size: usize,
+}
+
+struct PolicyBackup {
+    script_path: String,
+    backup_path: PathBuf,
 }
 
 #[derive(Validate)]
@@ -106,58 +112,193 @@ impl HttpFiles {
 
         self.move_tmp_files()?;
 
+        let policy_backup = self.backup_policy_script(cfg)?;
+
         // Install de FWCloud script.
-        let mut res: HttpResponse;
-        if self.ws_id != Uuid::nil() {
-            let ws_data: Arc<Mutex<WsData>>;
-            {
-                debug!("Locking ws map mutex (thread id: {})", thread_id::get());
-                let ws_map = cfg.ws_map.lock().unwrap();
-                ws_data = ws_map
-                    .get(&self.ws_id)
-                    .ok_or(FwcError::WebSocketIdNotFound)?
-                    .clone();
-                debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
-            }
-            res = run_cmd_ws(
-                "sh",
-                &[&self.files[0].dst_path[..], "install"],
-                &ws_data,
-                false,
-            )?;
-        } else {
-            res = run_cmd("sh", &[&self.files[0].dst_path[..], "install"])?;
+        if let Err(err) = self.run_policy_command(&self.files[0].dst_path, "install", cfg, false) {
+            return self.recover_policy(policy_backup.as_ref(), cfg, "install", err);
         }
 
         // Load policy.
-        for file in cfg.fwcloud_script_paths.iter() {
-            if Path::new(file).is_file() {
-                if self.ws_id != Uuid::nil() {
-                    let ws_data: Arc<Mutex<WsData>>;
-                    {
-                        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
-                        let ws_map = cfg.ws_map.lock().unwrap();
-                        ws_data = ws_map
-                            .get(&self.ws_id)
-                            .ok_or(FwcError::WebSocketIdNotFound)?
-                            .clone();
-                        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
-                    }
-                    res = run_cmd_ws("sh", &[&file[..], "start"], &ws_data, true)?;
-                    {
-                        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
-                        let mut ws_map = cfg.ws_map.lock().unwrap();
-                        ws_map.remove(&self.ws_id);
-                        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
-                    }
-                } else {
-                    res = run_cmd("sh", &[&file[..], "start"])?;
-                }
-                break;
-            }
+        let script_path = cfg
+            .fwcloud_script_paths
+            .iter()
+            .find(|file| Path::new(file).is_file())
+            .ok_or(FwcError::Internal("Installed policy script not found"));
+        let script_path = match script_path {
+            Ok(script_path) => script_path,
+            Err(err) => return self.recover_policy(policy_backup.as_ref(), cfg, "install", err),
+        };
+
+        let res: HttpResponse = match self.run_policy_command(script_path, "start", cfg, true) {
+            Ok(start_res) => start_res,
+            Err(err) => return self.recover_policy(policy_backup.as_ref(), cfg, "start", err),
+        };
+
+        if self.ws_id != Uuid::nil() {
+            self.remove_websocket(cfg);
         }
 
         Ok(res)
+    }
+
+    fn backup_policy_script(&self, cfg: &Config) -> Result<Option<PolicyBackup>> {
+        let backup_name = format!("fwcloud-{}.sh", Local::now().format("%Y%m%d%H%M%S"));
+
+        Self::backup_policy_script_from_paths(&cfg.fwcloud_script_paths, &backup_name)
+    }
+
+    fn backup_policy_script_from_paths(
+        script_paths: &[String],
+        backup_name: &str,
+    ) -> Result<Option<PolicyBackup>> {
+        for file in script_paths.iter() {
+            let script_path = Path::new(file);
+            if !script_path.is_file() {
+                continue;
+            }
+
+            let backup_path = script_path.with_file_name(backup_name);
+            if backup_path.exists() {
+                return Err(FwcError::Internal("Policy backup file already exists"));
+            }
+
+            fs::rename(script_path, &backup_path)?;
+
+            return Ok(Some(PolicyBackup {
+                script_path: file.clone(),
+                backup_path,
+            }));
+        }
+
+        Ok(None)
+    }
+
+    fn recover_policy(
+        &self,
+        policy_backup: Option<&PolicyBackup>,
+        cfg: &Config,
+        failed_action: &str,
+        original_error: FwcError,
+    ) -> Result<HttpResponse> {
+        let policy_backup = match policy_backup {
+            Some(policy_backup) => policy_backup,
+            None => {
+                self.push_websocket_message(
+                    cfg,
+                    format!(
+                        "ERROR: Policy {failed_action} failed and no previous policy is available."
+                    ),
+                );
+                self.finish_websocket(cfg);
+                return Err(original_error);
+            }
+        };
+
+        self.push_websocket_message(
+            cfg,
+            format!("ERROR: Policy {failed_action} failed. Restoring previous policy."),
+        );
+
+        let recovery_result: Result<()> = (|| {
+            Self::restore_policy_script(policy_backup)?;
+            self.push_websocket_message(
+                cfg,
+                String::from("Previous policy restored. Loading policy."),
+            );
+            self.run_policy_command(&policy_backup.script_path, "start", cfg, false)?;
+
+            Ok(())
+        })();
+
+        match recovery_result {
+            Ok(()) => {
+                self.push_websocket_message(cfg, String::from("Previous policy loaded."));
+                self.finish_websocket(cfg);
+                Err(original_error)
+            }
+            Err(err) => {
+                error!("Policy recovery failed: {}", err);
+                self.push_websocket_message(cfg, format!("ERROR: Policy recovery failed: {err}"));
+                self.finish_websocket(cfg);
+                Err(err)
+            }
+        }
+    }
+
+    fn restore_policy_script(policy_backup: &PolicyBackup) -> Result<()> {
+        let script_path = Path::new(&policy_backup.script_path);
+        if script_path.is_file() {
+            fs::remove_file(script_path)?;
+        }
+        fs::rename(&policy_backup.backup_path, script_path)?;
+
+        Ok(())
+    }
+
+    fn push_websocket_message(&self, cfg: &Config, message: String) {
+        if self.ws_id == Uuid::nil() {
+            return;
+        }
+
+        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+        let ws_data = cfg.ws_map.lock().unwrap().get(&self.ws_id).cloned();
+        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+
+        if let Some(ws_data) = ws_data {
+            debug!("Locking ws data mutex (thread id: {})", thread_id::get());
+            ws_data.lock().unwrap().lines.push(message);
+            debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
+        }
+    }
+
+    fn finish_websocket(&self, cfg: &Config) {
+        if self.ws_id == Uuid::nil() {
+            return;
+        }
+
+        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+        let ws_data = cfg.ws_map.lock().unwrap().get(&self.ws_id).cloned();
+        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+
+        if let Some(ws_data) = ws_data {
+            debug!("Locking ws data mutex (thread id: {})", thread_id::get());
+            ws_data.lock().unwrap().finished = true;
+            debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
+        }
+
+        self.remove_websocket(cfg);
+    }
+
+    fn remove_websocket(&self, cfg: &Config) {
+        debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+        cfg.ws_map.lock().unwrap().remove(&self.ws_id);
+        debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+    }
+
+    fn run_policy_command(
+        &self,
+        script_path: &str,
+        action: &str,
+        cfg: &Config,
+        finish_ws: bool,
+    ) -> Result<HttpResponse> {
+        if self.ws_id == Uuid::nil() {
+            return run_cmd("sh", &[script_path, action]);
+        }
+
+        let ws_data: Arc<Mutex<WsData>>;
+        {
+            debug!("Locking ws map mutex (thread id: {})", thread_id::get());
+            let ws_map = cfg.ws_map.lock().unwrap();
+            ws_data = ws_map
+                .get(&self.ws_id)
+                .ok_or(FwcError::WebSocketIdNotFound)?
+                .clone();
+            debug!("Releasing ws map mutex (thread id: {})", thread_id::get());
+        }
+
+        run_cmd_ws("sh", &[script_path, action], &ws_data, finish_ws)
     }
 
     async fn extract_multipart_data(&mut self, mut payload: Multipart) -> Result<()> {
@@ -337,6 +478,15 @@ impl Drop for HttpFiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn create_tmp_dir() -> PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("fwcloud-agent-http-files-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).unwrap();
+
+        path
+    }
 
     #[test]
     fn unix_permissions_to_u32() {
@@ -353,5 +503,86 @@ mod tests {
         item.perms = String::from("650");
         item.perms_to_u32();
         assert_eq!(item.perms_u32, 424);
+    }
+
+    #[test]
+    fn policy_backup_renames_existing_script() {
+        let tmp_dir = create_tmp_dir();
+        let script_path = tmp_dir.join("fwcloud.sh");
+        let backup_path = tmp_dir.join("fwcloud-20261116153045.sh");
+        fs::write(&script_path, "previous policy").unwrap();
+
+        let backup = HttpFiles::backup_policy_script_from_paths(
+            &[script_path.to_string_lossy().to_string()],
+            "fwcloud-20261116153045.sh",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(backup.script_path, script_path.to_string_lossy());
+        assert_eq!(backup.backup_path, backup_path);
+        assert!(!script_path.exists());
+        assert_eq!(fs::read_to_string(&backup_path).unwrap(), "previous policy");
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn policy_backup_skips_first_installation() {
+        let tmp_dir = create_tmp_dir();
+        let script_path = tmp_dir.join("fwcloud.sh");
+
+        let backup = HttpFiles::backup_policy_script_from_paths(
+            &[script_path.to_string_lossy().to_string()],
+            "fwcloud-20261116153045.sh",
+        )
+        .unwrap();
+
+        assert!(backup.is_none());
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn policy_backup_does_not_overwrite_existing_backup() {
+        let tmp_dir = create_tmp_dir();
+        let script_path = tmp_dir.join("fwcloud.sh");
+        let backup_path = tmp_dir.join("fwcloud-20261116153045.sh");
+        fs::write(&script_path, "previous policy").unwrap();
+        fs::write(&backup_path, "existing backup").unwrap();
+
+        let result = HttpFiles::backup_policy_script_from_paths(
+            &[script_path.to_string_lossy().to_string()],
+            "fwcloud-20261116153045.sh",
+        );
+
+        assert!(matches!(
+            result,
+            Err(FwcError::Internal("Policy backup file already exists"))
+        ));
+        assert_eq!(fs::read_to_string(&script_path).unwrap(), "previous policy");
+        assert_eq!(fs::read_to_string(&backup_path).unwrap(), "existing backup");
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn policy_restore_replaces_failed_script() {
+        let tmp_dir = create_tmp_dir();
+        let script_path = tmp_dir.join("fwcloud.sh");
+        let backup_path = tmp_dir.join("fwcloud-20261116153045.sh");
+        fs::write(&script_path, "failed policy").unwrap();
+        fs::write(&backup_path, "previous policy").unwrap();
+        let policy_backup = PolicyBackup {
+            script_path: script_path.to_string_lossy().to_string(),
+            backup_path: backup_path.clone(),
+        };
+
+        HttpFiles::restore_policy_script(&policy_backup).unwrap();
+
+        assert!(!backup_path.exists());
+        assert_eq!(fs::read_to_string(&script_path).unwrap(), "previous policy");
+
+        fs::remove_dir_all(tmp_dir).unwrap();
     }
 }
