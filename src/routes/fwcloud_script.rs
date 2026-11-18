@@ -23,12 +23,41 @@
 use actix_multipart::Multipart;
 use actix_web::{post, web, HttpResponse};
 use log::debug;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::config::Config;
 use crate::utils::http_files::HttpFiles;
 
 use crate::errors::Result;
+
+#[derive(Serialize)]
+pub struct PolicyScriptBackup {
+    pub path: String,
+    pub compilation_date: Option<String>,
+    pub installation_date: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct PolicyScriptContentRequest {
+    pub file: String,
+}
+
+#[derive(Serialize)]
+pub struct PolicyScriptContent {
+    pub content: String,
+}
+
+#[derive(Deserialize)]
+pub struct PolicyScriptComparisonRequest {
+    pub file1: String,
+    pub file2: String,
+}
+
+#[derive(Serialize)]
+pub struct PolicyScriptComparison {
+    pub diff: String,
+}
 
 #[post("/fwcloud_script/upload")]
 async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
