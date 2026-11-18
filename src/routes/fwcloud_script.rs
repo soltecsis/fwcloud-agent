@@ -29,6 +29,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 
 use crate::config::Config;
@@ -196,6 +197,25 @@ async fn content(
     let content = fs::read_to_string(path)?;
 
     Ok(HttpResponse::Ok().json(PolicyScriptContent { content }))
+}
+
+#[post("/fwcloud_script/diff")]
+async fn diff(
+    request: web::Json<PolicyScriptComparisonRequest>,
+    cfg: web::Data<Arc<Config>>,
+) -> Result<HttpResponse> {
+    let file1 = policy_script_path(&request.file1, &cfg.fwcloud_script_paths)
+        .ok_or_else(|| FwcError::BadRequest(String::from("Invalid policy script path")))?;
+    let file2 = policy_script_path(&request.file2, &cfg.fwcloud_script_paths)
+        .ok_or_else(|| FwcError::BadRequest(String::from("Invalid policy script path")))?;
+    let output = Command::new("diff").arg(&file1).arg(&file2).output()?;
+
+    match output.status.code() {
+        Some(0) | Some(1) => Ok(HttpResponse::Ok().json(PolicyScriptComparison {
+            diff: String::from_utf8_lossy(&output.stdout).to_string(),
+        })),
+        _ => Err(FwcError::CmdExitStatusNotZero),
+    }
 }
 
 #[post("/fwcloud_script/upload")]
