@@ -21,9 +21,14 @@
 */
 
 use actix_multipart::Multipart;
-use actix_web::{post, web, HttpResponse};
+use actix_web::{get, post, web, HttpResponse};
 use log::debug;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::fs;
+use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::config::Config;
@@ -57,6 +62,95 @@ pub struct PolicyScriptComparisonRequest {
 #[derive(Serialize)]
 pub struct PolicyScriptComparison {
     pub diff: String,
+}
+
+lazy_static! {
+    static ref POLICY_SCRIPT_BACKUP_NAME: Regex = Regex::new(r"^fwcloud-\d{14}\.sh$").unwrap();
+}
+
+fn policy_script_backups(script_paths: &[String]) -> Result<Vec<PolicyScriptBackup>> {
+    let active_paths: HashSet<_> = script_paths
+        .iter()
+        .map(|script_path| Path::new(script_path).to_path_buf())
+        .collect();
+    let directories: HashSet<_> = script_paths
+        .iter()
+        .filter_map(|script_path| Path::new(script_path).parent().map(Path::to_path_buf))
+        .collect();
+    let mut backups: Vec<PolicyScriptBackup> = vec![];
+
+    for directory in directories {
+        if !directory.is_dir() {
+            continue;
+        }
+
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+
+            let path = entry.path();
+            let file_name = match path.file_name().and_then(|file_name| file_name.to_str()) {
+                Some(file_name) => file_name,
+                None => continue,
+            };
+            if !POLICY_SCRIPT_BACKUP_NAME.is_match(file_name) {
+                continue;
+            }
+
+            let (compilation_date, installation_date) = policy_script_dates(&path)?;
+            backups.push(PolicyScriptBackup {
+                path: path.to_string_lossy().to_string(),
+                compilation_date,
+                installation_date,
+            });
+        }
+    }
+
+    for path in active_paths {
+        if !path.is_file() {
+            continue;
+        }
+
+        let (compilation_date, installation_date) = policy_script_dates(&path)?;
+        backups.push(PolicyScriptBackup {
+            path: path.to_string_lossy().to_string(),
+            compilation_date,
+            installation_date,
+        });
+    }
+
+    backups.sort_by(|left, right| right.path.cmp(&left.path));
+
+    Ok(backups)
+}
+
+fn policy_script_dates(path: &Path) -> Result<(Option<String>, Option<String>)> {
+    let file = fs::File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut compilation_date = None;
+    let mut installation_date = None;
+
+    for line in reader.lines() {
+        let line = line?;
+        if let Some(value) = line.strip_prefix("FWCLOUD_COMPILATION_DATE=") {
+            compilation_date = Some(value.trim_matches('"').to_string());
+        } else if let Some(value) = line.strip_prefix("FWCLOUD_INSTALLATION_DATE=") {
+            installation_date = Some(value.trim_matches('"').to_string());
+        }
+
+        if compilation_date.is_some() && installation_date.is_some() {
+            break;
+        }
+    }
+
+    Ok((compilation_date, installation_date))
+}
+
+#[get("/fwcloud_script/history")]
+async fn history(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok().json(policy_script_backups(&cfg.fwcloud_script_paths)?))
 }
 
 #[post("/fwcloud_script/upload")]
