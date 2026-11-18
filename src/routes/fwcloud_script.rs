@@ -34,7 +34,7 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::utils::http_files::HttpFiles;
 
-use crate::errors::Result;
+use crate::errors::{FwcError, Result};
 
 #[derive(Serialize)]
 pub struct PolicyScriptBackup {
@@ -148,9 +148,54 @@ fn policy_script_dates(path: &Path) -> Result<(Option<String>, Option<String>)> 
     Ok((compilation_date, installation_date))
 }
 
+fn policy_script_path(path: &str, script_paths: &[String]) -> Option<std::path::PathBuf> {
+    let path = Path::new(path);
+    if !path.is_file() {
+        return None;
+    }
+
+    let path = path.canonicalize().ok()?;
+    let active_script =
+        script_paths
+            .iter()
+            .any(|script_path| match Path::new(script_path).canonicalize() {
+                Ok(script_path) => script_path == path,
+                Err(_) => false,
+            });
+    if active_script {
+        return Some(path);
+    }
+
+    let file_name = path.file_name()?.to_str()?;
+    if !POLICY_SCRIPT_BACKUP_NAME.is_match(file_name) {
+        return None;
+    }
+
+    let parent = path.parent()?;
+    script_paths.iter().find_map(|script_path| {
+        Path::new(script_path)
+            .parent()
+            .and_then(|directory| directory.canonicalize().ok())
+            .filter(|directory| directory == parent)
+            .map(|_| path.clone())
+    })
+}
+
 #[get("/fwcloud_script/history")]
 async fn history(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
     Ok(HttpResponse::Ok().json(policy_script_backups(&cfg.fwcloud_script_paths)?))
+}
+
+#[post("/fwcloud_script/content")]
+async fn content(
+    request: web::Json<PolicyScriptContentRequest>,
+    cfg: web::Data<Arc<Config>>,
+) -> Result<HttpResponse> {
+    let path = policy_script_path(&request.file, &cfg.fwcloud_script_paths)
+        .ok_or_else(|| FwcError::BadRequest(String::from("Invalid policy script path")))?;
+    let content = fs::read_to_string(path)?;
+
+    Ok(HttpResponse::Ok().json(PolicyScriptContent { content }))
 }
 
 #[post("/fwcloud_script/upload")]
