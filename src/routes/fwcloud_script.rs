@@ -182,6 +182,23 @@ fn policy_script_path(path: &str, script_paths: &[String]) -> Option<std::path::
     })
 }
 
+fn policy_script_content(path: &Path) -> Result<PolicyScriptContent> {
+    Ok(PolicyScriptContent {
+        content: fs::read_to_string(path)?,
+    })
+}
+
+fn policy_script_diff(file1: &Path, file2: &Path) -> Result<PolicyScriptComparison> {
+    let output = Command::new("diff").arg(file1).arg(file2).output()?;
+
+    match output.status.code() {
+        Some(0) | Some(1) => Ok(PolicyScriptComparison {
+            diff: String::from_utf8_lossy(&output.stdout).to_string(),
+        }),
+        _ => Err(FwcError::CmdExitStatusNotZero),
+    }
+}
+
 #[get("/fwcloud_script/history")]
 async fn history(cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
     Ok(HttpResponse::Ok().json(policy_script_backups(&cfg.fwcloud_script_paths)?))
@@ -194,9 +211,8 @@ async fn content(
 ) -> Result<HttpResponse> {
     let path = policy_script_path(&request.file, &cfg.fwcloud_script_paths)
         .ok_or_else(|| FwcError::BadRequest(String::from("Invalid policy script path")))?;
-    let content = fs::read_to_string(path)?;
 
-    Ok(HttpResponse::Ok().json(PolicyScriptContent { content }))
+    Ok(HttpResponse::Ok().json(policy_script_content(&path)?))
 }
 
 #[post("/fwcloud_script/diff")]
@@ -208,14 +224,8 @@ async fn diff(
         .ok_or_else(|| FwcError::BadRequest(String::from("Invalid policy script path")))?;
     let file2 = policy_script_path(&request.file2, &cfg.fwcloud_script_paths)
         .ok_or_else(|| FwcError::BadRequest(String::from("Invalid policy script path")))?;
-    let output = Command::new("diff").arg(&file1).arg(&file2).output()?;
 
-    match output.status.code() {
-        Some(0) | Some(1) => Ok(HttpResponse::Ok().json(PolicyScriptComparison {
-            diff: String::from_utf8_lossy(&output.stdout).to_string(),
-        })),
-        _ => Err(FwcError::CmdExitStatusNotZero),
-    }
+    Ok(HttpResponse::Ok().json(policy_script_diff(&file1, &file2)?))
 }
 
 #[post("/fwcloud_script/upload")]
@@ -237,4 +247,130 @@ async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Resu
     } // End of mutex scope.
 
     Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use uuid::Uuid;
+
+    fn create_tmp_dir() -> PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("fwcloud-agent-policy-history-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn write_policy(path: &Path, compilation_date: Option<&str>, installation_date: Option<&str>) {
+        let mut script_content = String::from("#!/bin/sh\n");
+        if let Some(compilation_date) = compilation_date {
+            script_content.push_str(&format!(
+                "FWCLOUD_COMPILATION_DATE=\"{compilation_date}\"\n"
+            ));
+        }
+        if let Some(installation_date) = installation_date {
+            script_content.push_str(&format!(
+                "FWCLOUD_INSTALLATION_DATE=\"{installation_date}\"\n"
+            ));
+        }
+        fs::write(path, script_content).unwrap();
+    }
+
+    #[test]
+    fn policy_script_backups_include_active_script_and_metadata() {
+        let tmp_dir = create_tmp_dir();
+        let active_path = tmp_dir.join("fwcloud.sh");
+        let backup_path = tmp_dir.join("fwcloud-20261118120000.sh");
+        write_policy(
+            &active_path,
+            Some("2026-11-18 11:59:00"),
+            Some("2026-11-18 12:00:00"),
+        );
+        write_policy(&backup_path, None, None);
+        fs::write(tmp_dir.join("unrelated.sh"), "#!/bin/sh\n").unwrap();
+
+        let backups = policy_script_backups(&[active_path.to_string_lossy().to_string()]).unwrap();
+
+        assert_eq!(backups.len(), 2);
+        let active = backups
+            .iter()
+            .find(|backup| backup.path == active_path.to_string_lossy())
+            .unwrap();
+        assert_eq!(
+            active.compilation_date.as_deref(),
+            Some("2026-11-18 11:59:00")
+        );
+        assert_eq!(
+            active.installation_date.as_deref(),
+            Some("2026-11-18 12:00:00")
+        );
+        let backup = backups
+            .iter()
+            .find(|backup| backup.path == backup_path.to_string_lossy())
+            .unwrap();
+        assert_eq!(backup.compilation_date, None);
+        assert_eq!(backup.installation_date, None);
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn policy_script_backups_ignore_missing_directories() {
+        let tmp_dir = create_tmp_dir();
+        let path = tmp_dir.join("missing/fwcloud.sh");
+
+        assert!(policy_script_backups(&[path.to_string_lossy().to_string()])
+            .unwrap()
+            .is_empty());
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn policy_script_path_only_allows_active_and_backup_scripts() {
+        let tmp_dir = create_tmp_dir();
+        let active_path = tmp_dir.join("fwcloud.sh");
+        let backup_path = tmp_dir.join("fwcloud-20261118120000.sh");
+        let other_path = tmp_dir.join("other.sh");
+        write_policy(&active_path, None, None);
+        write_policy(&backup_path, None, None);
+        write_policy(&other_path, None, None);
+        let script_paths = vec![active_path.to_string_lossy().to_string()];
+
+        assert_eq!(
+            policy_script_path(&active_path.to_string_lossy(), &script_paths),
+            Some(active_path.canonicalize().unwrap())
+        );
+        assert_eq!(
+            policy_script_path(&backup_path.to_string_lossy(), &script_paths),
+            Some(backup_path.canonicalize().unwrap())
+        );
+        assert_eq!(
+            policy_script_path(&other_path.to_string_lossy(), &script_paths),
+            None
+        );
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn policy_script_content_and_diff_preserve_read_only_behavior() {
+        let tmp_dir = create_tmp_dir();
+        let file1 = tmp_dir.join("fwcloud.sh");
+        let file2 = tmp_dir.join("fwcloud-20261118120000.sh");
+        fs::write(&file1, "same\n").unwrap();
+        fs::write(&file2, "same\n").unwrap();
+
+        assert_eq!(policy_script_content(&file1).unwrap().content, "same\n");
+        assert!(policy_script_diff(&file1, &file2).unwrap().diff.is_empty());
+
+        fs::write(&file2, "different\n").unwrap();
+        assert!(policy_script_diff(&file1, &file2)
+            .unwrap()
+            .diff
+            .contains("different"));
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
 }
