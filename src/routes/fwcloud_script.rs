@@ -40,8 +40,8 @@ use crate::errors::{FwcError, Result};
 #[derive(Serialize)]
 pub struct PolicyScriptBackup {
     pub path: String,
-    pub compilation_date: Option<String>,
-    pub installation_date: Option<String>,
+    pub compilation_date: String,
+    pub installation_date: String,
 }
 
 #[derive(Deserialize)]
@@ -100,12 +100,13 @@ fn policy_script_backups(script_paths: &[String]) -> Result<Vec<PolicyScriptBack
                 continue;
             }
 
-            let (compilation_date, installation_date) = policy_script_dates(&path)?;
-            backups.push(PolicyScriptBackup {
-                path: path.to_string_lossy().to_string(),
-                compilation_date,
-                installation_date,
-            });
+            if let Some((compilation_date, installation_date)) = policy_script_dates(&path)? {
+                backups.push(PolicyScriptBackup {
+                    path: path.to_string_lossy().to_string(),
+                    compilation_date,
+                    installation_date,
+                });
+            }
         }
     }
 
@@ -114,12 +115,13 @@ fn policy_script_backups(script_paths: &[String]) -> Result<Vec<PolicyScriptBack
             continue;
         }
 
-        let (compilation_date, installation_date) = policy_script_dates(&path)?;
-        backups.push(PolicyScriptBackup {
-            path: path.to_string_lossy().to_string(),
-            compilation_date,
-            installation_date,
-        });
+        if let Some((compilation_date, installation_date)) = policy_script_dates(&path)? {
+            backups.push(PolicyScriptBackup {
+                path: path.to_string_lossy().to_string(),
+                compilation_date,
+                installation_date,
+            });
+        }
     }
 
     backups.sort_by(|left, right| right.path.cmp(&left.path));
@@ -127,13 +129,13 @@ fn policy_script_backups(script_paths: &[String]) -> Result<Vec<PolicyScriptBack
     Ok(backups)
 }
 
-fn policy_script_dates(path: &Path) -> Result<(Option<String>, Option<String>)> {
+fn policy_script_dates(path: &Path) -> Result<Option<(String, String)>> {
     let file = fs::File::open(path)?;
     let reader = BufReader::new(file);
     let mut compilation_date = None;
     let mut installation_date = None;
 
-    for line in reader.lines() {
+    for line in reader.lines().take(25) {
         let line = line?;
         if let Some(value) = line.strip_prefix("FWCLOUD_COMPILATION_DATE=") {
             compilation_date = Some(value.trim_matches('"').to_string());
@@ -142,11 +144,14 @@ fn policy_script_dates(path: &Path) -> Result<(Option<String>, Option<String>)> 
         }
 
         if compilation_date.is_some() && installation_date.is_some() {
-            break;
+            return Ok(Some((
+                compilation_date.unwrap(),
+                installation_date.unwrap(),
+            )));
         }
     }
 
-    Ok((compilation_date, installation_date))
+    Ok(None)
 }
 
 fn policy_script_path(path: &str, script_paths: &[String]) -> Option<std::path::PathBuf> {
@@ -287,7 +292,11 @@ mod tests {
             Some("2026-11-18 11:59:00"),
             Some("2026-11-18 12:00:00"),
         );
-        write_policy(&backup_path, None, None);
+        write_policy(
+            &backup_path,
+            Some("2026-11-18 08:59:00"),
+            Some("2026-11-18 09:00:00"),
+        );
         fs::write(tmp_dir.join("unrelated.sh"), "#!/bin/sh\n").unwrap();
 
         let backups = policy_script_backups(&[active_path.to_string_lossy().to_string()]).unwrap();
@@ -297,20 +306,43 @@ mod tests {
             .iter()
             .find(|backup| backup.path == active_path.to_string_lossy())
             .unwrap();
-        assert_eq!(
-            active.compilation_date.as_deref(),
-            Some("2026-11-18 11:59:00")
-        );
-        assert_eq!(
-            active.installation_date.as_deref(),
-            Some("2026-11-18 12:00:00")
-        );
+        assert_eq!(active.compilation_date.as_str(), "2026-11-18 11:59:00");
+        assert_eq!(active.installation_date.as_str(), "2026-11-18 12:00:00");
         let backup = backups
             .iter()
             .find(|backup| backup.path == backup_path.to_string_lossy())
             .unwrap();
-        assert_eq!(backup.compilation_date, None);
-        assert_eq!(backup.installation_date, None);
+        assert_eq!(backup.compilation_date.as_str(), "2026-11-18 08:59:00");
+        assert_eq!(backup.installation_date.as_str(), "2026-11-18 09:00:00");
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn policy_script_backups_ignore_scripts_without_complete_metadata_in_the_header() {
+        let tmp_dir = create_tmp_dir();
+        let active_path = tmp_dir.join("fwcloud.sh");
+        let backup_path = tmp_dir.join("fwcloud-20261118120000.sh");
+        let late_metadata_path = tmp_dir.join("fwcloud-20261118130000.sh");
+        write_policy(
+            &active_path,
+            Some("2026-11-18 11:59:00"),
+            Some("2026-11-18 12:00:00"),
+        );
+        write_policy(&backup_path, Some("2026-11-18 11:00:00"), None);
+        fs::write(
+            &late_metadata_path,
+            format!(
+                "{}FWCLOUD_COMPILATION_DATE=\"2026-11-18 12:59:00\"\nFWCLOUD_INSTALLATION_DATE=\"2026-11-18 13:00:00\"\n",
+                "# header\n".repeat(25)
+            ),
+        )
+        .unwrap();
+
+        let backups = policy_script_backups(&[active_path.to_string_lossy().to_string()]).unwrap();
+
+        assert_eq!(backups.len(), 1);
+        assert_eq!(backups[0].path, active_path.to_string_lossy());
 
         fs::remove_dir_all(tmp_dir).unwrap();
     }
