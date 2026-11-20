@@ -107,10 +107,10 @@ fwcloud-agent = { path = "/opt/fwcloud/agent/fwcloud-agent", mode = "700", usern
 [dependencies]
 actix = "0.13.5"
 actix-web-actors = "4.3.1"
-actix-web = { version = "4.15.0", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "compress-zstd", "cookies", "unicode", "compat", "ws", "openssl"] }
+actix-web = { version = "4.18.2", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "compress-zstd", "cookies", "unicode", "compat", "ws", "openssl"] }
 actix-service = "2.0.3"
 actix-multipart = "0.8.1"
-tokio = { version = "1.53.1", features = ["full"] }
+tokio = { version = "1.53.3", features = ["full"] }
 futures = "0.3.34"
 openssl = { version = "0.10.81", features = ["vendored"] }
 thiserror = "2.0.20"
@@ -131,7 +131,7 @@ thread-id = "5.1.0"
 subprocess = "1.2.1"
 sha2 = "0.11.0"
 hex = "0.4.3"
-chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 sysinfo = "0.39.6"
 url = "2.5.8"
 
