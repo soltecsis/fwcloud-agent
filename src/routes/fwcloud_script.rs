@@ -144,10 +144,12 @@ fn policy_script_dates(path: &Path) -> Result<Option<(String, String)>> {
         }
 
         if compilation_date.is_some() && installation_date.is_some() {
-            return Ok(Some((
-                compilation_date.unwrap(),
-                installation_date.unwrap(),
-            )));
+            let compilation_date = compilation_date.unwrap();
+            let installation_date = installation_date.unwrap();
+            if compilation_date.is_empty() || installation_date.is_empty() {
+                return Ok(None);
+            }
+            return Ok(Some((compilation_date, installation_date)));
         }
     }
 
@@ -161,6 +163,7 @@ fn policy_script_path(path: &str, script_paths: &[String]) -> Option<std::path::
     }
 
     let path = path.canonicalize().ok()?;
+    policy_script_dates(&path).ok().flatten()?;
     let active_script =
         script_paths
             .iter()
@@ -324,12 +327,14 @@ mod tests {
         let active_path = tmp_dir.join("fwcloud.sh");
         let backup_path = tmp_dir.join("fwcloud-20261118120000.sh");
         let late_metadata_path = tmp_dir.join("fwcloud-20261118130000.sh");
+        let empty_metadata_path = tmp_dir.join("fwcloud-20261118140000.sh");
         write_policy(
             &active_path,
             Some("2026-11-18 11:59:00"),
             Some("2026-11-18 12:00:00"),
         );
         write_policy(&backup_path, Some("2026-11-18 11:00:00"), None);
+        write_policy(&empty_metadata_path, Some("2026-11-18 11:00:00"), Some(""));
         fs::write(
             &late_metadata_path,
             format!(
@@ -343,6 +348,21 @@ mod tests {
 
         assert_eq!(backups.len(), 1);
         assert_eq!(backups[0].path, active_path.to_string_lossy());
+        assert!(policy_script_path(
+            &backup_path.to_string_lossy(),
+            &[active_path.to_string_lossy().to_string()]
+        )
+        .is_none());
+        assert!(policy_script_path(
+            &late_metadata_path.to_string_lossy(),
+            &[active_path.to_string_lossy().to_string()]
+        )
+        .is_none());
+        assert!(policy_script_path(
+            &empty_metadata_path.to_string_lossy(),
+            &[active_path.to_string_lossy().to_string()]
+        )
+        .is_none());
 
         fs::remove_dir_all(tmp_dir).unwrap();
     }
@@ -365,8 +385,8 @@ mod tests {
         let active_path = tmp_dir.join("fwcloud.sh");
         let backup_path = tmp_dir.join("fwcloud-20261118120000.sh");
         let other_path = tmp_dir.join("other.sh");
-        write_policy(&active_path, None, None);
-        write_policy(&backup_path, None, None);
+        write_policy(&active_path, Some("date"), Some("date"));
+        write_policy(&backup_path, Some("date"), Some("date"));
         write_policy(&other_path, None, None);
         let script_paths = vec![active_path.to_string_lossy().to_string()];
 
@@ -377,6 +397,11 @@ mod tests {
         assert_eq!(
             policy_script_path(&backup_path.to_string_lossy(), &script_paths),
             Some(backup_path.canonicalize().unwrap())
+        );
+        write_policy(&backup_path, Some("date"), Some(""));
+        assert_eq!(
+            policy_script_path(&backup_path.to_string_lossy(), &script_paths),
+            None
         );
         assert_eq!(
             policy_script_path(&other_path.to_string_lossy(), &script_paths),
