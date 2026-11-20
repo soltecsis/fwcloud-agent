@@ -186,6 +186,7 @@ impl HttpFiles {
             None => {
                 self.push_websocket_message(
                     cfg,
+                    "error",
                     format!(
                         "ERROR: Policy {failed_action} failed and no previous policy is available."
                     ),
@@ -197,6 +198,7 @@ impl HttpFiles {
 
         self.push_websocket_message(
             cfg,
+            "error",
             format!("ERROR: Policy {failed_action} failed. Restoring previous policy."),
         );
 
@@ -204,6 +206,7 @@ impl HttpFiles {
             Self::restore_policy_script(policy_backup)?;
             self.push_websocket_message(
                 cfg,
+                "info",
                 String::from("Previous policy restored. Loading policy."),
             );
             self.run_policy_command(&policy_backup.script_path, "start", cfg, false)?;
@@ -213,13 +216,21 @@ impl HttpFiles {
 
         match recovery_result {
             Ok(()) => {
-                self.push_websocket_message(cfg, String::from("Previous policy loaded."));
+                self.push_websocket_message(
+                    cfg,
+                    "info",
+                    String::from("Previous policy loaded."),
+                );
                 self.finish_websocket(cfg);
                 Err(original_error)
             }
             Err(err) => {
                 error!("Policy recovery failed: {}", err);
-                self.push_websocket_message(cfg, format!("ERROR: Policy recovery failed: {err}"));
+                self.push_websocket_message(
+                    cfg,
+                    "error",
+                    format!("ERROR: Policy recovery failed: {err}"),
+                );
                 self.finish_websocket(cfg);
                 Err(err)
             }
@@ -236,7 +247,7 @@ impl HttpFiles {
         Ok(())
     }
 
-    fn push_websocket_message(&self, cfg: &Config, message: String) {
+    fn push_websocket_message(&self, cfg: &Config, message_type: &str, message: String) {
         if self.ws_id == Uuid::nil() {
             return;
         }
@@ -247,7 +258,14 @@ impl HttpFiles {
 
         if let Some(ws_data) = ws_data {
             debug!("Locking ws data mutex (thread id: {})", thread_id::get());
-            ws_data.lock().unwrap().lines.push(message);
+            ws_data.lock().unwrap().lines.push(
+                serde_json::json!({
+                    "fwcloud_agent_progress": true,
+                    "type": message_type,
+                    "message": message,
+                })
+                .to_string(),
+            );
             debug!("Releasing ws data mutex (thread id: {})", thread_id::get());
         }
     }
