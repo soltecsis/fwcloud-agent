@@ -55,3 +55,37 @@ async fn systemctl(systemctl: web::Json<Systemctl>) -> Result<HttpResponse> {
         &[systemctl.command.as_ref(), systemctl.service.as_ref()],
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Systemctl;
+    use validator::Validate;
+
+    #[test]
+    fn validates_openvpn_service_names() {
+        for service in [
+            "openvpn@firewall1",
+            "openvpn-server@firewall1",
+            "openvpn@firewall.example.com-01",
+            "openvpn-server@firewall.example.com-01",
+        ] {
+            let request = Systemctl {
+                command: "status".to_string(),
+                service: service.to_string(),
+            };
+            assert!(request.validate().is_ok(), "{service}");
+        }
+
+        for service in [
+            "openvpn-server",
+            "openvpn@firewall;id",
+            "openvpn-server@firewall$(id)",
+        ] {
+            let request = Systemctl {
+                command: "status".to_string(),
+                service: service.to_string(),
+            };
+            assert!(request.validate().is_err(), "{service}");
+        }
+    }
+}
