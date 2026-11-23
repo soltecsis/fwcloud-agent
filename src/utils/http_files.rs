@@ -72,6 +72,52 @@ pub struct HttpFiles {
 }
 
 impl HttpFiles {
+    pub fn restore_named_policy(
+        cfg: &Config,
+        script_path: &str,
+        backup_name: &str,
+        ws_id: Option<Uuid>,
+    ) -> Result<HttpResponse> {
+        let backup =
+            Self::named_policy_backup(&cfg.fwcloud_script_paths, script_path, backup_name)?;
+
+        let mut files = Self::new(cfg.tmp_dir, false);
+        if let Some(ws_id) = ws_id {
+            if ws_id.is_nil() || !cfg.ws_map.lock().unwrap().contains_key(&ws_id) {
+                return Err(FwcError::WebSocketIdNotFound);
+            }
+            files.ws_id = ws_id;
+        }
+
+        Self::restore_policy_script(&backup)?;
+        let result = files.run_policy_command(script_path, "start", cfg, false);
+        files.finish_websocket(cfg);
+        result
+    }
+
+    fn named_policy_backup(
+        script_paths: &[String],
+        script_path: &str,
+        backup_name: &str,
+    ) -> Result<PolicyBackup> {
+        if !script_paths.iter().any(|path| path == script_path) {
+            return Err(FwcError::BadRequest(String::from(
+                "Invalid policy script path",
+            )));
+        }
+
+        let backup_path = Path::new(script_path).with_file_name(backup_name);
+        let metadata = fs::symlink_metadata(&backup_path)?;
+        if !metadata.file_type().is_file() {
+            return Err(FwcError::BadRequest(String::from("Invalid policy backup")));
+        }
+
+        Ok(PolicyBackup {
+            script_path: script_path.to_owned(),
+            backup_path,
+        })
+    }
+
     pub fn new(tmp_dir: &'static str, create_dst_dir: bool) -> Self {
         HttpFiles {
             tmp_dir,
@@ -608,6 +654,25 @@ mod tests {
 
         assert!(!backup_path.exists());
         assert_eq!(fs::read_to_string(&script_path).unwrap(), "previous policy");
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn named_policy_backup_requires_configured_path_and_regular_file() {
+        let tmp_dir = create_tmp_dir();
+        let script_path = tmp_dir.join("fwcloud.sh");
+        let script = script_path.to_string_lossy().to_string();
+        let backup_name = "fwcloud-20261116153045.sh";
+        let backup_path = tmp_dir.join(backup_name);
+        fs::write(&backup_path, "previous policy").unwrap();
+
+        assert!(HttpFiles::named_policy_backup(&[], &script, backup_name).is_err());
+        assert!(HttpFiles::named_policy_backup(&[script.clone()], &script, backup_name).is_ok());
+        fs::remove_file(&backup_path).unwrap();
+        assert!(HttpFiles::named_policy_backup(&[script.clone()], &script, backup_name).is_err());
+        std::os::unix::fs::symlink(&script_path, &backup_path).unwrap();
+        assert!(HttpFiles::named_policy_backup(&[script.clone()], &script, backup_name).is_err());
 
         fs::remove_dir_all(tmp_dir).unwrap();
     }
