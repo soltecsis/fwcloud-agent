@@ -116,7 +116,9 @@ impl HttpFiles {
 
         // Install de FWCloud script.
         if let Err(err) = self.run_policy_command(&self.files[0].dst_path, "install", cfg, false) {
-            return self.recover_policy(policy_backup.as_ref(), cfg, "install", err);
+            return self
+                .recover_policy(policy_backup.as_ref(), cfg, "install", err)
+                .await;
         }
 
         // Load policy.
@@ -127,12 +129,20 @@ impl HttpFiles {
             .ok_or(FwcError::Internal("Installed policy script not found"));
         let script_path = match script_path {
             Ok(script_path) => script_path,
-            Err(err) => return self.recover_policy(policy_backup.as_ref(), cfg, "install", err),
+            Err(err) => {
+                return self
+                    .recover_policy(policy_backup.as_ref(), cfg, "install", err)
+                    .await
+            }
         };
 
         let res: HttpResponse = match self.run_policy_command(script_path, "start", cfg, true) {
             Ok(start_res) => start_res,
-            Err(err) => return self.recover_policy(policy_backup.as_ref(), cfg, "start", err),
+            Err(err) => {
+                return self
+                    .recover_policy(policy_backup.as_ref(), cfg, "start", err)
+                    .await
+            }
         };
 
         if self.ws_id != Uuid::nil() {
@@ -174,7 +184,7 @@ impl HttpFiles {
         Ok(None)
     }
 
-    fn recover_policy(
+    async fn recover_policy(
         &self,
         policy_backup: Option<&PolicyBackup>,
         cfg: &Config,
@@ -202,6 +212,8 @@ impl HttpFiles {
             format!("ERROR: Policy {failed_action} failed. Restoring previous policy."),
         );
 
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
         let recovery_result: Result<()> = (|| {
             Self::restore_policy_script(policy_backup)?;
             self.push_websocket_message(
@@ -216,11 +228,7 @@ impl HttpFiles {
 
         match recovery_result {
             Ok(()) => {
-                self.push_websocket_message(
-                    cfg,
-                    "info",
-                    String::from("Previous policy loaded."),
-                );
+                self.push_websocket_message(cfg, "info", String::from("Previous policy loaded."));
                 self.finish_websocket(cfg);
                 Err(original_error)
             }
