@@ -219,7 +219,7 @@ impl HttpFiles {
         Ok(res)
     }
 
-    fn valid_policy_backup_name(name: &str) -> bool {
+    pub(crate) fn valid_policy_backup_name(name: &str) -> bool {
         name.len() == 25
             && name.starts_with("fwcloud-")
             && name.ends_with(".sh")

@@ -248,7 +248,7 @@ async fn recover(
     request: web::Json<PolicyScriptRecoveryRequest>,
     cfg: web::Data<Arc<Config>>,
 ) -> Result<HttpResponse> {
-    if !POLICY_SCRIPT_BACKUP_NAME.is_match(&request.backup_name) {
+    if !HttpFiles::valid_policy_backup_name(&request.backup_name) {
         return Err(FwcError::BadRequest(String::from(
             "Invalid policy backup name",
         )));
@@ -292,9 +292,9 @@ mod tests {
 
     #[test]
     fn recovery_backup_name_must_be_a_timestamped_basename() {
-        assert!(POLICY_SCRIPT_BACKUP_NAME.is_match("fwcloud-20261116153045.sh"));
-        assert!(!POLICY_SCRIPT_BACKUP_NAME.is_match("../fwcloud-20261116153045.sh"));
-        assert!(!POLICY_SCRIPT_BACKUP_NAME.is_match("fwcloud.sh"));
+        assert!(HttpFiles::valid_policy_backup_name("fwcloud-20261116153045.sh"));
+        assert!(!HttpFiles::valid_policy_backup_name("../fwcloud-20261116153045.sh"));
+        assert!(!HttpFiles::valid_policy_backup_name("fwcloud.sh"));
     }
 
     fn create_tmp_dir() -> PathBuf {
