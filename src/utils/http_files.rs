@@ -323,13 +323,10 @@ impl HttpFiles {
     }
 
     fn policy_failure(&self, error: FwcError, recovery_status: &str) -> Result<HttpResponse> {
-        if self.policy_backup_name.is_some() {
-            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-                "message": error.to_string(),
-                "recovery_status": recovery_status,
-            })));
-        }
-        Err(error)
+        Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": error.to_string(),
+            "recovery_status": recovery_status,
+        })))
     }
 
     fn restore_policy_script(policy_backup: &PolicyBackup) -> Result<()> {
@@ -645,6 +642,25 @@ mod tests {
             response.status(),
             actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
         );
+    }
+
+    #[actix_web::test]
+    async fn individual_installation_failure_reports_recovery_status() {
+        let files = HttpFiles::new("", false);
+        for status in ["restored", "failed", "unavailable"] {
+            let response = files
+                .policy_failure(FwcError::CmdExitStatusNotZero, status)
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+            );
+            let body = actix_web::body::to_bytes(response.into_body())
+                .await
+                .unwrap();
+            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(json["recovery_status"], status);
+        }
     }
 
     #[test]
