@@ -71,9 +71,57 @@ pub struct HttpFiles {
     ws_id_buf: String,
     allow_crowdsec_backend: bool,
     crowdsec_backend_buf: String,
+    policy_backup_name: Option<String>,
+    accept_policy_backup_name: bool,
 }
 
 impl HttpFiles {
+    pub fn restore_named_policy(
+        cfg: &Config,
+        script_path: &str,
+        backup_name: &str,
+        ws_id: Option<Uuid>,
+    ) -> Result<HttpResponse> {
+        let backup =
+            Self::named_policy_backup(&cfg.fwcloud_script_paths, script_path, backup_name)?;
+
+        let mut files = Self::new(cfg.tmp_dir, false);
+        if let Some(ws_id) = ws_id {
+            if ws_id.is_nil() || !cfg.ws_map.lock().unwrap().contains_key(&ws_id) {
+                return Err(FwcError::WebSocketIdNotFound);
+            }
+            files.ws_id = ws_id;
+        }
+
+        Self::restore_policy_script(&backup)?;
+        let result = files.run_policy_command(script_path, "start", cfg, false);
+        files.finish_websocket(cfg);
+        result
+    }
+
+    fn named_policy_backup(
+        script_paths: &[String],
+        script_path: &str,
+        backup_name: &str,
+    ) -> Result<PolicyBackup> {
+        if !script_paths.iter().any(|path| path == script_path) {
+            return Err(FwcError::BadRequest(String::from(
+                "Invalid policy script path",
+            )));
+        }
+
+        let backup_path = Path::new(script_path).with_file_name(backup_name);
+        let metadata = fs::symlink_metadata(&backup_path)?;
+        if !metadata.file_type().is_file() {
+            return Err(FwcError::BadRequest(String::from("Invalid policy backup")));
+        }
+
+        Ok(PolicyBackup {
+            script_path: script_path.to_owned(),
+            backup_path,
+        })
+    }
+
     pub fn new(tmp_dir: &'static str, create_dst_dir: bool) -> Self {
         HttpFiles {
             tmp_dir,
@@ -90,6 +138,8 @@ impl HttpFiles {
             ws_id_buf: String::from(""),
             allow_crowdsec_backend: false,
             crowdsec_backend_buf: String::from(""),
+            policy_backup_name: None,
+            accept_policy_backup_name: false,
         }
     }
 
@@ -108,20 +158,43 @@ impl HttpFiles {
     ) -> Result<HttpResponse> {
         self.expected_files = 1;
         self.allow_crowdsec_backend = true;
+        self.accept_policy_backup_name = true;
         self.extract_multipart_data(payload).await?;
         self.check_data()?;
+
+        if let Some(name) = &self.policy_backup_name {
+            if !Self::valid_policy_backup_name(name) {
+                return Err(FwcError::BadRequest(String::from(
+                    "Invalid policy backup name",
+                )));
+            }
+        }
 
         if self.files[0].dst_name != "fwcloud.sh" {
             return Err(FwcError::NotExpectedFileName);
         }
 
+        self.push_websocket_message(
+            cfg,
+            "info",
+            String::from("Checking previous firewall script."),
+        );
         let policy_backup = self.backup_policy_script(cfg)?;
+        if policy_backup.is_some() {
+            self.push_websocket_message(
+                cfg,
+                "info",
+                String::from("Previous firewall script backed up."),
+            );
+        }
 
         self.move_tmp_files()?;
 
         // Install de FWCloud script.
         if let Err(err) = self.run_policy_command(&self.files[0].dst_path, "install", cfg, false) {
-            return self.recover_policy(policy_backup.as_ref(), cfg, "install", err);
+            return self
+                .recover_policy(policy_backup.as_ref(), cfg, "install", err)
+                .await;
         }
 
         // Load policy.
@@ -132,15 +205,31 @@ impl HttpFiles {
             .ok_or(FwcError::Internal("Installed policy script not found"));
         let script_path = match script_path {
             Ok(script_path) => script_path,
-            Err(err) => return self.recover_policy(policy_backup.as_ref(), cfg, "install", err),
+            Err(err) => {
+                return self
+                    .recover_policy(policy_backup.as_ref(), cfg, "install", err)
+                    .await
+            }
         };
 
         // Keep the WebSocket open because the route may still reconcile the CrowdSec
         // Firewall Bouncer after the policy has been loaded.
         let res: HttpResponse = match self.run_policy_command(script_path, "start", cfg, false) {
             Ok(start_res) => start_res,
-            Err(err) => return self.recover_policy(policy_backup.as_ref(), cfg, "start", err),
+            Err(err) => {
+                return self
+                    .recover_policy(policy_backup.as_ref(), cfg, "start", err)
+                    .await
+            }
         };
+
+        if self.policy_backup_name.is_some() {
+            return Ok(HttpResponse::Ok().json(serde_json::json!({
+                "backup_name": policy_backup.as_ref().map(|_| self.policy_backup_name.as_deref().unwrap()),
+                "script_path": policy_backup.as_ref().map(|backup| &backup.script_path),
+                "recovery_status": "not_needed",
+            })));
+        }
 
         Ok(res)
     }
@@ -161,8 +250,18 @@ impl HttpFiles {
         (self.ws_id != Uuid::nil()).then_some(self.ws_id)
     }
 
+    pub(crate) fn valid_policy_backup_name(name: &str) -> bool {
+        name.len() == 25
+            && name.starts_with("fwcloud-")
+            && name.ends_with(".sh")
+            && name.as_bytes()[8..22].iter().all(u8::is_ascii_digit)
+    }
+
     fn backup_policy_script(&self, cfg: &Config) -> Result<Option<PolicyBackup>> {
-        let backup_name = format!("fwcloud-{}.sh", Local::now().format("%Y%m%d%H%M%S"));
+        let backup_name = self
+            .policy_backup_name
+            .clone()
+            .unwrap_or_else(|| format!("fwcloud-{}.sh", Local::now().format("%Y%m%d%H%M%S")));
 
         Self::backup_policy_script_from_paths(&cfg.fwcloud_script_paths, &backup_name)
     }
@@ -193,7 +292,7 @@ impl HttpFiles {
         Ok(None)
     }
 
-    fn recover_policy(
+    async fn recover_policy(
         &self,
         policy_backup: Option<&PolicyBackup>,
         cfg: &Config,
@@ -211,7 +310,7 @@ impl HttpFiles {
                     ),
                 );
                 self.finish_websocket(cfg);
-                return Err(original_error);
+                return self.policy_failure(original_error, "unavailable");
             }
         };
 
@@ -220,6 +319,8 @@ impl HttpFiles {
             "error",
             format!("ERROR: Policy {failed_action} failed. Restoring previous policy."),
         );
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         let recovery_result: Result<()> = (|| {
             Self::restore_policy_script(policy_backup)?;
@@ -237,7 +338,7 @@ impl HttpFiles {
             Ok(()) => {
                 self.push_websocket_message(cfg, "info", String::from("Previous policy loaded."));
                 self.finish_websocket(cfg);
-                Err(original_error)
+                self.policy_failure(original_error, "restored")
             }
             Err(err) => {
                 error!("Policy recovery failed: {}", err);
@@ -247,9 +348,16 @@ impl HttpFiles {
                     format!("ERROR: Policy recovery failed: {err}"),
                 );
                 self.finish_websocket(cfg);
-                Err(err)
+                self.policy_failure(err, "failed")
             }
         }
+    }
+
+    fn policy_failure(&self, error: FwcError, recovery_status: &str) -> Result<HttpResponse> {
+        Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": error.to_string(),
+            "recovery_status": recovery_status,
+        })))
     }
 
     fn restore_policy_script(policy_backup: &PolicyBackup) -> Result<()> {
@@ -415,6 +523,8 @@ impl HttpFiles {
             &mut self.ws_id_buf
         } else if name == "crowdsec_backend" && self.allow_crowdsec_backend {
             &mut self.crowdsec_backend_buf
+        } else if name == "backup_name" && self.accept_policy_backup_name {
+            self.policy_backup_name.get_or_insert_with(String::new)
         } else {
             return Err(FwcError::NotAllowedParameter);
         };
@@ -552,6 +662,52 @@ mod tests {
     }
 
     #[test]
+    fn policy_backup_name_requires_timestamped_basename() {
+        assert!(HttpFiles::valid_policy_backup_name(
+            "fwcloud-20261116153045.sh"
+        ));
+        assert!(!HttpFiles::valid_policy_backup_name(
+            "../fwcloud-20261116153045.sh"
+        ));
+        assert!(!HttpFiles::valid_policy_backup_name(
+            "fwcloud-2026111615304x.sh"
+        ));
+        assert!(!HttpFiles::valid_policy_backup_name(""));
+    }
+
+    #[test]
+    fn coordinated_installation_failure_remains_an_error_response() {
+        let mut files = HttpFiles::new("", false);
+        files.policy_backup_name = Some(String::from("fwcloud-20261116153045.sh"));
+        let response = files
+            .policy_failure(FwcError::CmdExitStatusNotZero, "restored")
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[actix_web::test]
+    async fn individual_installation_failure_reports_recovery_status() {
+        let files = HttpFiles::new("", false);
+        for status in ["restored", "failed", "unavailable"] {
+            let response = files
+                .policy_failure(FwcError::CmdExitStatusNotZero, status)
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+            );
+            let body = actix_web::body::to_bytes(response.into_body())
+                .await
+                .unwrap();
+            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(json["recovery_status"], status);
+        }
+    }
+
+    #[test]
     fn policy_backup_renames_existing_script() {
         let tmp_dir = create_tmp_dir();
         let script_path = tmp_dir.join("fwcloud.sh");
@@ -628,6 +784,25 @@ mod tests {
 
         assert!(!backup_path.exists());
         assert_eq!(fs::read_to_string(&script_path).unwrap(), "previous policy");
+
+        fs::remove_dir_all(tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn named_policy_backup_requires_configured_path_and_regular_file() {
+        let tmp_dir = create_tmp_dir();
+        let script_path = tmp_dir.join("fwcloud.sh");
+        let script = script_path.to_string_lossy().to_string();
+        let backup_name = "fwcloud-20261116153045.sh";
+        let backup_path = tmp_dir.join(backup_name);
+        fs::write(&backup_path, "previous policy").unwrap();
+
+        assert!(HttpFiles::named_policy_backup(&[], &script, backup_name).is_err());
+        assert!(HttpFiles::named_policy_backup(&[script.clone()], &script, backup_name).is_ok());
+        fs::remove_file(&backup_path).unwrap();
+        assert!(HttpFiles::named_policy_backup(&[script.clone()], &script, backup_name).is_err());
+        std::os::unix::fs::symlink(&script_path, &backup_path).unwrap();
+        assert!(HttpFiles::named_policy_backup(&[script.clone()], &script, backup_name).is_err());
 
         fs::remove_dir_all(tmp_dir).unwrap();
     }
