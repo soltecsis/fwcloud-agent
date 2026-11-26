@@ -73,7 +73,7 @@ mod tests {
                 command: "status".to_string(),
                 service: service.to_string(),
             };
-            assert!(request.validate().is_ok(), "{service}");
+            assert!(request.validate().is_ok(), "{}", service);
         }
 
         for service in [
@@ -85,7 +85,7 @@ mod tests {
                 command: "status".to_string(),
                 service: service.to_string(),
             };
-            assert!(request.validate().is_err(), "{service}");
+            assert!(request.validate().is_err(), "{}", service);
         }
     }
 }

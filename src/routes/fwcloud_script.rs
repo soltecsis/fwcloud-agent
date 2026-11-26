@@ -65,6 +65,13 @@ pub struct PolicyScriptComparison {
     pub diff: String,
 }
 
+#[derive(Deserialize)]
+pub struct PolicyScriptRecoveryRequest {
+    pub backup_name: String,
+    pub script_path: String,
+    pub ws_id: Option<uuid::Uuid>,
+}
+
 lazy_static! {
     static ref POLICY_SCRIPT_BACKUP_NAME: Regex = Regex::new(r"^fwcloud-\d{14}\.sh$").unwrap();
 }
@@ -236,6 +243,26 @@ async fn diff(
     Ok(HttpResponse::Ok().json(policy_script_diff(&file1, &file2)?))
 }
 
+#[post("/fwcloud_script/recover")]
+async fn recover(
+    request: web::Json<PolicyScriptRecoveryRequest>,
+    cfg: web::Data<Arc<Config>>,
+) -> Result<HttpResponse> {
+    if !HttpFiles::valid_policy_backup_name(&request.backup_name) {
+        return Err(FwcError::BadRequest(String::from(
+            "Invalid policy backup name",
+        )));
+    }
+
+    let _guard = cfg.mutex.fwcloud_script.lock().await;
+    HttpFiles::restore_named_policy(
+        cfg.as_ref(),
+        &request.script_path,
+        &request.backup_name,
+        request.ws_id,
+    )
+}
+
 #[post("/fwcloud_script/upload")]
 async fn upload_and_run(payload: Multipart, cfg: web::Data<Arc<Config>>) -> Result<HttpResponse> {
     let res: HttpResponse;
@@ -262,6 +289,13 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use uuid::Uuid;
+
+    #[test]
+    fn recovery_backup_name_must_be_a_timestamped_basename() {
+        assert!(HttpFiles::valid_policy_backup_name("fwcloud-20261116153045.sh"));
+        assert!(!HttpFiles::valid_policy_backup_name("../fwcloud-20261116153045.sh"));
+        assert!(!HttpFiles::valid_policy_backup_name("fwcloud.sh"));
+    }
 
     fn create_tmp_dir() -> PathBuf {
         let path =
