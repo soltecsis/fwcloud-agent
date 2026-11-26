@@ -171,7 +171,19 @@ impl HttpFiles {
 
         self.move_tmp_files()?;
 
+        self.push_websocket_message(
+            cfg,
+            "info",
+            String::from("Checking previous firewall script."),
+        );
         let policy_backup = self.backup_policy_script(cfg)?;
+        if policy_backup.is_some() {
+            self.push_websocket_message(
+                cfg,
+                "info",
+                String::from("Previous firewall script backed up."),
+            );
+        }
 
         // Install de FWCloud script.
         if let Err(err) = self.run_policy_command(&self.files[0].dst_path, "install", cfg, false) {
